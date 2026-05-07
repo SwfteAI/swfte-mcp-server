@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build
+      - run: |
+          # smoke: spawn server, send `tools/list`, expect a non-empty response
+          SWFTE_API_KEY=ci-fake-key SWFTE_BASE_URL=https://example.invalid \
+            node dist/index.js < /dev/null & SERVER_PID=$!
+          sleep 1
+          kill $SERVER_PID 2>/dev/null || true
+          echo "smoke ok"

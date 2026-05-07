@@ -1,0 +1,70 @@
+{
+  "name": "@swfte/mcp-server",
+  "version": "0.1.0",
+  "description": "Official Model Context Protocol (MCP) server for the Swfte AI platform — wraps the Swfte API as MCP tools so Claude Desktop, Claude Code, Cursor, Cline, and any MCP client can manage agents, chatflows, workflows, RAG, voice, and marketplace modules. https://www.swfte.com",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "swfte",
+    "ai",
+    "agents",
+    "chatflows",
+    "workflows",
+    "rag",
+    "voice",
+    "claude",
+    "anthropic",
+    "openai"
+  ],
+  "homepage": "https://www.swfte.com",
+  "bugs": {
+    "url": "https://github.com/SwfteAI/swfte-mcp-server/issues",
+    "email": "developers@swfte.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SwfteAI/swfte-mcp-server.git"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Swfte",
+    "email": "developers@swfte.com",
+    "url": "https://www.swfte.com"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "swfte-mcp-server": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "ABOUT.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "smoke": "bash scripts/smoke.sh",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.10.0",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.23.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

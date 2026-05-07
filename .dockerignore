@@ -1,0 +1,15 @@
+node_modules
+dist
+.git
+.github
+.env*
+*.log
+.DS_Store
+coverage
+examples
+scripts
+docs
+README.md
+ABOUT.md
+.gitignore
+.dockerignore
