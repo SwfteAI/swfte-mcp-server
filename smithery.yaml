@@ -1,0 +1,33 @@
+# Smithery.ai server manifest
+# Docs: https://smithery.ai/docs
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required: [swfteApiKey]
+    properties:
+      swfteApiKey:
+        type: string
+        title: Swfte API Key
+        description: >-
+          Your Swfte API key. Create one at https://www.swfte.com/settings/api-keys.
+        format: password
+      swfteWorkspaceId:
+        type: string
+        title: Swfte Workspace ID
+        description: Default workspace ID (optional — can be passed per call).
+      swfteBaseUrl:
+        type: string
+        title: Swfte API Base URL
+        description: Override only if you self-host or are pointing at staging.
+        default: https://api.swfte.com/agents
+  commandFunction: |-
+    (config) => ({
+      command: 'node',
+      args: ['dist/index.js'],
+      env: {
+        SWFTE_API_KEY: config.swfteApiKey,
+        SWFTE_WORKSPACE_ID: config.swfteWorkspaceId || '',
+        SWFTE_BASE_URL: config.swfteBaseUrl || 'https://api.swfte.com/agents',
+      },
+    })
