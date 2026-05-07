@@ -52,7 +52,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "smoke": "bash scripts/smoke.sh",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "node -e \"if(!process.env.SWFTE_PUBLISH_CONFIRMED){console.error('\\n[guard] @swfte/mcp-server is published only via the GitHub Actions release workflow.\\n        Set SWFTE_PUBLISH_CONFIRMED=1 to override.\\n');process.exit(1)}\" && npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.0",
