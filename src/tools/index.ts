@@ -12,6 +12,9 @@ import { marketplaceTools } from './marketplace.js';
 import { voiceTools } from './voice.js';
 import { auditTools } from './audit.js';
 import { costControlTools } from './cost-control.js';
+import { journeyTools } from './journeys.js';
+import { relayRunTools } from './relay-runs.js';
+import { relayMailboxTools } from './relay-mailboxes.js';
 
 export const allTools: ToolDefinition[] = [
   ...agentTools,
@@ -27,6 +30,9 @@ export const allTools: ToolDefinition[] = [
   ...voiceTools,
   ...auditTools,
   ...costControlTools,
+  ...journeyTools,
+  ...relayRunTools,
+  ...relayMailboxTools,
 ];
 
 export type { ToolDefinition, ToolContext } from './_types.js';

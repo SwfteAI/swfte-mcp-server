@@ -16,6 +16,7 @@ All tools accept an optional `workspaceId` field that overrides the `SWFTE_WORKS
 | `swfte_agents_wizard_generate` | POST | `/v2/agents/wizard/generate` |
 | `swfte_agents_wizard_quick` | POST | `/v2/agents/wizard/quick` |
 | `swfte_agents_wizard_templates` | GET | `/v2/agents/wizard/templates` |
+| `swfte_agents_find` | GET | `/v1/agents` |
 
 ## ChatFlows — `swfte_chatflows_*`
 
@@ -41,6 +42,16 @@ All tools accept an optional `workspaceId` field that overrides the `SWFTE_WORKS
 | `swfte_workflows_validate` | POST | `/v2/workflows/validate` |
 | `swfte_workflows_clone` | POST | `/v2/workflows/{workflowId}/clone` |
 | `swfte_workflows_export` | GET | `/v2/workflows/{workflowId}/export` |
+| `swfte_workflows_publish` | POST | `/v2/workflows/{workflowId}/publish` |
+| `swfte_workflows_deployment_status` | GET | `/v2/workflows/{workflowId}/deployment-status` |
+| `swfte_workflows_deployment_status_simple` | GET | `/v2/workflows/{workflowId}/deployment-status/simple` |
+| `swfte_workflows_pre_deploy` | POST | `/v2/workflows/{workflowId}/pre-deploy` |
+| `swfte_workflows_execute` | POST | `/v2/workflows/{workflowId}/execute` |
+| `swfte_workflows_executions_list` | GET | `/v2/workflows/{workflowId}/executions` |
+| `swfte_workflows_execution_status` | GET | `/v2/workflows/executions/{executionId}/status` |
+| `swfte_workflows_execution_traces` | GET | `/v2/workflows/executions/{executionId}/traces` |
+| `swfte_workflows_execution_pause` | POST | `/v2/workflows/executions/{executionId}/pause` |
+| `swfte_workflows_execution_resume` | POST | `/v2/workflows/executions/{executionId}/resume` |
 
 ## Conversations — `swfte_conversations_*`
 
@@ -139,6 +150,44 @@ All tools accept an optional `workspaceId` field that overrides the `SWFTE_WORKS
 | `swfte_cost_usage_caps_list` | GET | `/v2/cost-control/usage-caps` |
 | `swfte_cost_usage_cap_workspace_set` | PUT | `/v2/cost-control/usage-caps/workspace` |
 | `swfte_cost_usage_stats` | GET | `/v2/cost-control/usage-stats` |
+
+## Journeys — `swfte_journeys_*`
+
+| Tool | Method | Path |
+|---|---|---|
+| `swfte_journeys_list` | GET | `/v2/journey-templates` |
+| `swfte_journeys_get` | GET | `/v2/journey-templates/{id}` |
+| `swfte_journeys_create` | POST | `/v2/journey-templates` |
+| `swfte_journeys_update` | PUT | `/v2/journey-templates/{id}` |
+| `swfte_journeys_delete` | DELETE | `/v2/journey-templates/{id}` |
+| `swfte_journeys_generate` | POST | `/v2/journey-templates/generate` |
+| `swfte_journeys_deploy` | POST | `/v2/relay/journeys/{journeyTemplateId}/deploy` |
+| `swfte_journeys_run` | POST | `/v2/relay/journeys/{journeyTemplateId}/run` |
+| `swfte_journeys_test` | POST | `/v2/relay/journeys/{journeyTemplateId}/test` |
+| `swfte_journeys_app_deploy` | POST | `/v2/applications/{moduleId}/deploy` |
+| `swfte_journeys_app_deployments_list` | GET | `/v2/applications/{moduleId}/deploy` |
+
+A journey template's `definitionJson.segments[]` entries are discriminated by `kind`: `NODE` (deterministic integration call), `BRANCH` (boolean fork with `whenTrue`/`whenFalse`), `SWITCH` (multi-way fork via `cases`/`fallback`), `AGENT_OBJECTIVE` (LLM step with `responseOutputs` field extraction), and `HUMAN_ACCOUNTABLE` (human gate with `assignee`/`branches`).
+
+## Relay Runs — `swfte_relay_runs_*`
+
+| Tool | Method | Path |
+|---|---|---|
+| `swfte_relay_runs_list` | GET | `/v1/relay/runs` |
+| `swfte_relay_runs_get` | GET | `/v1/relay/runs/{runId}` |
+| `swfte_relay_runs_snapshot` | GET | `/v1/relay/runs/{runId}/snapshot` |
+| `swfte_relay_runs_cancel` | POST | `/v1/relay/runs/{runId}/cancel` |
+| `swfte_relay_runs_gate_decide` | POST | `/v1/relay/runs/{runId}/gate/{gateRequestId}` |
+
+A "run" is any Relay-tracked unit of work — an agent chat, a journey's workflow execution, or a worker run — keyed by `kind`. Cancel and gate-decide require the relay-operator role.
+
+## Relay Mailboxes — `swfte_relay_mailboxes_*`
+
+| Tool | Method | Path |
+|---|---|---|
+| `swfte_relay_mailboxes_get_profile` | GET | `/v2/mailbox/profile` |
+
+There is no separate mailbox-binding CRUD resource on the API — an inbox is bound to a journey by setting its `definitionJson.trigger` to `{type:"email", email, secretId}` and deploying with `swfte_journeys_deploy`. This tool only resolves the real address behind a newly-connected Gmail `secretId` so you can populate that trigger correctly.
 
 ---
 
