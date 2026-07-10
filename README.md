@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![swfte.com](https://img.shields.io/badge/swfte.com-website-7c3aed)](https://www.swfte.com)
 
-`@swfte/mcp-server` exposes the [Swfte API](https://www.swfte.com/developers) as a [Model Context Protocol](https://modelcontextprotocol.io) server, so Claude Desktop, Claude Code, Cursor, Cline, Zed, and any MCP-compliant client can manage Swfte agents, chatflows, workflows, RAG datasets, voice calls, and marketplace modules — without writing a line of HTTP plumbing.
+`@swfte/mcp-server` exposes the [Swfte API](https://www.swfte.com/developers) as a [Model Context Protocol](https://modelcontextprotocol.io) server, so Claude Desktop, Claude Code, Cursor, Cline, Zed, and any MCP-compliant client can manage Swfte agents, chatflows, workflows, Relay journeys, RAG datasets, voice calls, and marketplace modules — without writing a line of HTTP plumbing.
 
 If you don't know what Swfte is, [start here](https://www.swfte.com). It's the unified AI platform for **agents, workflows, chatflows, RAG, voice, and MCP servers** — one API, 200+ models, batteries-included.
 
@@ -17,7 +17,7 @@ If you don't know what Swfte is, [start here](https://www.swfte.com). It's the u
 
 ## What this gives you
 
-- **40+ MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
+- **99 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
 - **Stdio transport** — works out of the box with Claude Desktop and Claude Code.
 - **Workspace-scoped** — set `SWFTE_WORKSPACE_ID` once, or pass `workspaceId` per call.
 - **Zero-config security** — your API key stays on the machine running the MCP server, never in the LLM context.
@@ -103,9 +103,12 @@ See [`examples/`](./examples) for Cursor, Cline, Zed and Smithery configs.
 
 | Domain | Tool prefix | Highlights |
 |---|---|---|
-| **Agents** | `swfte_agents_*` | list, get, create, update, delete, wizard generate/quick/templates |
+| **Agents** | `swfte_agents_*` | list, get, create, update, delete, find by name/type/capability, wizard generate/quick/templates |
 | **ChatFlows** | `swfte_chatflows_*` | list/get/create, validate, deploy, publish, session start/get, builder templates |
-| **Workflows** | `swfte_workflows_*` | list, get, create, validate, clone, export |
+| **Workflows** | `swfte_workflows_*` | list, get, create, validate, clone, export, publish, deployment status, pre-deploy, execute, list/get/pause/resume executions, node-level traces |
+| **Journeys** | `swfte_journeys_*` | list/get/create/update/delete templates, generate from prompt, deploy/run/test a journey, app-level multi-journey deploy |
+| **Relay Runs** | `swfte_relay_runs_*` | list, get, conversation snapshot, cancel, resolve a paused gate |
+| **Relay Mailboxes** | `swfte_relay_mailboxes_*` | resolve a connected mailbox's address for a journey's email trigger |
 | **Conversations** | `swfte_conversations_*` | initiate, list, get, transcript, terminate |
 | **Datasets** | `swfte_datasets_*` | list, get, create, documents list/create/status |
 | **Files** | `swfte_files_*` | list, config, get, delete |
@@ -130,6 +133,7 @@ Once the server is connected, you can ask Claude things like:
 - *"Browse the Swfte marketplace for customer-support modules and install the top one into my workspace."*
 - *"List all chatflows in workspace ws-acme, then deploy any that are in DRAFT status."*
 - *"Generate a sales-qualification agent from this prompt, then publish it as a widget."*
+- *"Draft a Relay journey for inbound insurance claims from this description, deploy it, and show me any runs that are paused for a gate approval."*
 - *"Run a hybrid RAG search across dataset ds-help-center for 'refund policy' and rerank the top 20."*
 - *"Show me last week's voice calls that lasted more than 5 minutes, with their transcripts."*
 - *"Set a $100 weekly spend cap on the workspace and show me current usage."*
