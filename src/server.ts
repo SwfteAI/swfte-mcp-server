@@ -3,23 +3,29 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod';
 
-import { SwfteClient } from './client.js';
+import { SwfteApiError, SwfteClient } from './client.js';
 import { loadConfig, type ServerConfig } from './config.js';
 import { allTools } from './tools/index.js';
 import type { ToolDefinition } from './tools/_types.js';
 
 const PACKAGE_NAME = '@swfte/mcp-server';
-const PACKAGE_VERSION = '0.1.0';
+const PACKAGE_VERSION = '0.2.0';
 
 export interface BuildServerOptions {
   config?: ServerConfig;
   tools?: ToolDefinition[];
 }
 
+/** Apply the `SWFTE_TOOLS` group filter. An empty set means "advertise everything". */
+export function selectTools(tools: ToolDefinition[], config: ServerConfig): ToolDefinition[] {
+  if (config.enabledGroups.size === 0) return tools;
+  return tools.filter((t) => !t.group || config.enabledGroups.has(t.group));
+}
+
 export function buildServer(opts: BuildServerOptions = {}): Server {
   const config = opts.config ?? loadConfig();
   const client = new SwfteClient(config);
-  const tools = opts.tools ?? allTools;
+  const tools = selectTools(opts.tools ?? allTools, config);
 
   const toolMap = new Map<string, ToolDefinition>();
   for (const t of tools) toolMap.set(t.name, t);
@@ -32,9 +38,13 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: tools.map((t) => ({
       name: t.name,
-      description: t.description + (t.title ? '' : ''),
+      description: t.description,
       inputSchema: zodSchemaToJson(t.inputSchema),
-      annotations: t.title ? { title: t.title } : undefined,
+      annotations: {
+        ...(t.title ? { title: t.title } : {}),
+        ...(t.readOnly ? { readOnlyHint: true } : {}),
+        ...(t.destructive ? { destructiveHint: true } : {}),
+      },
     })),
   }));
 
@@ -63,7 +73,7 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
     }
 
     try {
-      const result = await tool.execute(parsed.data, { client });
+      const result = await tool.execute(parsed.data, { client, config });
       return {
         content: [
           {
@@ -73,6 +83,14 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
         ],
       };
     } catch (err) {
+      // Structured failures carry a code and a suggested action; hand those
+      // through as JSON so the model can branch on them instead of parsing prose.
+      if (err instanceof SwfteApiError) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify(err.toJSON(), null, 2) }],
+        };
+      }
       const message = err instanceof Error ? err.message : String(err);
       return { isError: true, content: [{ type: 'text', text: message }] };
     }
@@ -82,9 +100,9 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
 }
 
 function zodSchemaToJson(schema: ZodTypeAny): Record<string, unknown> {
-  // The MCP SDK expects a JSON-Schema-like object on the wire. We use
-  // `zod-to-json-schema` so each tool's input schema is faithful and richly
-  // annotated for clients (Claude Desktop, Cursor, Cline, etc.).
+  // The MCP SDK expects a JSON-Schema-like object on the wire. `zod-to-json-schema`
+  // keeps each tool's input schema faithful and richly annotated for clients
+  // (Claude Code/Desktop, Cursor, Cline, etc.).
   const json = zodToJsonSchema(schema, { target: 'jsonSchema7' }) as Record<string, unknown>;
   delete json.$schema;
   return json;
