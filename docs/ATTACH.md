@@ -7,9 +7,19 @@ Two kinds work, and the difference matters.
 **Personal access token (`pat_…`) — recommended.** Acts as *you*, with the same
 access you have in Studio. Bound to one workspace.
 
-> Studio → Settings → **CLI & MCP** → *New token* → copy it.
-> The raw token is shown **once**. Only its SHA-256 hash is stored, so a lost
-> token cannot be recovered — mint a new one and revoke the old.
+There is no Settings page for these yet. The minting UI currently lives inside
+the module documents hub, because it was built for the `@swfte/cortex` CLI:
+
+> Studio → **Modules** → open any module → **Documents** tab →
+> the **CLI** ingest mode, or the *Connect CLI* button → mint a token.
+>
+> URL shape: `/v2/studio/modules/<moduleId>/documents`
+
+The raw token is shown **once**. Only its SHA-256 hash is stored, so a lost
+token cannot be recovered — mint a new one and revoke the old.
+
+*(A dedicated Settings entry would be the obvious home for this. Today the panel
+is only reachable through that route.)*
 
 **Workspace API key (`sk-swfte-…` / `sk_…`).** Acts as the workspace rather than
 a person. Use for shared or service setups.

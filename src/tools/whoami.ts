@@ -75,7 +75,7 @@ export const whoamiTools: ToolDefinition[] = [
               problem: 'Every identity probe was rejected — the credential is invalid, expired, or revoked.',
               suggestedAction:
                 config.credentialKind === 'pat'
-                  ? 'Mint a fresh PAT in Studio → Settings → CLI & MCP and update SWFTE_PAT.'
+                  ? 'Mint a fresh PAT in Studio → Modules → any module → Documents → Connect CLI, then update SWFTE_PAT.'
                   : 'Check SWFTE_API_KEY against Studio → Settings → API keys.',
             }
           : {}),

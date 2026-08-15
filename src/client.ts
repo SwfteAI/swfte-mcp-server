@@ -91,7 +91,7 @@ const SUGGESTED_ACTIONS: Record<string, string> = {
   WORKFLOW_NOT_PUBLISHED:
     'Publish the workflow first (swfte_run does this automatically via the draft test path).',
   VALIDATION_FAILED: 'Fix the reported validation errors with swfte_refine, then retry swfte_create.',
-  pat_invalid: 'The personal access token is invalid, expired, or revoked. Mint a new one in Studio → Settings → CLI & MCP.',
+  pat_invalid: 'The personal access token is invalid, expired, or revoked. Mint a new one in Studio → Modules → any module → Documents → Connect CLI.',
   pat_missing: 'No credential reached the server. Check SWFTE_PAT is set in the MCP server environment.',
 };
 

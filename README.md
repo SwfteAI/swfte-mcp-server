@@ -84,7 +84,10 @@ docker run --rm -i \
 
 **Personal access token (recommended)** — acts as *you*, with your Studio access:
 
-> Studio → Settings → **CLI & MCP** → *New token*. Shown once; only its hash is stored.
+> Studio → **Modules** → open a module → **Documents** → *Connect CLI* → mint a token.
+> (`/v2/studio/modules/<moduleId>/documents`. There is no Settings entry yet — the
+> panel was built for the `@swfte/cortex` CLI and shares its home.)
+> Shown once; only its SHA-256 hash is stored.
 
 Or a **workspace API key** at
 [swfte.com/settings/api-keys](https://www.swfte.com/settings/api-keys), for

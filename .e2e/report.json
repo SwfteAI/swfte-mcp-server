@@ -1,0 +1,24 @@
+{
+  "at": "2026-08-15T22:54:19.727Z",
+  "endpoint": "http://localhost:8080",
+  "kinds": [
+    "workflow"
+  ],
+  "ran": true,
+  "results": [
+    {
+      "kind": "_",
+      "phase": "whoami",
+      "ok": true,
+      "ms": 60
+    },
+    {
+      "kind": "workflow",
+      "phase": "build",
+      "ok": false,
+      "ms": 2236,
+      "detail": "Error: build failed: Failed to generate workflow from description"
+    }
+  ],
+  "created": []
+}

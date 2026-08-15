@@ -3,8 +3,8 @@
  *
  * Two credential kinds are supported, and the distinction matters on the wire:
  *
- * - **PAT** (`pat_…`) — minted per user+workspace in Studio (Settings → CLI &
- *   MCP). agents-service `PersonalAccessTokenAuthFilter` claims `Bearer pat_…`
+ * - **PAT** (`pat_…`) — minted per user+workspace in Studio (Modules → any
+ *   module → Documents → Connect CLI). agents-service `PersonalAccessTokenAuthFilter` claims `Bearer pat_…`
  *   and injects *trusted* `X-User-Id` / `X-Workspace-Id` / `X-Account-Id`
  *   headers that override anything we send, granting the full logged-in-studio-
  *   user authority set. So a PAT must travel in `Authorization` ONLY: copying it
@@ -52,7 +52,7 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is ~116 tools, which measurably degrades a model's ability
+ * The full surface is ~119 tools, which measurably degrades a model's ability
  * to pick the right one. This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
  * `SWFTE_TOOLS=all` advertises everything, and `swfte_whoami` reports which
@@ -160,7 +160,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     throw new ConfigError(
       'No credential configured. Set one of:\n' +
         '  SWFTE_PAT=pat_…       Personal access token — acts as you, full studio-user access.\n' +
-        '                        Mint one in Studio → Settings → CLI & MCP.\n' +
+        '                        Mint one in Studio → Modules → any module → Documents\n' +
+        '                        → Connect CLI.\n' +
         '  SWFTE_API_KEY=sk_…    Workspace API key, for shared/service usage.'
     );
   }
