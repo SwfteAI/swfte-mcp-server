@@ -58,10 +58,27 @@ prompt precedence unambiguous · responds.
 | widget | ✓ | — | — | auto | — | — | ✓ | ✓ |
 | application | ✓ | — | — | ✓ | — | — | ✓ | ✓ |
 | mcp-server | ✓ | ✓ | ✓ | — | — | — | ✓ | ✓ |
+| module | ✓ | — | — | auto | — | ✓ | — | ✓ |
+| model | — | — | — | — | — | ✓ | ✓ | ✓ |
 
 "auto" means the wizard persists during generation, so no separate create is
 needed. Gaps are real backend differences, not unfinished work — calling an
 unsupported verb returns an explanation rather than a generic failure.
+
+Two kinds work differently enough to call out:
+
+- **`module`** is assembled from resources rather than written from a
+  description. `swfte_build` creates the module and starts a build; attach
+  documents first or it compiles with nothing in it. `swfte_run` queries it.
+- **`model`** has no `build` at all — model-vault models are *uploaded*, and a
+  multi-part weights upload is not something to drive through a chat turn. Get
+  weights in via Studio → Model Vault, then deploy, probe, and verify here.
+  Serving is GPU-backed and bills while running, so `swfte_verify` reminds you
+  to tear it down.
+
+`custom-node` is declared but not implemented: its wizard is SSE-only with no
+async+poll pair, so it needs a different transport from every other kind.
+Calling it reports that plainly rather than half-working.
 
 ---
 

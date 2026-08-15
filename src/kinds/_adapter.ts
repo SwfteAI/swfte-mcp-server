@@ -159,10 +159,14 @@ export interface KindAdapter {
   /** Surfaced in tool errors when a verb is unsupported for this kind. */
   notes?: string;
 
-  build(client: SwfteClient, input: BuildInput): Promise<{ sessionId: string }>;
-  status(client: SwfteClient, sessionId: string): Promise<BuildSnapshot>;
+  /**
+   * Optional because not every kind has a generator: model-vault models are
+   * uploaded, not written, so there is nothing for a wizard to build.
+   */
+  build?(client: SwfteClient, input: BuildInput): Promise<{ sessionId: string }>;
+  status?(client: SwfteClient, sessionId: string): Promise<BuildSnapshot>;
   /** Pull the finished artifact out of a terminal snapshot. */
-  extractArtifact(snapshot: BuildSnapshot): unknown;
+  extractArtifact?(snapshot: BuildSnapshot): unknown;
   /** Id of the persisted artifact, when the wizard created it itself. */
   extractId?(snapshot: BuildSnapshot): string | undefined;
 

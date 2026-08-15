@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SwfteApiError, type SwfteClient } from '../client.js';
 import {
+  BUILDABLE_KINDS,
   IMPLEMENTED_KINDS,
   getAdapter,
   requireVerb,
@@ -13,7 +14,10 @@ import type { ToolDefinition } from './_types.js';
 /** Only advertise kinds that actually have an adapter. */
 const KindArg = z.enum(IMPLEMENTED_KINDS as [Kind, ...Kind[]]);
 
-const kindList = IMPLEMENTED_KINDS.join(' | ');
+/** Narrower enum for the build family — models are uploaded, not generated. */
+const BuildableKindArg = z.enum(BUILDABLE_KINDS as [Kind, ...Kind[]]);
+
+const kindList = BUILDABLE_KINDS.join(' | ');
 
 /** Trim streamed graph payloads so a 40-node build doesn't flood the context. */
 function summariseGraph(snapshot: BuildSnapshot) {
@@ -27,7 +31,7 @@ function summariseGraph(snapshot: BuildSnapshot) {
 /** The terminal payload, with the wizard's own reasoning trail kept intact. */
 function terminalPayload(adapter: KindAdapter, snapshot: BuildSnapshot) {
   const fr = snapshot.finalResponse as any;
-  const artifact = adapter.extractArtifact(snapshot);
+  const artifact = adapter.extractArtifact?.(snapshot) ?? null;
   const id = adapter.extractId?.(snapshot);
 
   return {
@@ -53,8 +57,11 @@ async function pollToTerminal(
   sessionId: string,
   waitMs: number
 ) {
+  const status = adapter.status;
+  if (!status) throw new Error(`${adapter.kind} has no build status to poll.`);
+
   const { snapshot, timedOut, elapsedMs, polls } = await client.pollUntil<BuildSnapshot>(
-    () => adapter.status(client, sessionId),
+    () => status.call(adapter, client, sessionId),
     (s) => s.done,
     { timeoutMs: waitMs, intervalMs: 2_000 }
   );
@@ -92,7 +99,7 @@ export const shipTools: ToolDefinition[] = [
       'rather than failing. Some kinds (chatflow, widget) persist as they build and return an id ' +
       'directly; the rest need swfte_create afterwards.',
     inputSchema: z.object({
-      kind: KindArg,
+      kind: BuildableKindArg,
       prompt: z
         .string()
         .min(10)
@@ -103,7 +110,7 @@ export const shipTools: ToolDefinition[] = [
       options: z.record(z.unknown()).optional().describe('Kind-specific extras merged into the request (e.g. {attach:{kind:"agent",id:"…"}} for widgets).'),
     }),
     execute: async (input, { client, config }) => {
-      const adapter = getAdapter(input.kind);
+      const adapter = requireVerb(input.kind, 'build');
       const { sessionId } = await adapter.build(client, {
         prompt: input.prompt,
         model: input.model,
