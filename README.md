@@ -17,12 +17,40 @@ If you don't know what Swfte is, [start here](https://www.swfte.com). It's the u
 
 ## What this gives you
 
-- **40+ MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
-- **Stdio transport** — works out of the box with Claude Desktop and Claude Code.
-- **Workspace-scoped** — set `SWFTE_WORKSPACE_ID` once, or pass `workspaceId` per call.
-- **Zero-config security** — your API key stays on the machine running the MCP server, never in the LLM context.
-- **Multi-arch Docker image** — `swfte/mcp-server` on Docker Hub for amd64 + arm64.
-- **TypeScript-first** — every input is typed via Zod, schemas surfaced to the client as JSON-Schema.
+**Build a complete Studio artifact from one sentence, then prove it works — without leaving your editor.**
+
+```
+"Build a workflow that watches a Google Sheet for new leads, researches each one
+ with an agent, and emails a summary. Then check it actually works."
+```
+
+That is `swfte_build` → `swfte_verify` → `swfte_run` → `swfte_deploy`, and it is
+the same four tools whether you are building a **workflow, agent, chatflow,
+widget, application, or MCP server**.
+
+- **Task-shaped core tools, not one-tool-per-endpoint.** Eleven tools take a
+  `kind` and dispatch through a per-kind adapter, so the surface stays small
+  enough for a model to choose well.
+- **`swfte_verify` — the part most API wrappers skip.** "Did the API return 200?"
+  is not "does this work?". It catches unwired nodes, edges pointing at
+  non-existent ids, plaintext credentials in node config, unpublished drafts,
+  capability tiers that silently stop an agent using its tools, and nodes that
+  report success while producing nothing.
+- **Async builds that don't time out.** Long generations return a resumable
+  `sessionId` instead of failing, and can be steered mid-flight.
+- **Provider-agnostic deploy, gated by default.** The backend's unified router
+  picks the target; you never name a cloud. Previews cost nothing, and
+  provisioning needs both `confirm:true` and `SWFTE_ALLOW_DEPLOY=1`.
+- **Hardened against the platform's real behaviour** — auto-pagination past a
+  server-side page cap, read-merge-write updates where the raw PATCH would wipe
+  omitted fields, retry with load-shedding detection, and typed error envelopes
+  carrying the backend's own code plus a suggested action.
+- **119 tools available, 66 advertised by default**, adjustable via `SWFTE_TOOLS`.
+- **Stdio transport**, multi-arch Docker image, and Zod-typed inputs published
+  as JSON Schema over `tools/list`.
+
+Your credential stays on the machine running the server and never enters the
+model's context.
 
 ---
 
@@ -52,9 +80,16 @@ docker run --rm -i \
   swfte/mcp-server:latest
 ```
 
-### 2. Get an API key
+### 2. Get a credential
 
-[swfte.com/settings/api-keys](https://www.swfte.com/settings/api-keys). Free tier is enough to try every tool.
+**Personal access token (recommended)** — acts as *you*, with your Studio access:
+
+> Studio → Settings → **CLI & MCP** → *New token*. Shown once; only its hash is stored.
+
+Or a **workspace API key** at
+[swfte.com/settings/api-keys](https://www.swfte.com/settings/api-keys), for
+shared and service setups. Set exactly one — configuring both is rejected at
+startup, since they authenticate as different principals.
 
 ### 3. Wire it into your MCP client
 
@@ -66,10 +101,7 @@ docker run --rm -i \
     "swfte": {
       "command": "npx",
       "args": ["-y", "@swfte/mcp-server"],
-      "env": {
-        "SWFTE_API_KEY": "sk-swfte-...",
-        "SWFTE_WORKSPACE_ID": "ws-..."
-      }
+      "env": { "SWFTE_PAT": "pat_..." }
     }
   }
 }
@@ -78,13 +110,22 @@ docker run --rm -i \
 #### Claude Code
 
 ```bash
-claude mcp add swfte \
-  --env SWFTE_API_KEY=sk-swfte-... \
-  --env SWFTE_WORKSPACE_ID=ws-... \
-  -- npx -y @swfte/mcp-server
+claude mcp add swfte -e SWFTE_PAT=pat_... -- npx -y @swfte/mcp-server
 ```
 
-See [`examples/`](./examples) for Cursor, Cline, Zed and Smithery configs.
+A PAT needs no workspace id: the server injects the token's own trusted tenant
+headers and overrides anything a client sends, so one is redundant and
+misleading if it disagrees.
+
+### 4. Confirm
+
+Ask Claude to run **`swfte_whoami`** — it resolves which workspace you are
+acting in and what the credential can do, which turns a later opaque `403` into
+a concrete answer.
+
+See [`docs/ATTACH.md`](./docs/ATTACH.md) for the full setup and troubleshooting
+guide, [`docs/RECIPES.md`](./docs/RECIPES.md) for worked examples, and
+[`examples/`](./examples) for Cursor, Cline, Zed and Smithery configs.
 
 ---
 
@@ -92,47 +133,87 @@ See [`examples/`](./examples) for Cursor, Cline, Zed and Smithery configs.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `SWFTE_API_KEY` | ✅ | — | Bearer API key. Get one at [swfte.com/settings/api-keys](https://www.swfte.com/settings/api-keys). |
-| `SWFTE_WORKSPACE_ID` | ⛔ | — | Default workspace. Tools accept a per-call override. |
-| `SWFTE_BASE_URL` | ⛔ | `https://api.swfte.com/agents` | Override for self-hosted / staging. |
-| `SWFTE_DEBUG` | ⛔ | `0` | Set to `1` to log request lines to stderr. |
+| `SWFTE_PAT` | one of | — | Personal access token (`pat_…`). Acts as you. |
+| `SWFTE_API_KEY` | one of | — | Workspace API key (`sk-swfte-…` / `sk_…`). |
+| `SWFTE_BASE_URL` | ⛔ | `https://api.swfte.com/agents` | Point at a local or staging backend. |
+| `SWFTE_WORKSPACE_ID` | ⛔ | — | API keys only; a PAT carries its own binding. |
+| `SWFTE_TOOLS` | ⛔ | curated subset | `all`, or a comma-separated group list. |
+| `SWFTE_ALLOW_DEPLOY` | ⛔ | `0` | Required, with `confirm:true`, to provision real infrastructure. |
+| `SWFTE_DEFAULT_WAIT_MS` | ⛔ | `240000` | How long build/run tools wait before returning a resumable handle. |
+| `SWFTE_DEBUG` | ⛔ | `0` | Log request lines to stderr. |
 
 ---
 
 ## Available tools
 
-| Domain | Tool prefix | Highlights |
-|---|---|---|
-| **Agents** | `swfte_agents_*` | list, get, create, update, delete, wizard generate/quick/templates |
-| **ChatFlows** | `swfte_chatflows_*` | list/get/create, validate, deploy, publish, session start/get, builder templates |
-| **Workflows** | `swfte_workflows_*` | list, get, create, validate, clone, export |
-| **Conversations** | `swfte_conversations_*` | initiate, list, get, transcript, terminate |
-| **Datasets** | `swfte_datasets_*` | list, get, create, documents list/create/status |
-| **Files** | `swfte_files_*` | list, config, get, delete |
-| **RAG** | `swfte_rag_*` | hybrid search, rerank, embedding/reranker model lists, strategies |
-| **MCP-on-MCP** | `swfte_mcp_*` | servers list/connect, tools list/schema/execute, health-check |
-| **Modules** | `swfte_modules_*` | list, get, create, build, versions |
-| **Marketplace** | `swfte_marketplace_*` | browse, get, install, installations |
-| **Voice** | `swfte_voice_*` | list calls, in-progress, get, transcript, recording |
-| **Audit** | `swfte_audit_*` | events, resource events, my events |
-| **Cost Control** | `swfte_cost_*` | routing rules, usage caps, usage stats |
+### Core — 11 tools, every artifact kind
 
-Every tool's input schema is published over MCP `tools/list` so your client can autocomplete and validate.
+`swfte_whoami` · `swfte_build` · `swfte_build_status` · `swfte_build_steer` ·
+`swfte_validate` · `swfte_create` · `swfte_refine` · `swfte_run` ·
+`swfte_deploy` · `swfte_verify` · `swfte_verify_batch`
 
-Full endpoint→tool mapping is in [`docs/TOOLS.md`](docs/TOOLS.md). Underlying API reference: [swfte.com/developers](https://www.swfte.com/developers) and [swfte.com/resources](https://www.swfte.com/resources).
+Each takes a `kind`: `workflow`, `agent`, `chatflow`, `widget`, `application`,
+or `mcp-server`.
+
+### Domain tools
+
+| Domain | Prefix | Group | On by default |
+|---|---|---|:-:|
+| Agents | `swfte_agents_*` | `agents` | ✓ |
+| Workflows | `swfte_workflows_*` | `workflows` | ✓ |
+| ChatFlows | `swfte_chatflows_*` | `chatflows` | ✓ |
+| Datasets | `swfte_datasets_*` | `datasets` | ✓ |
+| Modules | `swfte_modules_*` | `modules` | ✓ |
+| Deployments | `swfte_deployments_*` | `deployments` | ✓ |
+| Analytics | `swfte_analytics_*` | `analytics` | ✓ |
+| A/B experiments | `swfte_experiments_*` | `experiments` | |
+| OAuth connect | `swfte_connect_*` | `connect` | |
+| Conversations | `swfte_conversations_*` | `conversations` | |
+| RAG | `swfte_rag_*` | `rag` | |
+| Voice | `swfte_voice_*` | `voice` | |
+| Marketplace | `swfte_marketplace_*` | `marketplace` | |
+| Files | `swfte_files_*` | `files` | |
+| MCP-on-MCP | `swfte_mcp_*` | `mcp` | |
+| Audit | `swfte_audit_*` | `audit` | |
+| Cost control | `swfte_cost_*` | `cost` | |
+
+Advertising all 119 tools measurably degrades a model's ability to pick the
+right one, so 66 are advertised by default. `SWFTE_TOOLS=all` widens it, and
+`swfte_whoami` reports which groups are live and what is hidden — nothing
+disappears silently.
+
+Full reference: [`docs/TOOLS.md`](docs/TOOLS.md). API docs:
+[swfte.com/developers](https://www.swfte.com/developers).
 
 ---
 
 ## Example prompts
 
-Once the server is connected, you can ask Claude things like:
+- *"Build a workflow that watches a Google Sheet for new leads, researches each with an agent, and emails a summary. Then verify it works."*
+- *"That agent isn't using its knowledge base — check why."*
+- *"Preview what deploying this workflow would cost before we commit."*
+- *"Set up an A/B test between v3 and v4 of the intake flow, optimising completion rate."*
+- *"Our bill jumped this week — find what's driving it."*
+- *"Connect our Slack workspace so the notify step can post."*
+- *"Re-check every workflow I built this week and tell me which are broken."*
 
-- *"Browse the Swfte marketplace for customer-support modules and install the top one into my workspace."*
-- *"List all chatflows in workspace ws-acme, then deploy any that are in DRAFT status."*
-- *"Generate a sales-qualification agent from this prompt, then publish it as a widget."*
-- *"Run a hybrid RAG search across dataset ds-help-center for 'refund policy' and rerank the top 20."*
-- *"Show me last week's voice calls that lasted more than 5 minutes, with their transcripts."*
-- *"Set a $100 weekly spend cap on the workspace and show me current usage."*
+More, with what each one does underneath: [`docs/RECIPES.md`](./docs/RECIPES.md).
+
+---
+
+## Development
+
+```bash
+npm install
+npm run typecheck
+npm run smoke:protocol   # launches the server over stdio, checks handshake + tools/list
+SWFTE_PAT=pat_… npm run e2e            # real build → verify → teardown against the API
+SWFTE_PAT=pat_… npm run e2e -- --run   # also executes what it builds
+SWFTE_PAT=pat_… npm run bench          # wall-clock per artifact
+```
+
+`smoke:protocol` needs no credential and is safe in CI. `e2e` is the regression
+gate: if it passes, an attached Claude session using the same tools will work.
 
 ---
 
