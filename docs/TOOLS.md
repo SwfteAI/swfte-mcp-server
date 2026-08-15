@@ -1,6 +1,6 @@
 # Tool reference
 
-`@swfte/mcp-server` exposes **119 tools**, of which a curated **66** are
+`@swfte/mcp-server` exposes **119 tools**, of which a curated **69** are
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
 
 Tools that take a `workspaceId` only honour it for **API-key** credentials. A
@@ -12,7 +12,7 @@ alongside it is overridden.
 ## Core — the reason to attach this server
 
 These take a `kind` discriminator (`workflow`, `agent`, `chatflow`, `widget`,
-`application`, `mcp-server`) and dispatch through a per-kind adapter, so the
+`application`, `mcp-server`, `module`, `model`) and dispatch through a per-kind adapter, so the
 same eleven tools cover every artifact type.
 
 | Tool | What it does |

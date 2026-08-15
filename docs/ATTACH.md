@@ -87,8 +87,8 @@ copy the secret into a header that has no use for it.
 
 ### Tool groups
 
-The full surface is 116 tools. Advertising all of them measurably degrades a
-model's ability to pick the right one, so a **66-tool default** is advertised:
+The full surface is 119 tools. Advertising all of them measurably degrades a
+model's ability to pick the right one, so a **69-tool default** is advertised:
 
 ```
 core, workflows, agents, chatflows, datasets, modules, deployments, analytics
