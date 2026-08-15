@@ -48,7 +48,7 @@ export const agentTools: ToolDefinition[] = [
     name: 'swfte_agents_get',
     title: 'Get agent',
     readOnly: true,
-    description: 'Fetch a single agent by ID.',
+    description: 'Fetch one agent, including its model, capability tier, linked tools and knowledge. Use swfte_verify with kind:"agent" to check whether that configuration actually works.',
     inputSchema: Workspace.extend({ agentId: z.string() }),
     execute: async (input, { client }) =>
       client.request({

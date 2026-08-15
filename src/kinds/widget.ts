@@ -83,6 +83,19 @@ export const widgetAdapter: KindAdapter = {
     };
   },
 
+  async teardown(client, id) {
+    // Widgets pause rather than tear down — the lifecycle is
+    // deploy → pause → resume → rollback. Pausing takes the widget off the
+    // embed surface; the record and its deployment history survive, so it is
+    // reversible with a resume.
+    await client.request({
+      method: 'POST',
+      path: `${WIDGETS_V2}/${encodeURIComponent(id)}/pause`,
+      expectStatuses: [200, 202, 204, 404],
+      retries: 1,
+    });
+  },
+
   async get(client, id) {
     return client.request({ method: 'GET', path: `${WIDGETS_V2}/${encodeURIComponent(id)}`, retries: 1 });
   },

@@ -23,7 +23,7 @@ export const workflowTools: ToolDefinition[] = [
   {
     name: 'swfte_workflows_get',
     title: 'Get workflow',
-    description: 'Fetch a workflow by ID.',
+    description: 'Fetch one workflow, including its node graph and connections. Use swfte_verify with kind:"workflow" to check the graph is actually sound rather than merely present.',
     inputSchema: Workspace.extend({ workflowId: z.string() }),
     execute: async (input, { client }) =>
       client.request({
@@ -35,7 +35,7 @@ export const workflowTools: ToolDefinition[] = [
   {
     name: 'swfte_workflows_create',
     title: 'Create workflow',
-    description: 'Create a new workflow.',
+    description: 'Create a workflow from a full graph definition. To build one from a description instead, use swfte_build with kind:"workflow". Note that this endpoint accepts graphs whose nodes are never wired together, so validate before relying on it.',
     inputSchema: Workspace.extend({ workflow: z.record(z.unknown()) }),
     execute: async (input, { client }) =>
       client.request({

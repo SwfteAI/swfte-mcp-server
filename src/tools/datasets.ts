@@ -35,7 +35,7 @@ export const datasetTools: ToolDefinition[] = [
   {
     name: 'swfte_datasets_create',
     title: 'Create dataset',
-    description: 'Create a new RAG dataset.',
+    description: 'Create a RAG dataset to hold documents for retrieval. Enum-valued fields must be UPPERCASE on the wire or the API rejects the body as malformed.',
     inputSchema: Workspace.extend({ dataset: z.record(z.unknown()) }),
     execute: async (input, { client }) =>
       client.request({

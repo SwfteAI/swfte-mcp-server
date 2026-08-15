@@ -14,6 +14,7 @@ import {
 } from './_adapter.js';
 
 const WIZARD = '/v2/mcp/wizard';
+const DEPLOYMENTS = '/v2/mcp/deployments';
 
 /**
  * Generating an MCP server is the one wizard that is genuinely synchronous —
@@ -136,6 +137,18 @@ export const mcpServerAdapter: KindAdapter = {
       endpoint: body?.endpoint ?? body?.url,
       raw: body,
     };
+  },
+
+  async teardown(client, id, deploymentId) {
+    // The deployment lives under /v2/mcp/deployments, keyed by its own id —
+    // the artifact id is not the deployment id, so prefer the explicit one and
+    // fall back to the artifact id for the common case where they match.
+    await client.request({
+      method: 'DELETE',
+      path: `${DEPLOYMENTS}/${encodeURIComponent(deploymentId ?? id)}`,
+      expectStatuses: [200, 202, 204, 404],
+      retries: 1,
+    });
   },
 
   async get(client, id) {
