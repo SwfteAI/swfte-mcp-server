@@ -145,6 +145,13 @@ export interface VerifyOpts {
   run?: boolean;
   inputs?: Record<string, unknown>;
   timeoutMs?: number;
+  /**
+   * Treat "draft only, never published" as a failure rather than as
+   * information. Off by default: a freshly built artifact is legitimately
+   * unpublished, and failing on it would make every good build look broken.
+   * Turn it on when checking something that is supposed to be live.
+   */
+  requirePublished?: boolean;
 }
 
 /**

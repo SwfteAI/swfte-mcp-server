@@ -147,9 +147,11 @@ export const chatflowAdapter: KindAdapter = {
     });
 
     const published = Boolean(flow?.published ?? flow?.status === 'PUBLISHED');
+    // Same reasoning as the workflow adapter: draft is the normal state right
+    // after a build, so it is information unless the caller expected it live.
     checks.push({
       id: 'published',
-      ok: published,
+      ok: published ? true : _opts.requirePublished ? false : null,
       detail: published ? 'Published' : 'Draft only — not reachable by end users yet',
     });
     if (!published) nextActions.push('Publish the chatflow with swfte_chatflows_publish to make it reachable.');

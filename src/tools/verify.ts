@@ -24,6 +24,13 @@ export const verifyTools: ToolDefinition[] = [
         .optional()
         .describe('Also execute the artifact as part of the sweep. Costs time and tokens; off by default.'),
       inputs: z.record(z.unknown()).optional().describe('Inputs for the execution check, when run:true.'),
+      requirePublished: z
+        .boolean()
+        .optional()
+        .describe(
+          'Fail if the artifact is still a draft. Off by default — a freshly built artifact is ' +
+          'legitimately unpublished. Turn on when checking something that should already be live.'
+        ),
       timeoutMs: z.number().int().min(5_000).optional(),
     }),
     execute: async (input, { client }) => {
@@ -31,6 +38,7 @@ export const verifyTools: ToolDefinition[] = [
       const report = await adapter.verify(client, input.id, {
         run: input.run,
         inputs: input.inputs,
+        requirePublished: input.requirePublished,
         timeoutMs: input.timeoutMs,
       });
 

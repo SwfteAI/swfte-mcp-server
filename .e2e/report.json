@@ -1,8 +1,9 @@
 {
-  "at": "2026-08-15T22:54:19.727Z",
-  "endpoint": "http://localhost:8080",
+  "at": "2026-08-16T15:23:43.482Z",
+  "endpoint": "https://api.swfte.com/agents",
   "kinds": [
-    "workflow"
+    "workflow",
+    "agent"
   ],
   "ran": true,
   "results": [
@@ -10,15 +11,45 @@
       "kind": "_",
       "phase": "whoami",
       "ok": true,
-      "ms": 60
+      "ms": 129
     },
     {
       "kind": "workflow",
       "phase": "build",
+      "ok": true,
+      "ms": 24694
+    },
+    {
+      "kind": "workflow",
+      "phase": "validate",
+      "ok": true,
+      "ms": 26
+    },
+    {
+      "kind": "workflow",
+      "phase": "create",
+      "ok": true,
+      "ms": 50
+    },
+    {
+      "kind": "workflow",
+      "phase": "verify",
       "ok": false,
-      "ms": 2236,
-      "detail": "Error: build failed: Failed to generate workflow from description"
+      "ms": 3268,
+      "detail": "Error: verify failed: node-traces"
+    },
+    {
+      "kind": "agent",
+      "phase": "build",
+      "ok": false,
+      "ms": 159,
+      "detail": "PAYMENT_METHOD_REQUIRED: You've used your free agent. Add a card to keep building — you'll only pay for what you use."
     }
   ],
-  "created": []
+  "created": [
+    {
+      "kind": "workflow",
+      "id": "5ef622e5-0e37-4627-938f-9d655fca9ce7"
+    }
+  ]
 }

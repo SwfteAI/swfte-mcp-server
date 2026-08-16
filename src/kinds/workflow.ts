@@ -503,13 +503,20 @@ export const workflowAdapter: KindAdapter = {
       });
       const list = pickList(versions);
       published = list.length > 0;
+      // Being unpublished is the NORMAL state right after a build, and
+      // swfte_run handles it by falling back to the draft test path. Failing
+      // the whole report on it made every freshly-built workflow look broken —
+      // which is the fastest way to train someone to ignore the report. It is
+      // informational unless the caller says they expect a released version.
       checks.push({
         id: 'published',
-        ok: published,
-        detail: published ? `${list.length} published version(s)` : 'No published versions — only a draft exists',
+        ok: published ? true : opts.requirePublished ? false : null,
+        detail: published
+          ? `${list.length} published version(s)`
+          : 'Draft only — no published version yet (swfte_run uses the draft test path)',
       });
       if (!published) {
-        nextActions.push('Publish the workflow to run the released version (swfte_run falls back to the draft test path meanwhile).');
+        nextActions.push('Publish the workflow when you want the released version to run rather than the draft.');
       }
     } catch {
       checks.push({ id: 'published', ok: null, detail: 'Version history unavailable on this instance — skipped' });
