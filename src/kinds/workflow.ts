@@ -535,16 +535,35 @@ export const workflowAdapter: KindAdapter = {
         // A node can report COMPLETED and still have produced nothing useful —
         // an unbound channel, an empty query. Surface that separately from the
         // overall run status, which would otherwise read as a clean pass.
-        const failedNodes = (result.nodeTraces ?? []).filter((t) => !isSucceededRunStatus(t.status));
+        //
+        // SKIPPED is NOT a failure. It is the normal state of a branch that was
+        // not taken, and of everything downstream of a node that did fail.
+        // Counting it made a correct conditional workflow report as broken, and
+        // turned one real failure into a cascade of apparent ones.
+        const traces = result.nodeTraces ?? [];
+        const failedNodes = traces.filter(
+          (t) => !isSucceededRunStatus(t.status) && String(t.status).toUpperCase() !== 'SKIPPED'
+        );
+        const skipped = traces.filter((t) => String(t.status).toUpperCase() === 'SKIPPED');
+
+        const traceDetail = (): string => {
+          if (traces.length === 0) return 'No per-node traces returned';
+          const parts: string[] = [];
+          if (failedNodes.length === 0) {
+            parts.push(`${traces.length - skipped.length}/${traces.length} nodes succeeded`);
+          } else {
+            parts.push(failedNodes.map((t) => `${t.id} → ${t.status}${t.error ? `: ${t.error}` : ''}`).join('; '));
+          }
+          if (skipped.length > 0) {
+            parts.push(`${skipped.length} skipped (${skipped.map((t) => t.id).join(', ')})`);
+          }
+          return parts.join(' — ');
+        };
+
         checks.push({
           id: 'node-traces',
-          ok: (result.nodeTraces?.length ?? 0) > 0 ? failedNodes.length === 0 : null,
-          detail:
-            (result.nodeTraces?.length ?? 0) === 0
-              ? 'No per-node traces returned'
-              : failedNodes.length === 0
-                ? `All ${result.nodeTraces!.length} nodes reached a success state`
-                : failedNodes.map((t) => `${t.id} → ${t.status}${t.error ? `: ${t.error}` : ''}`).join('; '),
+          ok: traces.length > 0 ? failedNodes.length === 0 : null,
+          detail: traceDetail(),
         });
 
         if (!result.ok) {

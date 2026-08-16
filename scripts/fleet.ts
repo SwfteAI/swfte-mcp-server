@@ -41,19 +41,37 @@ const WAIT_MS = Number(val('wait', '300000'));
  * Prompt variety matters at volume: a thousand identical prompts exercise one
  * code path a thousand times and prove far less than a hundred different ones.
  */
+/**
+ * Deliberately SELF-CONTAINED: text in, AI/transform/branch, value out.
+ *
+ * An earlier corpus reached for Google Sheets, Slack and email, and every run
+ * failed on `read-sheet` / `send-email` because the workspace has no OAuth
+ * credentials connected. That measured whether integrations were configured,
+ * not whether the loop works — the opposite of a reliability test. Third-party
+ * integrations deserve their own suite with connected credentials.
+ */
 const SUBJECTS = [
-  'new leads from a Google Sheet', 'failed payments in Stripe', 'support tickets tagged urgent',
-  'daily sales figures', 'expiring subscriptions', 'inbound webhook events',
-  'nightly database backups', 'customer churn signals', 'shipment tracking updates',
-  'security alerts from the SIEM', 'onboarding survey responses', 'abandoned carts',
+  'a "text" input containing a customer message',
+  'a "topic" input naming a subject',
+  'a "document" input containing several paragraphs',
+  'a "review" input containing product feedback',
+  'a "ticket" input describing a support problem',
+  'a "transcript" input of a short conversation',
+  'a "spec" input describing a feature request',
+  'an "article" input of a few hundred words',
 ];
 const ACTIONS = [
-  'summarise each with an AI step', 'classify each by severity', 'enrich each with a web lookup',
-  'score each against a rubric', 'extract the key fields as JSON', 'translate each to Spanish',
+  'use an AI step to summarise it in three sentences',
+  'use an AI step to classify its sentiment as positive, neutral or negative',
+  'use an AI step to extract the key facts as JSON',
+  'use an AI step to rewrite it more concisely',
+  'use an AI step to score its urgency from 1 to 5',
+  'use an AI step to list its three main points',
 ];
 const SINKS = [
-  'post the result to Slack', 'email a digest', 'write the result to a variable and return it',
-  'store the result in a dataset', 'send it to a webhook',
+  'store the result in a variable named "result" and return it',
+  'return the result directly as the workflow output',
+  'branch on whether the result is empty, returning a fallback message if so',
 ];
 
 const pick = <T,>(xs: T[], i: number): T => xs[i % xs.length]!;
@@ -61,9 +79,9 @@ const pick = <T,>(xs: T[], i: number): T => xs[i % xs.length]!;
 function promptFor(i: number): string {
   // Deterministic per index, so a failing run number is reproducible.
   return (
-    `A manually triggered workflow that reads ${pick(SUBJECTS, i)}, ` +
+    `A manually triggered workflow that takes ${pick(SUBJECTS, i)}, ` +
     `${pick(ACTIONS, Math.floor(i / SUBJECTS.length) + i)}, then ` +
-    `${pick(SINKS, i * 3 + 1)}. Keep it under six nodes.`
+    `${pick(SINKS, i * 3 + 1)}. Use no external integrations. Keep it to four nodes or fewer.`
   );
 }
 
