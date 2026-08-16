@@ -271,6 +271,80 @@ export class SwfteClient {
   }
 
   /**
+   * GET a binary body (a zip, an export bundle) plus the response headers.
+   *
+   * Separate from `request` because that one assumes JSON both ways: it would
+   * mangle a zip through `res.text()` and lose the headers the code round-trip
+   * needs (`X-Swfte-Blueprint-Sha` tells you whether the blueprint moved under
+   * your edits).
+   */
+  async getBinary(
+    path: string,
+    opts: { query?: RequestOptions['query']; timeoutMs?: number } = {}
+  ): Promise<{ bytes: Uint8Array; headers: Record<string, string>; contentType: string }> {
+    const url = this.buildUrl(path, opts.query);
+    const headers = this.buildHeaders({ method: 'GET', path });
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 180_000);
+    let res: Response;
+    try {
+      res = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (!res.ok) {
+      // Error bodies are still JSON even when the success path is binary.
+      const text = await res.text();
+      throw this.toApiError(res, text, { method: 'GET', path });
+    }
+
+    const out: Record<string, string> = {};
+    res.headers.forEach((v, k) => {
+      out[k.toLowerCase()] = v;
+    });
+
+    return {
+      bytes: new Uint8Array(await res.arrayBuffer()),
+      headers: out,
+      contentType: res.headers.get('content-type') ?? '',
+    };
+  }
+
+  /**
+   * POST multipart/form-data. Used by the code-sync upload, which takes the
+   * workspace as a file part rather than as JSON.
+   *
+   * Deliberately sets no Content-Type: fetch derives it from the FormData along
+   * with the boundary, and setting it by hand produces a body the server cannot
+   * parse.
+   */
+  async postMultipart<T = unknown>(
+    path: string,
+    form: FormData,
+    opts: { query?: RequestOptions['query']; timeoutMs?: number } = {}
+  ): Promise<T> {
+    const url = this.buildUrl(path, opts.query);
+    const headers = this.buildHeaders({ method: 'POST', path });
+    delete headers['Content-Type'];
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 180_000);
+    let res: Response;
+    let text: string;
+    try {
+      res = await fetch(url, { method: 'POST', headers, body: form, signal: controller.signal });
+      text = await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (!res.ok) throw this.toApiError(res, text, { method: 'POST', path });
+    return (text ? JSON.parse(text) : undefined) as T;
+  }
+
+  /**
    * Fetch every page of a list endpoint.
    *
    * This exists because `GET /v1/agents` caps its page size at 20 and *silently
