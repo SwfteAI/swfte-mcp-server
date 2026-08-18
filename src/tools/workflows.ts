@@ -151,7 +151,10 @@ export const workflowTools: ToolDefinition[] = [
       'billed. This answers "why is this workflow expensive" for a specific run, where ' +
       'swfte_analytics_workspace_costs only reports the workspace aggregate. A run that was never ' +
       'billed — a draft test, or one that failed before spending anything — returns NOT_FOUND, which ' +
-      'is an answer rather than a fault.',
+      'is an answer rather than a fault. A NOT_FOUND carrying `lookupError` means the cost could not ' +
+      'be read at all, which is a different thing from a run that cost nothing. Against a backend ' +
+      'older than the billing fix this endpoint answers 500 for every execution, billed or not, so ' +
+      'treat a 500 here as a stale deployment rather than as a broken workflow.',
     inputSchema: z.object({ executionId: z.string() }),
     execute: async (input, { client }) =>
       client.request({
