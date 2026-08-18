@@ -1,8 +1,73 @@
 import { z } from 'zod';
 import { IMPLEMENTED_KINDS, getAdapter, type Kind } from '../kinds/index.js';
+import { requiredConnections } from '../connections.js';
+import type { VerifyCheck } from '../kinds/_adapter.js';
 import type { ToolDefinition } from './_types.js';
 
 const KindArg = z.enum(IMPLEMENTED_KINDS as [Kind, ...Kind[]]);
+
+/**
+ * A workflow whose integration nodes have no stored credential publishes and
+ * verifies clean, then fails at execution — the credential is only consulted
+ * when the node runs. That is the most common way a built workflow turns out
+ * not to work, and no other check here can see it, so verify folds it in rather
+ * than leaving it to a tool the caller has to already know to call.
+ *
+ * Best-effort by design: a missing catalog reports a skip, not a failure. A
+ * false "you are missing credentials" is worse than staying quiet.
+ */
+async function connectionCheck(
+  client: Parameters<typeof requiredConnections>[0],
+  kind: Kind,
+  id: string
+): Promise<{ check: VerifyCheck; nextActions: string[] }> {
+  const skip = (detail: string) => ({
+    check: { id: 'connections', ok: null, detail } as VerifyCheck,
+    nextActions: [] as string[],
+  });
+
+  if (kind !== 'workflow') return skip('Only workflows carry integration-node credentials.');
+
+  let required: Awaited<ReturnType<typeof requiredConnections>>;
+  try {
+    const workflow = await getAdapter('workflow').get!(client as never, id);
+    required = await requiredConnections(client, workflow);
+  } catch {
+    return skip('Connection catalog unavailable — credentials not checked.');
+  }
+
+  if (required.length === 0) return skip('No node in this workflow needs a third-party credential.');
+
+  const missing = required.filter((r) => !r.connected);
+  if (missing.length === 0) {
+    return {
+      check: {
+        id: 'connections',
+        ok: true,
+        detail: `Connected: ${required.map((r) => r.provider).join(', ')}.`,
+      },
+      nextActions: [],
+    };
+  }
+
+  const named = missing
+    .map((m) => `${m.provider} (${m.nodeIds.filter(Boolean).join(', ') || 'unknown node'})`)
+    .join('; ');
+
+  return {
+    check: {
+      id: 'connections',
+      ok: false,
+      detail: `Missing ${missing.length} OAuth connection(s): ${named}. These nodes will fail at execution.`,
+    },
+    nextActions: [
+      `Call swfte_connect_start with provider "${missing[0]!.provider}" to open sign-in for the user` +
+        (missing.length > 1
+          ? `, then repeat for: ${missing.slice(1).map((m) => m.provider).join(', ')}.`
+          : '.'),
+    ],
+  };
+}
 
 export const verifyTools: ToolDefinition[] = [
   {
@@ -42,13 +107,22 @@ export const verifyTools: ToolDefinition[] = [
         timeoutMs: input.timeoutMs,
       });
 
-      const failed = report.checks.filter((c) => c.ok === false);
-      const skipped = report.checks.filter((c) => c.ok === null);
+      const connections = await connectionCheck(client, input.kind, input.id);
+      const checks = [...report.checks, connections.check];
+      // A missing credential is a real failure of "does this actually work?",
+      // so it lowers ok rather than sitting in the report as a note nobody acts on.
+      const ok = report.ok && connections.check.ok !== false;
+
+      const failed = checks.filter((c) => c.ok === false);
+      const skipped = checks.filter((c) => c.ok === null);
 
       return {
         ...report,
-        summary: report.ok
-          ? `${report.checks.length - skipped.length}/${report.checks.length - skipped.length} checks passed` +
+        ok,
+        checks,
+        nextActions: [...report.nextActions, ...connections.nextActions],
+        summary: ok
+          ? `${checks.length - skipped.length}/${checks.length - skipped.length} checks passed` +
             (skipped.length ? ` (${skipped.length} skipped)` : '')
           : `${failed.length} check(s) failed: ${failed.map((c) => c.id).join(', ')}`,
       };

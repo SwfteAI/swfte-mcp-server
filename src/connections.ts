@@ -113,7 +113,14 @@ export async function requiredConnections(
   const byProvider = new Map<string, ConnectionRequirement>();
   for (const n of nodes) {
     // A node may name its provider directly; otherwise fall back to the catalog.
-    const explicit = n?.oauthProvider ?? n?.config?.oauthProvider;
+    // `configuration` is the canonical key the API stores and returns; `config`
+    // is the frontend-side spelling. Reading only the latter meant an explicit
+    // hint on a persisted node was silently ignored. The catalog fallback masked
+    // that for known node types — which is exactly where the hint is redundant.
+    // It matters for a generic node type pointed at a provider, or one the
+    // catalog does not carry, where the fallback has nothing to offer.
+    const explicit =
+      n?.oauthProvider ?? n?.configuration?.oauthProvider ?? n?.config?.oauthProvider;
     const provider = explicit ?? byType.get(nodeType(n));
     if (!provider) continue;
 
@@ -163,6 +170,13 @@ export function openInBrowser(url: string): OpenResult {
   // A headless/CI box has nothing to open. Better to hand back the link.
   if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
     return { opened: false, reason: 'No display detected — open the URL manually.' };
+  }
+  // Over SSH the browser would open on the wrong machine: the box running the
+  // server, not the one in front of the person who has to click. Silently
+  // opening a sign-in page on a remote desktop is worse than handing back the
+  // link, because nothing appears and the reason is invisible.
+  if (process.env.SSH_CONNECTION || process.env.SSH_TTY || process.env.SSH_CLIENT) {
+    return { opened: false, reason: 'Remote session detected — open the URL on your own machine.' };
   }
 
   const [cmd, args]: [string, string[]] =

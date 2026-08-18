@@ -9,7 +9,27 @@ import {
   type Kind,
   type KindAdapter,
 } from '../kinds/index.js';
+import { requiredConnections } from '../connections.js';
 import type { ToolDefinition } from './_types.js';
+
+/**
+ * Providers this workflow needs that nobody has signed in to yet.
+ *
+ * Best-effort, and deliberately silent about its own failures: if the catalog is
+ * unreachable this returns nothing and the run proceeds. A false "you are
+ * missing credentials" that blocks a good run is worse than a real failure,
+ * which the trace explains anyway.
+ */
+async function missingConnections(client: SwfteClient, kind: Kind, id: string): Promise<string[]> {
+  if (kind !== 'workflow') return [];
+  try {
+    const workflow = await getAdapter('workflow').get!(client, id);
+    const required = await requiredConnections(client, workflow);
+    return required.filter((r) => !r.connected).map((r) => r.provider);
+  } catch {
+    return [];
+  }
+}
 
 /** Only advertise kinds that actually have an adapter. */
 const KindArg = z.enum(IMPLEMENTED_KINDS as [Kind, ...Kind[]]);
@@ -276,16 +296,46 @@ export const shipTools: ToolDefinition[] = [
       'Execute a persisted artifact to a terminal state and return the result. For workflows that ' +
       'means per-node traces, and an unpublished workflow automatically falls back to the draft test ' +
       'path instead of erroring. For agents it sends a chat probe, retrying through backend ' +
-      'load-shedding so a degraded platform is reported as such rather than as a broken agent.',
+      'load-shedding so a degraded platform is reported as such rather than as a broken agent. ' +
+      'Stops before spending an execution when the workflow needs an OAuth provider nobody has ' +
+      'signed in to, since that run can only fail — connect first, or pass force:true.',
     inputSchema: z.object({
       kind: KindArg,
       id: z.string(),
       inputs: z.record(z.unknown()).optional().describe('Workflow inputs.'),
       message: z.string().optional().describe('The turn to send, for conversational kinds.'),
+      force: z
+        .boolean()
+        .optional()
+        .describe('Run even when a required OAuth connection appears to be missing.'),
       timeoutMs: z.number().int().min(5_000).optional(),
     }),
     execute: async (input, { client }) => {
       const adapter = requireVerb(input.kind, 'run');
+
+      // Executions are metered, and a workflow missing a credential fails at the
+      // first integration node every time. Spending the execution to discover
+      // that helps nobody, so check first and hand back the step that fixes it.
+      // `force` exists because the check is best-effort: a credential stored
+      // under a name that does not normalise to the provider would otherwise
+      // block a run that would have worked.
+      if (!input.force) {
+        const missing = await missingConnections(client, input.kind, input.id);
+        if (missing.length > 0) {
+          return {
+            ran: false,
+            blocked: 'MISSING_CONNECTIONS',
+            missing,
+            summary:
+              `Not run: this workflow needs ${missing.join(', ')}, which nobody has signed in to. ` +
+              'Every run would fail at that node.',
+            nextStep:
+              `Call swfte_connect_start with provider "${missing[0]}" to open sign-in for the user, ` +
+              'then run again. Pass force:true to run anyway.',
+          };
+        }
+      }
+
       return adapter.run(client, input.id, {
         inputs: input.inputs,
         message: input.message,

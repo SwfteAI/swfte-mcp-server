@@ -67,6 +67,13 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   'modules',
   'deployments',
   'analytics',
+  // Small (5 tools) and load-bearing: this is the only way to get a user signed
+  // in to a provider their workflow needs. Hidden, an agent cannot repair — or
+  // even name — a missing credential, so an integration workflow fails at
+  // execution with nothing actionable to say. The tool-count argument for
+  // trimming the surface does not apply to the tools that make the advertised
+  // ones work.
+  'connect',
 ];
 
 export interface ServerConfig {
