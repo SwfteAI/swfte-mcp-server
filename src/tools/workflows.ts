@@ -82,4 +82,96 @@ export const workflowTools: ToolDefinition[] = [
         workspaceId: input.workspaceId,
       }),
   },
+
+  // Post-deploy observability. Everything above answers "does this workflow
+  // exist and is it well-formed"; a deployed workflow fails for reasons none of
+  // it can see. These five read the execution record, which is the only place
+  // that says whether the thing actually works once it is live.
+  //
+  // None takes a workspaceId: these are all path-addressed, and on a PAT the
+  // gateway injects the trusted tenant headers anyway (see src/config.ts) — a
+  // workspace id we set by hand is at best ignored.
+  {
+    name: 'swfte_workflows_executions',
+    title: 'Workflow execution history',
+    readOnly: true,
+    description:
+      'Every recorded run of one workflow, with status, timing, and result. A deployment reaching ' +
+      'READY only says the workflow shipped; this says whether it is working. Read it after a deploy, ' +
+      'then take a failing executionId to swfte_workflows_execution_traces to find out which node broke.',
+    inputSchema: z.object({ workflowId: z.string() }),
+    execute: async (input, { client }) =>
+      client.request({
+        method: 'GET',
+        path: `/v2/workflows/${encodeURIComponent(input.workflowId)}/executions`,
+        retries: 1,
+      }),
+  },
+  {
+    name: 'swfte_workflows_execution_traces',
+    title: 'Execution traces',
+    readOnly: true,
+    description:
+      'Per-node traces for a single run — timing, token usage, and the error text of the node that ' +
+      'failed. The execution status tells you a run failed; only the traces tell you which node did ' +
+      'it, which is the question you actually have. Also carries a stallDiagnostic when a run stopped ' +
+      'making progress instead of erroring outright. Works on historical runs, not just live ones: ' +
+      'once the in-memory state is gone the traces are served from the persisted execution record.',
+    inputSchema: z.object({ executionId: z.string() }),
+    execute: async (input, { client }) =>
+      client.request({
+        method: 'GET',
+        path: `/v2/workflows/executions/${encodeURIComponent(input.executionId)}/traces`,
+        retries: 1,
+      }),
+  },
+  {
+    name: 'swfte_workflows_execution_status',
+    title: 'Execution status and result',
+    readOnly: true,
+    description:
+      'The full execution record for one run: status, progress, the inputs it received, the output it ' +
+      'produced, and its billing summary. Reach for this when you hold an executionId but not the ' +
+      'workflow it came from, or to read back what a finished run actually returned — the traces tool ' +
+      'covers per-node failure detail but never the run output.',
+    inputSchema: z.object({ executionId: z.string() }),
+    execute: async (input, { client }) =>
+      client.request({
+        method: 'GET',
+        path: `/v2/workflows/executions/${encodeURIComponent(input.executionId)}/status`,
+        retries: 1,
+      }),
+  },
+  {
+    name: 'swfte_workflows_execution_cost',
+    title: 'Execution cost',
+    readOnly: true,
+    description:
+      'What one run cost: tokens in and out, per-node token usage, platform cost and the amount ' +
+      'billed. This answers "why is this workflow expensive" for a specific run, where ' +
+      'swfte_analytics_workspace_costs only reports the workspace aggregate. A run that was never ' +
+      'billed — a draft test, or one that failed before spending anything — returns NOT_FOUND, which ' +
+      'is an answer rather than a fault.',
+    inputSchema: z.object({ executionId: z.string() }),
+    execute: async (input, { client }) =>
+      client.request({
+        method: 'GET',
+        path: `/v2/workflows/executions/${encodeURIComponent(input.executionId)}/billing`,
+        retries: 1,
+      }),
+  },
+  {
+    name: 'swfte_workflows_stats',
+    title: 'Workflow execution stats',
+    readOnly: true,
+    description:
+      'Execution count, success/failure split, average duration and last-run status for every ' +
+      'workflow in the workspace that has ever run. The fastest way to find the deployed workflow ' +
+      'that is quietly failing, without opening them one at a time. Workflows with zero executions ' +
+      'are omitted entirely — so a workflow missing from this list has never run, which after a ' +
+      'deploy is itself the finding.',
+    inputSchema: z.object({}),
+    execute: async (_input, { client }) =>
+      client.request({ method: 'GET', path: '/v2/workflows/stats', retries: 1 }),
+  },
 ];

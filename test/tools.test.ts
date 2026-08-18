@@ -160,8 +160,14 @@ describe('advertised surface', () => {
   });
 
   test('the default surface stays small enough for reliable tool selection', () => {
+    // The ceiling moved 80 → 85 when the five post-deploy observability tools
+    // landed. They are workflow tools and the workflows group is advertised by
+    // default, so there is no shipping them and keeping them out of the count.
+    // Worth the slots: without them a deployed workflow can be reported as
+    // shipped but never as working. Raise this again only for something that
+    // earns it the same way — the number exists to make the trade visible.
     const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x' } as never));
-    assert.ok(selected.length < 80, `default surface is ${selected.length} tools`);
+    assert.ok(selected.length < 85, `default surface is ${selected.length} tools`);
     assert.ok(selected.length > 40, `default surface is only ${selected.length} tools`);
   });
 
