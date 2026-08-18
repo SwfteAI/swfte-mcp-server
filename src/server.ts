@@ -3,6 +3,8 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod';
 
+import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+
 import { SwfteApiError, SwfteClient } from './client.js';
 import { loadConfig, type ServerConfig } from './config.js';
 import { allTools } from './tools/index.js';
@@ -14,6 +16,17 @@ const PACKAGE_VERSION = '0.2.0';
 export interface BuildServerOptions {
   config?: ServerConfig;
   tools?: ToolDefinition[];
+  /**
+   * Resolve the client for a single call, from that call's auth.
+   *
+   * stdio has one credential for the life of the process, so it leaves this unset
+   * and every call shares one client — unchanged from before. Hosted over HTTP the
+   * credential arrives per request in the bearer token, and one process serves many
+   * users, so capturing a client at construction would hand every caller whichever
+   * identity happened to start the server. Resolving per call is what makes the same
+   * build safe in both places.
+   */
+  resolveClient?: (authInfo?: AuthInfo) => SwfteClient | Promise<SwfteClient>;
 }
 
 /** Apply the `SWFTE_TOOLS` group filter. An empty set means "advertise everything". */
@@ -24,7 +37,10 @@ export function selectTools(tools: ToolDefinition[], config: ServerConfig): Tool
 
 export function buildServer(opts: BuildServerOptions = {}): Server {
   const config = opts.config ?? loadConfig();
-  const client = new SwfteClient(config);
+  // Built once and reused when no resolver is supplied, so the stdio path keeps
+  // exactly the behaviour (and the connection reuse) it had before.
+  const sharedClient = opts.resolveClient ? null : new SwfteClient(config);
+  const resolveClient = opts.resolveClient ?? (() => sharedClient!);
   const tools = selectTools(opts.tools ?? allTools, config);
 
   const toolMap = new Map<string, ToolDefinition>();
@@ -48,7 +64,7 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
     })),
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     const tool = toolMap.get(req.params.name);
     if (!tool) {
       return {
@@ -73,6 +89,7 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
     }
 
     try {
+      const client = await resolveClient(extra?.authInfo);
       const result = await tool.execute(parsed.data, { client, config });
       return {
         content: [
