@@ -237,6 +237,10 @@ Multi-arch images are published on every release tag to:
 - Docker Hub: [`swfte/mcp-server`](https://hub.docker.com/r/swfte/mcp-server)
 - GitHub Container Registry: `ghcr.io/swfteai/swfte-mcp-server`
 
+To serve the same tools over HTTP instead — so clients connect with
+`claude mcp add --transport http` and log in from a browser rather than carrying a
+pasted token — see [`DEPLOY.md`](./DEPLOY.md).
+
 ---
 
 ## Development

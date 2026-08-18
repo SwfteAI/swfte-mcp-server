@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Swfte MCP server</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #17171a;
+        --muted: #6b6b74;
+        --line: #e4e4e9;
+        --code-bg: #f5f5f7;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #101013;
+          --fg: #ececf1;
+          --muted: #9a9aa5;
+          --line: #2a2a31;
+          --code-bg: #1a1a20;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 3rem 1.25rem 5rem;
+        background: var(--bg);
+        color: var(--fg);
+        font: 16px/1.6 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      main {
+        max-width: 44rem;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin: 0 0 0.25rem;
+      }
+      p.lede {
+        color: var(--muted);
+        margin: 0 0 2rem;
+      }
+      h2 {
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 2rem 0 0.6rem;
+      }
+      pre {
+        background: var(--code-bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0.9rem 1rem;
+        overflow-x: auto;
+        font-size: 0.86rem;
+        margin: 0;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      a {
+        color: inherit;
+      }
+      footer {
+        margin-top: 3rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Swfte MCP server</h1>
+      <p class="lede">
+        Build, validate and deploy Swfte workflows, agents, chatflows and modules from any
+        MCP client. This page is not the server — the endpoint is
+        <code>/mcp</code>, and it speaks JSON-RPC over HTTP, not HTML.
+      </p>
+
+      <h2>Add it to Claude Code</h2>
+      <pre><code>claude mcp add --transport http swfte https://&lt;this-host&gt;/mcp
+claude mcp login swfte</code></pre>
+
+      <h2>Add it to any other MCP client</h2>
+      <p>
+        Point it at <code>https://&lt;this-host&gt;/mcp</code> with the streamable HTTP
+        transport. Every request carries its own credential; the server holds none.
+      </p>
+
+      <h2>Prefer to run it yourself?</h2>
+      <pre><code>npx -y @swfte/mcp-server</code></pre>
+      <p>
+        The stdio install reads a personal access token from <code>SWFTE_PAT</code>. The
+        hosted endpoint above does not need one — you log in from the browser instead.
+      </p>
+
+      <footer>
+        <a href="https://www.swfte.com">swfte.com</a> ·
+        <a href="https://github.com/SwfteAI/swfte-mcp-server">source</a> ·
+        <a href="https://www.swfte.com/developers">developer docs</a>
+      </footer>
+    </main>
+  </body>
+</html>
