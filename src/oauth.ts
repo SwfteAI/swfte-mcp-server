@@ -71,6 +71,20 @@ const DEFAULT_TOKEN_LIFETIME_S = 90 * 24 * 60 * 60;
  * misbehaves. `swfte_whoami` leads with the same endpoint.
  */
 const IDENTITY_PATH = '/v2/workspace/members/me';
+const TOKENS_PATH = '/v1/personal-access-tokens';
+
+/**
+ * The display prefix agents-service stores for a token: its first 12 characters and an
+ * ellipsis (`PersonalAccessTokenService.DISPLAY_PREFIX_LEN`). Recomputing it here is how
+ * a token identifies its own row in a list that never returns the secret.
+ *
+ * Mirrors the backend rather than being told by it, so if that length ever changes this
+ * stops matching and revocation fails loudly rather than deleting the wrong row.
+ */
+const DISPLAY_PREFIX_LEN = 12;
+function displayPrefix(token: string): string {
+  return token.slice(0, Math.min(DISPLAY_PREFIX_LEN, token.length)) + '…';
+}
 
 /**
  * A PAT carries no record of which OAuth client obtained it, so nothing here can name
@@ -621,6 +635,66 @@ export class SwfteOAuthProvider implements OAuthServerProvider {
     }
     this.verified.set(key, { info, until });
     return info;
+  }
+
+  /**
+   * Revoke the presented token, so "disconnect" in a client actually kills the
+   * credential rather than only forgetting it locally.
+   *
+   * <p>Presenting the token is the proof — the same self-authenticating shape RFC 7009
+   * describes. No new backend endpoint was needed: a PAT may not mint another PAT, but
+   * it may list and delete its own, so this authenticates *as* the token, finds itself
+   * in the list, and deletes that row.
+   *
+   * <p>The list exposes a 12-character display prefix rather than the secret, which is
+   * how the row is identified. If that matches anything other than exactly one token
+   * this refuses instead of guessing: deleting the wrong credential is far worse than
+   * failing to delete this one, and the caller still holds a token they can revoke from
+   * the dashboard.
+   *
+   * <p>Revocation is not silent-on-failure. A client that reports "disconnected" while
+   * the credential still works has told the user something untrue about their security.
+   */
+  async revokeToken(_client: OAuthClientInformationFull, request: { token: string }): Promise<void> {
+    const token = request.token;
+    if (!detectCredentialKind(token)) {
+      // Nothing to revoke, and nothing to report — RFC 7009 asks for success on an
+      // unrecognised token so a client cannot probe validity through this endpoint.
+      return;
+    }
+
+    const client = new SwfteClient({
+      ...this.opts.config,
+      credential: token,
+      credentialKind: detectCredentialKind(token)!,
+    });
+
+    const prefix = displayPrefix(token);
+    const tokens = await client.request<Array<{ id?: string; prefix?: string }>>({
+      method: 'GET',
+      path: TOKENS_PATH,
+      retries: 1,
+    });
+
+    const matches = (Array.isArray(tokens) ? tokens : []).filter((t) => t?.prefix === prefix);
+    if (matches.length !== 1 || !matches[0]?.id) {
+      throw new ServerError(
+        matches.length === 0
+          ? 'Could not find this token to revoke it. Revoke it from the Swfte dashboard instead.'
+          : 'More than one token shares this prefix, so revoking would be a guess. ' +
+            'Revoke it from the Swfte dashboard instead.'
+      );
+    }
+
+    await client.request({
+      method: 'DELETE',
+      path: `${TOKENS_PATH}/${encodeURIComponent(matches[0].id!)}`,
+      retries: 1,
+    });
+
+    // Drop the cached verification too, or the token keeps working here for up to the
+    // cache TTL after the user was told it was revoked.
+    this.verified.delete(createHash('sha256').update(token).digest('base64url'));
   }
 
   private openCode(client: OAuthClientInformationFull, authorizationCode: string): CodeEnvelope {
