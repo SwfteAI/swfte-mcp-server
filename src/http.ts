@@ -65,16 +65,47 @@ export function createHttpHandler(opts: HttpHandlerOptions): (req: Request) => P
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
     await server.connect(transport);
+    const close = () => void transport.close().catch(() => undefined);
+
+    let response: Response;
     try {
       // The transport is what carries `authInfo` down to each tool call's `extra`, which
       // is where `resolveClient` reads the credential from.
-      return await transport.handleRequest(req, authInfo ? { authInfo } : undefined);
-    } finally {
-      // Release the transport with the response. Skipping this leaks a listener per
-      // request, which on a warm Fluid Compute instance accumulates across invocations
-      // rather than dying with the process the way it would on stdio.
-      await transport.close().catch(() => undefined);
+      response = await transport.handleRequest(req, authInfo ? { authInfo } : undefined);
+    } catch (err) {
+      close();
+      throw err;
     }
+
+    // Closing here rather than in a `finally` around handleRequest, which is what shipped
+    // first and was wrong. handleRequest resolves once the status and headers are known,
+    // while the body is still streaming, so closing at that point killed the stream
+    // mid-write: 200, correct content-type, zero bytes. Nothing threw, so the only
+    // symptom was a client timing out with nothing pointing back here.
+    //
+    // The transport still has to be released — a leaked listener on a warm Fluid Compute
+    // instance accumulates across invocations instead of dying with the process the way
+    // it would on stdio. So the close is tied to the end of the body instead.
+    if (!response.body) {
+      close();
+      return response;
+    }
+
+    const released = response.body.pipeThrough(
+      new TransformStream({
+        transform(chunk, controller) {
+          controller.enqueue(chunk);
+        },
+        flush: close,
+        cancel: close,
+      })
+    );
+
+    return new Response(released, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
   };
 }
 

@@ -16,7 +16,7 @@ import { createHostedHandler, resolveClientFromAuth } from '../src/http.js';
 
 const ISSUER = 'https://mcp.test';
 const LOGIN_URL = 'https://api.test/agents/v1/mcp/login';
-const EXCHANGE_URL = 'https://api.test/agents/v1/mcp/exchange';
+const EXCHANGE_URL = 'https://api.test/agents/v1/mcp/login/exchange';
 const CLIENT_REDIRECT = 'http://localhost:9876/callback';
 
 const config = () =>

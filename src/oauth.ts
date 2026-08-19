@@ -146,7 +146,12 @@ export function loadOAuthOptions(config: ServerConfig, env: NodeJS.ProcessEnv = 
     issuerUrl: new URL(publicUrl.replace(/\/+$/, '')),
     mcpPath: normalisePath(env.SWFTE_MCP_PATH?.trim() || '/mcp'),
     loginUrl: env.SWFTE_MCP_LOGIN_URL?.trim() || `${base}/v1/mcp/login`,
-    exchangeUrl: env.SWFTE_MCP_EXCHANGE_URL?.trim() || `${base}/v1/mcp/exchange`,
+    // `/v1/mcp/login/exchange`, not `/v1/mcp/exchange`: the backend hangs the exchange
+    // off the login controller's own mapping. The two halves of this flow were built in
+    // parallel against a contract that named the login endpoint and left this one
+    // unnamed, and they guessed differently. Wrong, the default silently fails every
+    // login unless someone happens to set the override.
+    exchangeUrl: env.SWFTE_MCP_EXCHANGE_URL?.trim() || `${base}/v1/mcp/login/exchange`,
     exchangeToken: env.SWFTE_MCP_EXCHANGE_TOKEN?.trim() || undefined,
     signingSecret,
     config,

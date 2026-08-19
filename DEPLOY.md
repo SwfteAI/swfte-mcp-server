@@ -124,7 +124,7 @@ call succeeding, each one belonging to the wrong person.
 |---|---|---|---|
 | `SWFTE_MCP_PATH` | no | `/mcp` | Moves the MCP endpoint. Also moves the protected-resource metadata path and the `Cache-Control` rule in `vercel.json`, which is keyed on `/mcp`. |
 | `SWFTE_MCP_LOGIN_URL` | no | `${SWFTE_BASE_URL}/v1/mcp/login` | agents-service login + workspace picker. |
-| `SWFTE_MCP_EXCHANGE_URL` | no | `${SWFTE_BASE_URL}/v1/mcp/exchange` | Redeems the one-time code for a PAT. |
+| `SWFTE_MCP_EXCHANGE_URL` | no | `${SWFTE_BASE_URL}/v1/mcp/login/exchange` | Redeems the one-time code for a PAT. |
 | `SWFTE_BASE_URL` | no | `https://api.swfte.com/agents` | Point a preview at staging; the two URLs above follow it. |
 | `SWFTE_TOOLS` | no | curated subset | `all`, or a comma-separated group list. |
 | `SWFTE_DEFAULT_WAIT_MS` | no | `240000` | Must stay under `maxDuration`. |
