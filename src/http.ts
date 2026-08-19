@@ -11,16 +11,17 @@
  * production under exactly the conditions that are hardest to reproduce. Statelessness
  * costs server-initiated messages, which none of these tools use.
  *
- * Auth is NOT handled here. The bearer token reaches tools through
- * `buildServer({ resolveClient })`, and mounting the OAuth endpoints in front of this
- * handler is the next phase — see MCP_HOSTED_OAUTH_PLAN.md.
+ * `createHttpHandler` serves the MCP endpoint alone. `createHostedHandler` puts the
+ * OAuth surface from `oauth.ts` in front of it, and is what a hosted deployment mounts —
+ * see MCP_HOSTED_OAUTH_PLAN.md.
  */
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 
 import { buildServer } from './server.js';
-import type { SwfteClient } from './client.js';
-import type { ServerConfig } from './config.js';
+import { SwfteClient } from './client.js';
+import { detectCredentialKind, loadConfig, type ServerConfig } from './config.js';
+import { createOAuthEndpoints, loadOAuthOptions, type AuthenticateResult, type OAuthEndpoints } from './oauth.js';
 
 export interface HttpHandlerOptions {
   /**
@@ -31,6 +32,14 @@ export interface HttpHandlerOptions {
   config: ServerConfig;
   /** Build the client for one call from that call's verified token. */
   resolveClient: (authInfo?: AuthInfo) => SwfteClient | Promise<SwfteClient>;
+  /**
+   * Gate every MCP request behind a verified bearer token.
+   *
+   * Left unset the endpoint is open, which is only ever right when something in front of
+   * it has already established the caller — a local dev process holding one credential,
+   * or a test. A hosted deployment always sets it.
+   */
+  authenticate?: (req: Request) => Promise<AuthenticateResult>;
 }
 
 /**
@@ -43,12 +52,23 @@ export interface HttpHandlerOptions {
  */
 export function createHttpHandler(opts: HttpHandlerOptions): (req: Request) => Promise<Response> {
   return async function handle(req: Request): Promise<Response> {
+    let authInfo: AuthInfo | undefined;
+    if (opts.authenticate) {
+      const result = await opts.authenticate(req);
+      // A rejection is already a complete OAuth response, WWW-Authenticate header and
+      // all, which is what points the client at the login it needs to run.
+      if ('response' in result) return result.response;
+      authInfo = result.authInfo;
+    }
+
     const server = buildServer({ config: opts.config, resolveClient: opts.resolveClient });
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
     await server.connect(transport);
     try {
-      return await transport.handleRequest(req);
+      // The transport is what carries `authInfo` down to each tool call's `extra`, which
+      // is where `resolveClient` reads the credential from.
+      return await transport.handleRequest(req, authInfo ? { authInfo } : undefined);
     } finally {
       // Release the transport with the response. Skipping this leaks a listener per
       // request, which on a warm Fluid Compute instance accumulates across invocations
@@ -56,4 +76,105 @@ export function createHttpHandler(opts: HttpHandlerOptions): (req: Request) => P
       await transport.close().catch(() => undefined);
     }
   };
+}
+
+/**
+ * A placeholder so `ServerConfig` can be built before anyone has logged in.
+ *
+ * Hosted, there is no server-wide credential at all: every call brings its own. This
+ * value exists only to satisfy the field and is replaced per request by `resolveClient`,
+ * and its shape is deliberately one `detectCredentialKind` accepts so config loading
+ * does not fail before the real credential arrives.
+ */
+const HOSTED_PLACEHOLDER_CREDENTIAL = 'pat_hosted_no_credential';
+
+/**
+ * Build the client for one call from the token that call carried.
+ *
+ * The verified bearer token *is* the credential — the login mints a PAT and hands it
+ * over as the access token — so there is no lookup here, only the mapping from token to
+ * client. Anything reaching this without auth is a wiring mistake and says so, because
+ * the alternative is a client built on the placeholder credential that fails much later
+ * with a 401 nobody can trace back here.
+ */
+export function resolveClientFromAuth(config: ServerConfig): (authInfo?: AuthInfo) => SwfteClient {
+  return (authInfo?: AuthInfo) => {
+    if (!authInfo?.token) {
+      throw new Error('No verified credential on this request — the bearer gate did not run.');
+    }
+    return new SwfteClient({
+      ...config,
+      credential: authInfo.token,
+      // The login only issues PATs, but a workspace API key presented as a bearer token
+      // is a valid principal too and needs different headers. Detect rather than assume.
+      credentialKind: detectCredentialKind(authInfo.token) ?? 'pat',
+    });
+  };
+}
+
+export interface HostedHandlerOptions {
+  env?: NodeJS.ProcessEnv;
+}
+
+export interface HostedHandler {
+  (req: Request): Promise<Response>;
+  /** The OAuth surface, exposed so a deployment can log or test its endpoints. */
+  oauth: OAuthEndpoints;
+  /** Path the MCP endpoint answers on. */
+  mcpPath: string;
+}
+
+/**
+ * The whole hosted server as one fetch handler: OAuth, metadata, callback and the
+ * authenticated MCP endpoint.
+ *
+ * One handler rather than a route per endpoint because the pieces have to agree on the
+ * issuer, the resource identifier and the signing secret, and computing those in two
+ * places is how a metadata document ends up advertising an endpoint that does not
+ * answer.
+ */
+export function createHostedHandler(opts: HostedHandlerOptions = {}): HostedHandler {
+  const env = opts.env ?? process.env;
+
+  // Nobody sets SWFTE_PAT on a hosted deployment, and if someone did, honouring it would
+  // hand every anonymous caller that person's identity. Overriding both credential
+  // variables makes that impossible rather than merely unlikely.
+  const config = loadConfig({ ...env, SWFTE_PAT: HOSTED_PLACEHOLDER_CREDENTIAL, SWFTE_API_KEY: undefined });
+  const oauth = createOAuthEndpoints(loadOAuthOptions(config, env));
+  const mcpPath = oauth.mcpPath;
+
+  const mcp = createHttpHandler({
+    config,
+    authenticate: oauth.authenticate,
+    resolveClient: resolveClientFromAuth(config),
+  });
+
+  const handler = async function handle(req: Request): Promise<Response> {
+    try {
+      const oauthResponse = await oauth.handle(req);
+      if (oauthResponse) return oauthResponse;
+
+      const { pathname } = new URL(req.url);
+      if (pathname === mcpPath) return mcp(req);
+
+      return new Response(JSON.stringify({ error: 'not_found', mcp_endpoint: mcpPath }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    } catch (err) {
+      // An unhandled throw here reaches the client as the platform's own error page, with
+      // nothing an OAuth client can parse and nothing in the logs tying it to a request.
+      // Answer in the shape the caller expects and put the reason where it can be read.
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[swfte-mcp] unhandled error:', err);
+      return new Response(JSON.stringify({ error: 'server_error', error_description: message }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+  } as HostedHandler;
+
+  handler.oauth = oauth;
+  handler.mcpPath = mcpPath;
+  return handler;
 }
