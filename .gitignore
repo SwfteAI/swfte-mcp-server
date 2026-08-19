@@ -6,3 +6,9 @@ dist/
 .DS_Store
 coverage/
 .tsbuildinfo
+.serena/
+
+# Fleet / e2e run artifacts. Timings and per-run ids from a live workspace —
+# useful locally, not worth versioning, and one careless `git add .` away from
+# committing whatever a future run decides to record.
+.e2e/

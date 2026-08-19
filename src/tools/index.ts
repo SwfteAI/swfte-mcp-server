@@ -1,4 +1,12 @@
-import type { ToolDefinition } from './_types.js';
+import type { ToolDefinition, ToolGroup } from './_types.js';
+
+// Task-shaped tools — the reason this server exists.
+import { whoamiTools } from './whoami.js';
+import { shipTools } from './ship.js';
+import { verifyTools } from './verify.js';
+import { codeTools } from './code.js';
+
+// Domain tools.
 import { agentTools } from './agents.js';
 import { chatFlowTools } from './chatflows.js';
 import { workflowTools } from './workflows.js';
@@ -12,27 +20,51 @@ import { marketplaceTools } from './marketplace.js';
 import { voiceTools } from './voice.js';
 import { auditTools } from './audit.js';
 import { costControlTools } from './cost-control.js';
+import { analyticsTools } from './analytics.js';
+import { experimentTools } from './experiments.js';
+import { connectTools } from './connect.js';
+import { deploymentTools } from './deployments.js';
 import { journeyTools } from './journeys.js';
 import { relayRunTools } from './relay-runs.js';
 import { relayMailboxTools } from './relay-mailboxes.js';
 
+/**
+ * Tag a whole module's tools with a group, so `SWFTE_TOOLS` can trim them
+ * without every tool file having to repeat the label. An explicit `group` on an
+ * individual tool wins.
+ */
+const tag = (group: ToolGroup, tools: ToolDefinition[]): ToolDefinition[] =>
+  tools.map((t) => ({ ...t, group: t.group ?? group }));
+
 export const allTools: ToolDefinition[] = [
-  ...agentTools,
-  ...chatFlowTools,
-  ...workflowTools,
-  ...conversationTools,
-  ...datasetTools,
-  ...fileTools,
-  ...ragTools,
-  ...mcpTools,
-  ...moduleTools,
-  ...marketplaceTools,
-  ...voiceTools,
-  ...auditTools,
-  ...costControlTools,
-  ...journeyTools,
-  ...relayRunTools,
-  ...relayMailboxTools,
+  ...whoamiTools,
+  ...shipTools,
+  ...verifyTools,
+
+  ...tag('agents', agentTools),
+  ...tag('chatflows', chatFlowTools),
+  ...tag('workflows', workflowTools),
+  ...tag('workflows', codeTools),
+  ...tag('conversations', conversationTools),
+  ...tag('datasets', datasetTools),
+  ...tag('files', fileTools),
+  ...tag('rag', ragTools),
+  ...tag('mcp', mcpTools),
+  ...tag('modules', moduleTools),
+  ...tag('marketplace', marketplaceTools),
+  ...tag('voice', voiceTools),
+  ...tag('audit', auditTools),
+  ...tag('cost', costControlTools),
+  ...tag('analytics', analyticsTools),
+  ...tag('experiments', experimentTools),
+  ...tag('connect', connectTools),
+  ...tag('deployments', deploymentTools),
+
+  // From the Relay PR. Grouped rather than left untagged so SWFTE_TOOLS can trim
+  // them like everything else — an untagged tool is advertised unconditionally.
+  ...tag('journeys', journeyTools),
+  ...tag('relay', relayRunTools),
+  ...tag('relay', relayMailboxTools),
 ];
 
 export type { ToolDefinition, ToolContext } from './_types.js';

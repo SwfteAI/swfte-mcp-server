@@ -1,0 +1,16 @@
+# What a deployment does not need. The function is bundled from `api/` and `src/`;
+# everything below is either build output, local run artifacts, or the npm/Docker
+# distribution path, and only adds upload time and surface.
+dist/
+node_modules/
+test/
+scripts/
+examples/
+.e2e/
+.github/
+.serena/
+Dockerfile
+.dockerignore
+smithery.yaml
+*.log
+.DS_Store

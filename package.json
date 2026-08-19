@@ -1,7 +1,7 @@
 {
   "name": "@swfte/mcp-server",
-  "version": "0.1.0",
-  "description": "Official Model Context Protocol (MCP) server for the Swfte AI platform — wraps the Swfte API as MCP tools so Claude Desktop, Claude Code, Cursor, Cline, and any MCP client can manage agents, chatflows, workflows, RAG, voice, and marketplace modules. https://www.swfte.com",
+  "version": "0.2.0",
+  "description": "Official Model Context Protocol (MCP) server for the Swfte AI platform — build, validate, and deploy complete workflows, agents, chatflows, widgets, applications and MCP servers from Claude Code, Claude Desktop, Cursor, or any MCP client.",
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -38,7 +38,9 @@
     "swfte-mcp-server": "dist/index.js"
   },
   "files": [
+    "bin",
     "dist",
+    "docs",
     "README.md",
     "ABOUT.md",
     "LICENSE"
@@ -52,16 +54,24 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "smoke": "bash scripts/smoke.sh",
-    "prepublishOnly": "node -e \"if(!process.env.SWFTE_PUBLISH_CONFIRMED){console.error('\\n[guard] @swfte/mcp-server is published only via the GitHub Actions release workflow.\\n        Set SWFTE_PUBLISH_CONFIRMED=1 to override.\\n');process.exit(1)}\" && npm run build"
+    "prepublishOnly": "node -e \"if(!process.env.SWFTE_PUBLISH_CONFIRMED){console.error('\\n[guard] @swfte/mcp-server is published only via the GitHub Actions release workflow.\\n        Set SWFTE_PUBLISH_CONFIRMED=1 to override.\\n');process.exit(1)}\" && npm run build",
+    "e2e": "tsx scripts/e2e.ts",
+    "bench": "tsx scripts/bench.ts",
+    "smoke:protocol": "npm run build && tsx scripts/protocol-smoke.ts",
+    "test": "tsx --test test/*.test.ts",
+    "probe:paths": "tsx scripts/probe-paths.ts",
+    "verify": "npm run typecheck && npm run test && npm run smoke:protocol && npm run probe:paths"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.0",
+    "fflate": "^0.8.3",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.23.5"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
     "tsup": "^8.3.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.6.0"
   },
   "publishConfig": {
