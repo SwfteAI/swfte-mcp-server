@@ -23,7 +23,7 @@ export const moduleTools: ToolDefinition[] = [
   {
     name: 'swfte_modules_get',
     title: 'Get module',
-    description: 'Fetch a single module by ID.',
+    description: 'Fetch one knowledge module, including its attached resources and build state. A module with no resources compiles fine and then retrieves nothing.',
     inputSchema: Workspace.extend({ moduleId: z.string() }),
     execute: async (input, { client }) =>
       client.request({
@@ -35,7 +35,7 @@ export const moduleTools: ToolDefinition[] = [
   {
     name: 'swfte_modules_create',
     title: 'Create module',
-    description: 'Create a new module.',
+    description: 'Create an empty knowledge module. Attach resources and build it before use, or retrieval returns nothing. swfte_build with kind:"module" does create-and-build in one step.',
     inputSchema: Workspace.extend({ module: z.record(z.unknown()) }),
     execute: async (input, { client }) =>
       client.request({
