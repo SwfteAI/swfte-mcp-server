@@ -64,18 +64,33 @@ export const datasetTools: ToolDefinition[] = [
   },
   {
     name: 'swfte_datasets_documents_create',
-    title: 'Add documents to dataset',
+    title: 'Add a document to a dataset',
     description:
-      'Create one or more documents inside a dataset. Documents can come from URLs, raw text, or file IDs uploaded via swfte_files_upload.',
+      'Register ONE already-uploaded file as a document inside a dataset. Upload the file with ' +
+      'swfte_files_upload first and pass the id it returns as fileId — the endpoint has no raw-text ' +
+      'or URL path, fileId is required. Call once per document.',
     inputSchema: Workspace.extend({
       datasetId: z.string(),
-      documents: z.array(z.record(z.unknown())),
+      fileId: z.string().describe('The id returned by swfte_files_upload.'),
+      name: z.string().describe('Display name for the document.'),
+      dataSourceType: z.string().optional().describe("Defaults to 'upload_file'."),
+      docType: z.string().optional(),
+      docLanguage: z.string().optional(),
     }),
     execute: async (input, { client }) =>
       client.request({
         method: 'POST',
         path: `/api/v2/datasets/${encodeURIComponent(input.datasetId)}/documents`,
-        body: { documents: input.documents },
+        // datasetId is repeated in the body: the controller reads it from there,
+        // not from the path, and rejects the call without it.
+        body: {
+          datasetId: input.datasetId,
+          fileId: input.fileId,
+          name: input.name,
+          dataSourceType: input.dataSourceType ?? 'upload_file',
+          docType: input.docType,
+          docLanguage: input.docLanguage,
+        },
         workspaceId: input.workspaceId,
       }),
   },

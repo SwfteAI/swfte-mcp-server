@@ -323,10 +323,10 @@ export class SwfteClient {
   async postMultipart<T = unknown>(
     path: string,
     form: FormData,
-    opts: { query?: RequestOptions['query']; timeoutMs?: number } = {}
+    opts: { query?: RequestOptions['query']; timeoutMs?: number; workspaceId?: string } = {}
   ): Promise<T> {
     const url = this.buildUrl(path, opts.query);
-    const headers = this.buildHeaders({ method: 'POST', path });
+    const headers = this.buildHeaders({ method: 'POST', path, workspaceId: opts.workspaceId });
     delete headers['Content-Type'];
 
     const controller = new AbortController();
