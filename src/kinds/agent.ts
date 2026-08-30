@@ -172,10 +172,20 @@ export const agentAdapter: KindAdapter = {
   },
 
   async create(client, artifact) {
+    // The endpoint binds `CreateAgentRequest { generatedAgent, attachStrictChatflow }`
+    // and dereferences `generatedAgent.getAgentName()` before any null check, so a
+    // bare agent body lands as an unhandled NPE — a 500 that reads like a platform
+    // outage rather than the shape error it is. Wrap it, unless the caller already
+    // passed the envelope.
+    const enveloped =
+      artifact && typeof artifact === 'object' && 'generatedAgent' in artifact
+        ? artifact
+        : { generatedAgent: artifact };
+
     const body = await client.request<any>({
       method: 'POST',
       path: `${WIZARD}/create`,
-      body: artifact,
+      body: enveloped,
       expectStatuses: [200, 201],
       retries: 0,
       timeoutMs: 90_000,

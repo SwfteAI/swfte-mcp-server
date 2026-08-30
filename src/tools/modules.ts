@@ -69,4 +69,36 @@ export const moduleTools: ToolDefinition[] = [
         workspaceId: input.workspaceId,
       }),
   },
+  {
+    name: 'swfte_modules_delete',
+    title: 'Delete module',
+    description:
+      'Permanently delete a knowledge module and its attached resources. Irreversible — there is ' +
+      'no undelete and no trash. Workspaces have a per-tier module cap, so this is also the only ' +
+      'way to free a slot when creation fails with "at module cap". Confirm the id with ' +
+      'swfte_modules_list first: ids are opaque and a mistaken delete cannot be undone.',
+    inputSchema: Workspace.extend({
+      moduleId: z.string(),
+      confirm: z
+        .boolean()
+        .describe('Must be true. Stops an unattended loop from destroying a workspace record.'),
+    }),
+    execute: async (input, { client }) => {
+      if (!input.confirm) {
+        return {
+          deleted: false,
+          reason: 'CONFIRMATION_REQUIRED',
+          nextAction: 'Re-call with confirm:true once the module id has been verified.',
+        };
+      }
+      await client.request({
+        method: 'DELETE',
+        path: `/v2/modules/${encodeURIComponent(input.moduleId)}`,
+        workspaceId: input.workspaceId,
+        expectStatuses: [200, 202, 204],
+        retries: 0,
+      });
+      return { deleted: true, moduleId: input.moduleId };
+    },
+  },
 ];
