@@ -128,11 +128,22 @@ export const widgetAdapter: KindAdapter = {
     }
 
     // A widget with no backing brain renders but answers nothing.
-    const binding = widget?.binding ?? widget?.attach ?? widget?.chatflowId ?? widget?.agentId;
+    //
+    // `brain` ({kind, id}) is the canonical reference the runtime resolves —
+    // WidgetControllerV1 reads it first and only falls back to the deprecated
+    // top-level `agentId` when it is null. Checking `binding`/`attach`/
+    // `chatflowId` instead, as this did, reads fields the v2 record does not
+    // have: every correctly bound CHATFLOW widget reported "no backing brain".
+    // A false "this is broken" is the expensive kind of wrong, because it sends
+    // someone to rebuild an artifact that was already right.
+    const brain = widget?.brain?.id ? widget.brain : null;
+    const binding = brain ?? widget?.agentId ?? widget?.binding ?? widget?.attach ?? widget?.chatflowId;
     checks.push({
       id: 'bound',
       ok: Boolean(binding),
-      detail: binding ? `Bound to ${JSON.stringify(binding).slice(0, 120)}` : 'No backing agent/chatflow/workflow — the widget has nothing to answer with',
+      detail: binding
+        ? `Bound to ${brain ? `${brain.kind ?? 'UNKNOWN'} ${brain.id}` : JSON.stringify(binding).slice(0, 120)}`
+        : 'No backing agent/chatflow/workflow — the widget has nothing to answer with',
     });
     if (!binding) nextActions.push('Rebuild the widget with an attach target, or bind it to an existing agent/chatflow.');
 

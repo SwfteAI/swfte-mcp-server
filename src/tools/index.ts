@@ -4,6 +4,7 @@ import type { ToolDefinition, ToolGroup } from './_types.js';
 import { whoamiTools } from './whoami.js';
 import { shipTools } from './ship.js';
 import { verifyTools } from './verify.js';
+import { solutionTools } from './solution.js';
 import { codeTools } from './code.js';
 
 // Domain tools.
@@ -37,6 +38,7 @@ export const allTools: ToolDefinition[] = [
   ...whoamiTools,
   ...shipTools,
   ...verifyTools,
+  ...solutionTools,
 
   ...tag('agents', agentTools),
   ...tag('chatflows', chatFlowTools),
