@@ -19,6 +19,7 @@ import { ragTools } from './rag.js';
 import { mcpTools } from './mcp.js';
 import { moduleTools } from './modules.js';
 import { marketplaceTools } from './marketplace.js';
+import { solutionPublishTools } from './solution-publish.js';
 import { voiceTools } from './voice.js';
 import { auditTools } from './audit.js';
 import { costControlTools } from './cost-control.js';
@@ -53,6 +54,7 @@ export const allTools: ToolDefinition[] = [
   ...tag('mcp', mcpTools),
   ...tag('modules', moduleTools),
   ...tag('marketplace', marketplaceTools),
+  ...tag('marketplace', solutionPublishTools),
   ...tag('voice', voiceTools),
   ...tag('audit', auditTools),
   ...tag('cost', costControlTools),
