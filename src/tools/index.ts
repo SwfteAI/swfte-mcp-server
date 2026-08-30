@@ -5,6 +5,7 @@ import { whoamiTools } from './whoami.js';
 import { shipTools } from './ship.js';
 import { verifyTools } from './verify.js';
 import { solutionTools } from './solution.js';
+import { orchestrateTools } from './orchestrate.js';
 import { codeTools } from './code.js';
 
 // Domain tools.
@@ -39,6 +40,7 @@ export const allTools: ToolDefinition[] = [
   ...shipTools,
   ...verifyTools,
   ...solutionTools,
+  ...orchestrateTools,
 
   ...tag('agents', agentTools),
   ...tag('chatflows', chatFlowTools),

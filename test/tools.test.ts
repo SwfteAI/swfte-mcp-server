@@ -166,8 +166,18 @@ describe('advertised surface', () => {
     // Worth the slots: without them a deployed workflow can be reported as
     // shipped but never as working. Raise this again only for something that
     // earns it the same way — the number exists to make the trade visible.
+    //
+    // 85 -> 90 for the four solution-orchestration tools. They earn it the same
+    // way: without them a multi-artifact build can be reported as delivered
+    // while none of its components reference each other. swfte_solution_build
+    // orders and wires a whole solution; swfte_solution_wire writes one
+    // reference into the field the runtime reads; swfte_knowledge_build proves
+    // a dataset retrieves rather than trusting its COMPLETED status;
+    // swfte_agent_ground carries the dataset -> module -> knowledgeModuleIds
+    // hop that is silent at every step when it is skipped. All four are `core`,
+    // so they cannot be group-filtered out of the count either.
     const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x' } as never));
-    assert.ok(selected.length < 85, `default surface is ${selected.length} tools`);
+    assert.ok(selected.length < 90, `default surface is ${selected.length} tools`);
     assert.ok(selected.length > 40, `default surface is only ${selected.length} tools`);
   });
 
