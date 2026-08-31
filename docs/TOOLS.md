@@ -25,9 +25,36 @@ same eleven tools cover every artifact type.
 | `swfte_create` | Persist. A `422` returns structured findings, not an opaque error. |
 | `swfte_refine` | Iterate with plain-language feedback. |
 | `swfte_run` | Execute to terminal, with per-node traces. |
-| `swfte_deploy` | Preview / deploy / teardown. **Previews by default.** |
+| `swfte_deploy` | Preview / deploy / teardown. **Previews by default**, and gated on preflight for workflows. |
 | `swfte_verify` | Kind-appropriate assertion sweep — "does this actually work?" |
 | `swfte_verify_batch` | The same, over up to 25 artifacts. |
+| `swfte_preflight` | 28 rules over a whole solution, each a way the platform reports success while doing nothing. Read-only. |
+| `swfte_preflight_manifest` | Derive preflight's input from an id registry, a spec, or seed ids. |
+| `swfte_publish` | `POST /v2/workflows/{id}/publish`, refused unless preflight passes. |
+
+### What `swfte_preflight` checks, and why it is separate
+
+`swfte_verify` asks whether one artifact is sound. `swfte_solution_verify` asks
+whether a set of artifacts forms the solution it claims to be. Preflight asks
+the third question neither can: whether this solution has walked into one of the
+platform's known silent-failure modes — a `{{node.field}}` reference to a code
+node that files that field under `.result`; `rows` handed in as an object so
+templates never resolve; a `DATA_TABLE` filter carrying `{{…}}` the executor
+never resolves; a templated table name that get-or-creates a brand-new empty
+table; an execution header that disagrees with its own traces; an output over
+the size guard that empties the variable pool downstream; a dataset reporting
+`COMPLETED` over zero segments; an `AGENTIC` agent whose only knowledge
+retrieves nothing, so it answers with an empty string.
+
+None of these fail a structural check. All of them ship.
+
+Every rule has been shown to fail under a deliberate mutation
+(`npm run preflight:mutation`, currently `28 rules · 73/73 · 0 broken`). A rule
+no mutation can kill is reported BROKEN there rather than counted as passing.
+
+A rule that cannot run reports **skip**, and a skip is never a pass. See
+[PUBLISH-GATE.md](./PUBLISH-GATE.md) for the gate, its three verdicts, and the
+two overrides.
 
 ### What `swfte_verify` checks
 
