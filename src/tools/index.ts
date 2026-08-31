@@ -4,6 +4,7 @@ import type { ToolDefinition, ToolGroup } from './_types.js';
 import { whoamiTools } from './whoami.js';
 import { shipTools } from './ship.js';
 import { verifyTools } from './verify.js';
+import { preflightTools } from './preflight.js';
 import { solutionTools } from './solution.js';
 import { orchestrateTools } from './orchestrate.js';
 import { codeTools } from './code.js';
@@ -40,6 +41,7 @@ export const allTools: ToolDefinition[] = [
   ...whoamiTools,
   ...shipTools,
   ...verifyTools,
+  ...preflightTools,
   ...solutionTools,
   ...orchestrateTools,
 

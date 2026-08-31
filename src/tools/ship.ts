@@ -10,6 +10,8 @@ import {
   type KindAdapter,
 } from '../kinds/index.js';
 import { requiredConnections } from '../connections.js';
+import { gate } from '../preflight.js';
+import { deriveFromLive } from '../preflight/derive.mjs';
 import type { ToolDefinition } from './_types.js';
 
 /**
@@ -368,6 +370,12 @@ export const shipTools: ToolDefinition[] = [
       lifecycle: z.enum(['ON_DEMAND', 'ALWAYS_ON']).optional(),
       secretId: z.string().optional(),
       timeoutMs: z.number().int().min(10_000).optional(),
+      skipPreflight: z
+        .boolean()
+        .optional()
+        .describe('Provision without the preflight gate. Produces no evidence that the artifact does what it reports doing.'),
+      force: z.boolean().optional().describe('Provision despite a blocking or inconclusive preflight. The override is recorded.'),
+      forceReason: z.string().optional().describe('Why the override is justified. Recorded verbatim.'),
     }),
     execute: async (input, { client, config }) => {
       const action = input.action ?? 'preview';
@@ -425,6 +433,31 @@ export const shipTools: ToolDefinition[] = [
             'This MCP server is configured preview-only. Set SWFTE_ALLOW_DEPLOY=1 in its environment ' +
             'to permit provisioning, then retry.',
         };
+      }
+
+      // The same gate publishing uses. Deploying a workflow whose templates all
+      // resolve to the empty string provisions capacity to run nothing, at cost,
+      // and every node still reports COMPLETED — so the deployment looks healthy
+      // in exactly the way this rule set exists to disprove. Only workflows have
+      // a rule set today; other kinds skip and say so rather than pretending.
+      if (input.kind === 'workflow' && !input.skipPreflight) {
+        const manifest = await deriveFromLive([['workflow', input.id]]);
+        const verdict = await gate(client, manifest as never, {
+          force: input.force,
+          forceReason: input.forceReason,
+        });
+        if (!verdict.allowed) {
+          return {
+            dryRun: true,
+            refused: true,
+            reason: `PREFLIGHT_${verdict.verdict}`,
+            message: verdict.reason,
+            blocking: verdict.blocking,
+            nextActions: verdict.nextActions,
+            skippedRules: verdict.report?.skipped ?? [],
+            note: 'Nothing was provisioned. Fix the findings, or pass force:true with forceReason.',
+          };
+        }
       }
 
       const adapter = requireVerb(input.kind, 'deploy');

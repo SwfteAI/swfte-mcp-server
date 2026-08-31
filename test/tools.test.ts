@@ -176,8 +176,18 @@ describe('advertised surface', () => {
     // swfte_agent_ground carries the dataset -> module -> knowledgeModuleIds
     // hop that is silent at every step when it is skipped. All four are `core`,
     // so they cannot be group-filtered out of the count either.
+    //
+    // 90 -> 93 for preflight. swfte_preflight runs the 28-rule sweep over the
+    // platform's known silent-failure modes — the ways an artifact reports
+    // COMPLETED while resolving every template to the empty string, which no
+    // structural check sees. swfte_preflight_manifest derives its input, so a
+    // solution stops hand-maintaining a parallel description of itself.
+    // swfte_publish is the gate: publish is the promotion boundary, and the
+    // last place a defect is still cheap. All three are `core` for the same
+    // reason the solution tools are — a gate anyone can group-filter away is
+    // not a gate.
     const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x' } as never));
-    assert.ok(selected.length < 90, `default surface is ${selected.length} tools`);
+    assert.ok(selected.length < 93, `default surface is ${selected.length} tools`);
     assert.ok(selected.length > 40, `default surface is only ${selected.length} tools`);
   });
 
