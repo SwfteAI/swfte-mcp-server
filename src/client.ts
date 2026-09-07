@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ServerConfig } from './config.js';
 
 export interface RequestOptions {
@@ -10,7 +11,7 @@ export interface RequestOptions {
   /** Per-request timeout. Defaults to 60s; wizard/exec polls override it. */
   timeoutMs?: number;
   /**
-   * Retry budget for *transient* failures (network, 429, 5xx). Defaults to 2.
+   * Retry budget for *transient* failures (network, 429, 5xx). GET defaults to 2; mutations to 0.
    * Set 0 for non-idempotent calls where a duplicate would be harmful.
    */
   retries?: number;
@@ -114,7 +115,22 @@ function defaultExtract(page: any): unknown[] {
   return page?.content ?? page?.items ?? page?.data ?? page?.agents ?? page?.workflows ?? [];
 }
 
+export class OperationDeadlineError extends Error {
+  constructor() { super('Operation time budget exhausted; an in-flight mutation may have committed. Inspect returned IDs before retrying.'); }
+}
+
 export class SwfteClient {
+  private readonly operationDeadline = new AsyncLocalStorage<number>();
+  withDeadline<T>(deadline: number, action: () => Promise<T>): Promise<T> {
+    return this.operationDeadline.run(Math.min(deadline, this.operationDeadline.getStore() ?? Infinity), action);
+  }
+  remainingMs(): number { return (this.operationDeadline.getStore() ?? Infinity) - Date.now(); }
+  assertDeadline(): void { if (this.remainingMs() <= 0) throw new OperationDeadlineError(); }
+  private requestBudget(timeoutMs: number): number {
+    this.assertDeadline();
+    return Math.max(1, Math.min(timeoutMs, this.remainingMs()));
+  }
+
   constructor(private readonly config: ServerConfig) {}
 
   get baseUrl(): string {
@@ -130,13 +146,15 @@ export class SwfteClient {
   }
 
   async request<T = unknown>(opts: RequestOptions): Promise<T> {
-    const retries = opts.retries ?? 2;
+    const retries = opts.retries ?? (opts.method === 'GET' ? 2 : 0);
     let lastError: unknown;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         return await this.requestOnce<T>(opts);
       } catch (err) {
+        this.assertDeadline();
+        if (err instanceof OperationDeadlineError) throw err;
         lastError = err;
 
         const retryable =
@@ -149,7 +167,7 @@ export class SwfteClient {
 
         // Linear-ish backoff. These are seconds-scale platform hiccups, not
         // contention we need to exponentially back away from.
-        await sleep(1_500 * (attempt + 1));
+        await sleep(Math.min(1_500 * (attempt + 1), Math.max(0, this.remainingMs())));
       }
     }
 
@@ -171,7 +189,7 @@ export class SwfteClient {
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 60_000);
+    const timer = setTimeout(() => controller.abort(), this.requestBudget(opts.timeoutMs ?? 60_000));
 
     let res: Response;
     let text: string;
@@ -286,30 +304,24 @@ export class SwfteClient {
     const headers = this.buildHeaders({ method: 'GET', path });
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 180_000);
-    let res: Response;
+    const timer = setTimeout(() => controller.abort(), this.requestBudget(opts.timeoutMs ?? 180_000));
     try {
-      res = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+      const res = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+      if (!res.ok) {
+        const text = await res.text();
+        throw this.toApiError(res, text, { method: 'GET', path });
+      }
+      const out: Record<string, string> = {};
+      res.headers.forEach((v, k) => { out[k.toLowerCase()] = v; });
+      return {
+        bytes: new Uint8Array(await res.arrayBuffer()),
+        headers: out,
+        contentType: res.headers.get('content-type') ?? '',
+      };
     } finally {
+      // Keep the deadline active until the streamed response body is consumed.
       clearTimeout(timer);
     }
-
-    if (!res.ok) {
-      // Error bodies are still JSON even when the success path is binary.
-      const text = await res.text();
-      throw this.toApiError(res, text, { method: 'GET', path });
-    }
-
-    const out: Record<string, string> = {};
-    res.headers.forEach((v, k) => {
-      out[k.toLowerCase()] = v;
-    });
-
-    return {
-      bytes: new Uint8Array(await res.arrayBuffer()),
-      headers: out,
-      contentType: res.headers.get('content-type') ?? '',
-    };
   }
 
   /**
@@ -330,7 +342,7 @@ export class SwfteClient {
     delete headers['Content-Type'];
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 180_000);
+    const timer = setTimeout(() => controller.abort(), this.requestBudget(opts.timeoutMs ?? 180_000));
     let res: Response;
     let text: string;
     try {
@@ -422,14 +434,15 @@ export class SwfteClient {
   ): Promise<{ snapshot: T; timedOut: boolean; elapsedMs: number; polls: number }> {
     const intervalMs = opts.intervalMs ?? 2_000;
     const started = Date.now();
-    const deadline = started + opts.timeoutMs;
+    const deadline = Math.min(started + opts.timeoutMs, this.operationDeadline.getStore() ?? Infinity);
 
     let snapshot = await fn();
     let polls = 1;
     opts.onTick?.(snapshot);
 
     while (!done(snapshot) && Date.now() < deadline) {
-      await sleep(intervalMs);
+      await sleep(Math.min(intervalMs, Math.max(0, deadline - Date.now())));
+      if (Date.now() >= deadline) break;
       try {
         snapshot = await fn();
         polls += 1;

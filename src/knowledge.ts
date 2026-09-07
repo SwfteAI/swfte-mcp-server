@@ -168,7 +168,7 @@ async function probe(
   };
 }
 
-export async function buildKnowledge(client: SwfteClient, input: BuildKnowledgeInput): Promise<BuildKnowledgeReport> {
+export async function buildKnowledge(client: SwfteClient, input: BuildKnowledgeInput, onCreated?: (datasetId: string) => void): Promise<BuildKnowledgeReport> {
   const checks: VerifyCheck[] = [];
   const nextActions: string[] = [];
   const waitMs = input.waitMs ?? 180_000;
@@ -193,6 +193,7 @@ export async function buildKnowledge(client: SwfteClient, input: BuildKnowledgeI
   if (!datasetId) {
     throw new Error(`Dataset create returned no id: ${JSON.stringify(created).slice(0, 300)}`);
   }
+  onCreated?.(datasetId);
   checks.push({ id: 'dataset-created', ok: true, detail: `${DATASETS}/${datasetId} ("${input.name}")` });
 
   // 2 — upload and attach, one document per call.
@@ -251,7 +252,7 @@ export async function buildKnowledge(client: SwfteClient, input: BuildKnowledgeI
     const pending = rows.filter((r) => !TERMINAL.has(String(r?.indexingStatus ?? '').toUpperCase()));
     if (rows.length >= attached.length && pending.length === 0) break;
     if (Date.now() >= deadline) break;
-    await sleep(3_000);
+    await sleep(Math.min(3_000, Math.max(0, client.remainingMs())));
   }
 
   // 4 — judge each document on segments, not on status.

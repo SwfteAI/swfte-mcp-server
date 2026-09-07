@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 /**
  * Standalone REST client for the Swfte platform.
  *
@@ -6,7 +8,7 @@
  * must not reach outside itself. Read-only by construction — the only verb
  * exported is GET.
  *
- * PACKAGED COPY. One thing is added over the engagement original: `setTransport`,
+ * PACKAGED COPY. One thing is added over the engagement original: `withTransport`,
  * so the MCP server can hand in its own already-authenticated GET instead of
  * this file re-deriving credentials from the environment. It is additive and
  * opt-in — with no transport set, the env-driven path below is byte-for-byte
@@ -30,27 +32,21 @@ function pat() {
  * Still funnelled through the same serialising `chain` below, because the
  * concurrency limit is a property of the platform, not of this transport.
  */
-let transport = null;
+const transportContext = new AsyncLocalStorage();
 
-/** Hand in an already-authenticated GET. Pass null to go back to env + fetch. */
-export function setTransport(fn) {
-  transport = typeof fn === 'function' ? fn : null;
+/** Scope credentials and the request queue to this invocation, including concurrent hosted calls. */
+export function withTransport(fn, action) {
+  return transportContext.run({ transport: fn, chain: Promise.resolve() }, action);
 }
 
-/**
- * One request at a time. The platform returns "fetch failed" under concurrency,
- * so a preflight that fanned out would report a healthy solution as broken.
- * Serialising is slower and is the only honest option.
- */
-let chain = Promise.resolve();
+// Standalone CLI requests share one queue. Hosted invocations each get their own.
+const standalone = { transport: null, chain: Promise.resolve() };
 
 export function get(path, opts = {}) {
-  const run = () => (transport ? transport(path, opts) : rawGet(path, opts));
-  const next = chain.then(run, run);
-  chain = next.then(
-    () => undefined,
-    () => undefined
-  );
+  const scope = transportContext.getStore() ?? standalone;
+  const run = () => (scope.transport ? scope.transport(path, opts) : rawGet(path, opts));
+  const next = scope.chain.then(run, run);
+  scope.chain = next.then(() => undefined, () => undefined);
   return next;
 }
 

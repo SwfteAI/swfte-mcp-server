@@ -10,7 +10,7 @@ import {
   type KindAdapter,
 } from '../kinds/index.js';
 import { requiredConnections } from '../connections.js';
-import { gate } from '../preflight.js';
+import { gate, withClientTransport } from '../preflight.js';
 import { deriveFromLive } from '../preflight/derive.mjs';
 import type { ToolDefinition } from './_types.js';
 
@@ -441,7 +441,7 @@ export const shipTools: ToolDefinition[] = [
       // in exactly the way this rule set exists to disprove. Only workflows have
       // a rule set today; other kinds skip and say so rather than pretending.
       if (input.kind === 'workflow' && !input.skipPreflight) {
-        const manifest = await deriveFromLive([['workflow', input.id]]);
+        const manifest = await withClientTransport(client, () => deriveFromLive([['workflow', input.id]]));
         const verdict = await gate(client, manifest as never, {
           force: input.force,
           forceReason: input.forceReason,

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { orchestrateSolution, type SolutionPlan } from '../orchestrator.js';
+import { orchestrateSolution, MAX_ORCHESTRATION_MS, type SolutionPlan } from '../orchestrator.js';
 import { buildKnowledge } from '../knowledge.js';
 import { checkGroundingIsUsable, moduleForDataset, writeWire, type SolutionKindLike } from '../wiring.js';
 import { RELATIONS } from '../solution.js';
@@ -43,7 +43,7 @@ const KnowledgeSchema = z.object({
   indexingTechnique: z.enum(['HIGH_QUALITY', 'ECONOMY']).optional(),
   permission: z.string().optional(),
   probeQuery: z.string().optional().describe('Query used for the retrieval probe. Defaults to the description.'),
-  waitMs: z.number().int().min(10_000).optional(),
+  waitMs: z.number().int().min(10_000).max(MAX_ORCHESTRATION_MS).optional(),
 });
 
 const ComponentSchema = z.object({
@@ -100,13 +100,15 @@ export const orchestrateTools: ToolDefinition[] = [
         wiring: z.array(WireSchema).max(200).optional(),
       }),
       dryRun: z.boolean().optional().describe('Plan and report without creating or writing anything.'),
-      waitMs: z.number().int().min(30_000).optional().describe('Per-component build budget. Default 600000.'),
+      waitMs: z.number().int().min(30_000).max(MAX_ORCHESTRATION_MS).optional().describe('Per-component build budget, capped by the total budget. Default 600000.'),
+      totalWaitMs: z.number().int().min(30_000).max(MAX_ORCHESTRATION_MS).optional().describe('Total operation budget across builds, wiring and verification. Default and maximum 600000.'),
       includeComponentVerify: z.boolean().optional().describe('Also run each component\'s own sweep in the review pass.'),
     }),
     execute: async (input, { client }) =>
       orchestrateSolution(client, input.plan as SolutionPlan, {
         dryRun: input.dryRun,
         waitMs: input.waitMs,
+        totalWaitMs: input.totalWaitMs,
         includeComponentVerify: input.includeComponentVerify,
       }),
   },

@@ -3,18 +3,11 @@
  * Route probe — validates every endpoint path this server uses, without needing
  * a credential.
  *
- * Sends a deliberately invalid PAT to each path. The auth filter rejects it
- * before the request reaches a controller, so nothing is created or mutated,
- * but the STATUS CODE still tells us whether the route exists:
- *
- *   401 / 403  → route exists and is gated. The path is correct.
- *   404        → NO SUCH ROUTE. A path in this server is wrong.
- *   405        → route exists, wrong method for the probe (fine — we probe with GET).
- *   5xx / net  → backend or connectivity problem, not a path problem.
- *
- * This catches the failure mode that matters most when endpoints were derived by
- * reading controllers rather than by calling them: a typo'd or hallucinated path
- * that would only surface at the worst moment.
+ * Sends an invalid PAT. Authentication can reject BEFORE routing, so a 401/403
+ * proves neither route existence nor method compatibility. Such responses are
+ * inconclusive and make this check exit nonzero. A 404 can also describe an
+ * absent entity, so it is reported as unresolved rather than proof of a bad route.
+ * Use authenticated method-and-payload contract tests for release evidence.
  *
  *   npx tsx scripts/probe-paths.ts
  *   npx tsx scripts/probe-paths.ts --base http://localhost:8080
@@ -166,7 +159,7 @@ async function probe(p: Probe): Promise<Result> {
     });
 
     const verdict: Result['verdict'] =
-      res.status === 401 || res.status === 403 || res.status === 405
+      res.status === 405
         ? 'ok'
         : res.status === 404
           ? 'missing'
@@ -213,18 +206,18 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log(`\n${results.filter((r) => r.verdict === 'ok').length}/${results.length} routes exist and are gated`);
+  console.log(`\n${results.filter((r) => r.verdict === 'ok').length}/${results.length} routes returned method-not-allowed (not payload verification)`);
 
   if (missing.length > 0) {
-    console.log(`\n✗ ${missing.length} route(s) DO NOT EXIST — these are bugs in this server:`);
+    console.log(`\n✗ ${missing.length} route(s) returned 404 — route or entity unresolved:`);
     for (const m of missing) console.log(`  ${m.path}`);
   }
   if (unknown.length > 0) {
-    console.log(`\n? ${unknown.length} inconclusive (backend or network, not a path problem):`);
+    console.log(`\n? ${unknown.length} inconclusive (authentication, backend, network, or routing):`);
     for (const u of unknown) console.log(`  ${u.status} ${u.path}`);
   }
 
-  process.exitCode = missing.length > 0 ? 1 : 0;
+  process.exitCode = missing.length > 0 || unknown.length > 0 ? 1 : 0;
 }
 
 main().catch((err) => {

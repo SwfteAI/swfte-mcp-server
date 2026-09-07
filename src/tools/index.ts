@@ -28,6 +28,8 @@ import { analyticsTools } from './analytics.js';
 import { experimentTools } from './experiments.js';
 import { connectTools } from './connect.js';
 import { deploymentTools } from './deployments.js';
+import { appWizardTools } from './app-wizard.js';
+import { customNodeWizardTools } from './custom-node-wizard.js';
 
 /**
  * Tag a whole module's tools with a group, so `SWFTE_TOOLS` can trim them
@@ -44,6 +46,8 @@ export const allTools: ToolDefinition[] = [
   ...preflightTools,
   ...solutionTools,
   ...orchestrateTools,
+  ...tag('apps', appWizardTools),
+  ...tag('custom-nodes', customNodeWizardTools),
 
   ...tag('agents', agentTools),
   ...tag('chatflows', chatFlowTools),

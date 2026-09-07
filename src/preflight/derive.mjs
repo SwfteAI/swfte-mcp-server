@@ -513,7 +513,8 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Bundlers rewrite import.meta.url to the MCP entry; never run the CLI from that bundle.
+if (process.argv[1]?.endsWith('/derive.mjs') && import.meta.url === `file://${process.argv[1]}`) {
   main().catch((e) => {
     console.error(`derive could not run: ${e.stack ?? e.message}`);
     process.exitCode = 1;

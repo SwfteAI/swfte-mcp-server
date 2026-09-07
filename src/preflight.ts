@@ -20,7 +20,7 @@
  *   finding does. A checker that fails open is a checker that lies.
  */
 import type { SwfteClient } from './client.js';
-import { setTransport } from './preflight/lib/api.mjs';
+import { withTransport } from './preflight/lib/api.mjs';
 import { buildSnapshot, type PreflightManifest, type Snapshot } from './preflight/lib/snapshot.mjs';
 import { RULES, type Finding, type Rule } from './preflight/lib/rules.mjs';
 
@@ -61,9 +61,10 @@ export interface PreflightReport {
  * as broken because it fanned out would be the exact class of lying check this
  * exists to prevent.
  */
-function useClientTransport(client: SwfteClient): void {
-  setTransport(async (path: string, opts?: { timeoutMs?: number }) =>
-    client.request({ method: 'GET', path, timeoutMs: opts?.timeoutMs ?? 120_000, retries: 3 })
+export function withClientTransport<T>(client: SwfteClient, action: () => Promise<T>): Promise<T> {
+  return withTransport(
+    (path, opts) => client.request({ method: 'GET', path, timeoutMs: opts?.timeoutMs ?? 120_000, retries: 3 }),
+    action
   );
 }
 
@@ -90,13 +91,9 @@ export async function preflight(
   manifest: PreflightManifest,
   opts: { executionsPerWorkflow?: number } = {}
 ): Promise<PreflightReport> {
-  useClientTransport(client);
-  let snapshot: Snapshot;
-  try {
-    snapshot = await buildSnapshot(manifest, { executionsPerWorkflow: opts.executionsPerWorkflow ?? 3 });
-  } finally {
-    setTransport(null);
-  }
+  const snapshot = await withClientTransport(client, () =>
+    buildSnapshot(manifest, { executionsPerWorkflow: opts.executionsPerWorkflow ?? 3 })
+  );
 
   const rules = runRules(snapshot);
   const all = rules.flatMap((r) => r.findings);

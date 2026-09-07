@@ -1,0 +1,86 @@
+name: Release on merge
+
+# Merging to master ships a release — when, and only when, package.json's `version` changes.
+# This workflow decides; release.yml does the work, exactly as if an operator had dispatched it
+# with confirm=PUBLISH. The npm-publish-prod and docker-publish-prod environments keep their
+# required reviewers, so the dispatched run still pauses for a human before anything is pushed —
+# that pause is the gate, and this workflow does not weaken it.
+#
+# WHY NOT A TAG. release.yml already triggers on `v*.*.*`, and that stays for operators. But a tag
+# pushed by GITHUB_TOKEN does not trigger workflows (GitHub's recursion guard), so "merge creates
+# the tag, the tag runs the release" cannot work from inside Actions. workflow_dispatch is exempt
+# from that guard, so this dispatches instead.
+#
+# WHY THE VERSION FIELD. This repo's commits are cleanly conventional (28 of 31), so a
+# commit-message-driven tool would work HERE — but its siblings' are not, and one release
+# mechanism across the estate is worth more than the changelog automation. The version field also
+# has a property the parser does not: it cannot skip a release silently.
+#
+# ONE FACT THAT CHANGES THE RISK PROFILE: @swfte/mcp-server has NEVER been published — the npm
+# registry returns 404 for the package (measured 2026-09-05), despite tag v0.1.0 in this repo. The
+# first successful run of this pipeline creates the package on npm. Until then the version-exists
+# guard in decide_version.py is exercising an empty registry, which is fine; it simply means the
+# first release is also the one that claims the name.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - package.json
+
+concurrency:
+  group: release-on-merge
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write # to dispatch release.yml
+
+jobs:
+  decide:
+    name: Is this merge a release?
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Decide
+        id: decide
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          base="$BEFORE"
+          case "$base" in ''|0000000000000000000000000000000000000000) base=HEAD^ ;; esac
+          python3 scripts/decide_version.py \
+            --kind package.json --file package.json \
+            --registry npm:@swfte/mcp-server \
+            --base "$base"
+
+      - name: Publishing must be armed
+        if: steps.decide.outputs.should_release == 'true'
+        env:
+          ARMED: ${{ vars.RELEASE_ON_MERGE }}
+        run: |
+          if [ "$ARMED" != "armed" ]; then
+            echo "::error::Version changed to ${{ steps.decide.outputs.version }} but repository variable RELEASE_ON_MERGE is not 'armed'."
+            echo "::error::Nothing was published. Red on purpose: a version bump that ships nothing is a failure, not a no-op."
+            exit 1
+          fi
+
+      - name: Dispatch release.yml
+        if: steps.decide.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.decide.outputs.version }}
+        run: |
+          body=$(printf '{"ref":"%s","inputs":{"confirm":"PUBLISH"}}' "$GITHUB_REF_NAME")
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/dispatches" \
+            -d "$body"
+          echo "dispatched release.yml for $VERSION on $GITHUB_REF_NAME"
+          echo "### Dispatched release.yml for \`$VERSION\` — it pauses at npm-publish-prod for approval" >> "$GITHUB_STEP_SUMMARY"

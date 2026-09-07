@@ -27,6 +27,8 @@ export type CredentialKind = 'pat' | 'api-key';
  * say, build+analytics can ask for exactly that.
  */
 export const TOOL_GROUPS = [
+  'custom-nodes',
+  'apps', // Hosted AppWizard sessions; opt in explicitly or use all.
   'core', // whoami + the 8 ship tools + verify — the reason this server exists
   'workflows',
   'agents',

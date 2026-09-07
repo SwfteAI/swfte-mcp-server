@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { gate, preflight, type PreflightManifest } from '../preflight.js';
 import { deriveFromLive, deriveFromSpec, seedsFromRegistry, type Seed } from '../preflight/derive.mjs';
-import { setTransport } from '../preflight/lib/api.mjs';
+import { withClientTransport } from '../preflight.js';
 import type { SwfteClient } from '../client.js';
 import type { ToolDefinition } from './_types.js';
 
@@ -78,16 +78,7 @@ async function resolveManifest(
 }
 
 /** Lend the vendored client this server's credential for the duration of one call. */
-async function withTransport<T>(client: SwfteClient, fn: () => Promise<T>): Promise<T> {
-  setTransport(async (path: string, opts?: { timeoutMs?: number }) =>
-    client.request({ method: 'GET', path, timeoutMs: opts?.timeoutMs ?? 120_000, retries: 3 })
-  );
-  try {
-    return await fn();
-  } finally {
-    setTransport(null);
-  }
-}
+const withTransport = withClientTransport;
 
 export const preflightTools: ToolDefinition[] = [
   // -------------------------------------------------------------------------

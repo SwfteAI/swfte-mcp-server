@@ -1,4 +1,4 @@
-import { SwfteApiError } from '../client.js';
+import { SwfteApiError, type SwfteClient } from '../client.js';
 import {
   pickId,
   toFindings,
@@ -23,7 +23,15 @@ const DEPLOYMENTS = '/v2/mcp/deployments';
  * build → status → create shape the tools expect, rather than forcing every
  * caller to special-case this kind.
  */
-const syntheticSessions = new Map<string, BuildSnapshot>();
+const syntheticSessions = new WeakMap<SwfteClient, Map<string, BuildSnapshot>>();
+function sessionsFor(client: SwfteClient): Map<string, BuildSnapshot> {
+  let sessions = syntheticSessions.get(client);
+  if (!sessions) {
+    sessions = new Map();
+    syntheticSessions.set(client, sessions);
+  }
+  return sessions;
+}
 
 let counter = 0;
 const nextSessionId = (): string => `mcpwiz-${Date.now().toString(36)}-${(counter += 1)}`;
@@ -36,7 +44,11 @@ export const mcpServerAdapter: KindAdapter = {
     'Artifacts are versioned in git — see the swfte_mcp_* tools for fork/commit/publish.',
 
   async build(client, input: BuildInput) {
+    const extras = input.options ?? {};
+    const options = (extras.options ?? {}) as Record<string, unknown>;
+    if (extras.autoDeploy || options.autoDeploy) throw new Error('Build cannot auto-deploy. Use swfte_deploy with its deployment controls.');
     const sessionId = nextSessionId();
+    const sessions = sessionsFor(client);
 
     const body = await client.request<any>({
       method: 'POST',
@@ -51,9 +63,9 @@ export const mcpServerAdapter: KindAdapter = {
       timeoutMs: 300_000,
     });
 
-    syntheticSessions.set(sessionId, {
+    sessions.set(sessionId, {
       sessionId,
-      status: body?.status ?? 'COMPLETED',
+      status: body?.status ?? 'UNKNOWN',
       message: body?.message ?? null,
       progress: 100,
       done: true,
@@ -66,16 +78,16 @@ export const mcpServerAdapter: KindAdapter = {
     });
 
     // Bounded: this map only exists to bridge sync → poll within one session.
-    if (syntheticSessions.size > 32) {
-      const oldest = syntheticSessions.keys().next().value;
-      if (oldest) syntheticSessions.delete(oldest);
+    if (sessions.size > 32) {
+      const oldest = sessions.keys().next().value;
+      if (oldest) sessions.delete(oldest);
     }
 
     return { sessionId };
   },
 
-  async status(_client, sessionId): Promise<BuildSnapshot> {
-    const snap = syntheticSessions.get(sessionId);
+  async status(client, sessionId): Promise<BuildSnapshot> {
+    const snap = sessionsFor(client).get(sessionId);
     if (!snap) {
       throw new Error(
         `No MCP wizard session "${sessionId}" in this process. ` +
@@ -87,12 +99,12 @@ export const mcpServerAdapter: KindAdapter = {
 
   extractArtifact(snapshot) {
     const fr = snapshot.finalResponse as any;
-    return fr?.artifact ?? fr?.server ?? fr;
+    return fr?.generatedServer ?? fr?.artifact ?? fr?.server ?? fr;
   },
 
   extractId(snapshot) {
     const fr = snapshot.finalResponse as any;
-    return pickId(fr?.artifact) ?? pickId(fr);
+    return fr?.savedArtifactId ?? pickId(fr?.artifact) ?? pickId(fr);
   },
 
   async steer(client, sessionId, instruction) {
@@ -122,19 +134,32 @@ export const mcpServerAdapter: KindAdapter = {
   },
 
   async deploy(client, id, _opts: DeployOpts): Promise<DeployResult> {
+    const artifact = await client.request<any>({
+      method: 'GET', path: `${WIZARD}/artifacts/${encodeURIComponent(id)}`,
+    });
+    if (!artifact || !artifact.name) throw new Error('Cannot deploy: the saved MCP artifact has no server definition.');
+    const server = {
+      ...artifact,
+      configuration: artifact.configuration ?? {
+        transport: artifact.transport ?? 'stdio',
+        port: artifact.port,
+        environment: artifact.environment,
+        requiredSecrets: artifact.requiredSecrets,
+      },
+    };
     const body = await client.request<any>({
       method: 'POST',
       path: `${WIZARD}/deploy`,
-      body: { artifactId: id },
+      body: { server },
       expectStatuses: [200, 201, 202],
       retries: 0,
       timeoutMs: 300_000,
     });
     return {
-      deploymentId: body?.deploymentId ?? body?.id,
-      phase: String(body?.status ?? 'DEPLOYED'),
-      url: body?.url ?? body?.endpoint,
-      endpoint: body?.endpoint ?? body?.url,
+      deploymentId: body?.deployment?.id ?? body?.deploymentId,
+      phase: String(body?.deployment?.state ?? body?.status ?? 'UNKNOWN'),
+      url: body?.deployment?.endpoint ?? body?.url,
+      endpoint: body?.deployment?.endpoint ?? body?.endpoint,
       raw: body,
     };
   },

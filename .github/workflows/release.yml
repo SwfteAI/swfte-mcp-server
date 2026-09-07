@@ -66,8 +66,20 @@ jobs:
       - name: Resolve version
         id: meta
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
+          # On a tag push the ref names the version. On workflow_dispatch (an operator, or
+          # release-on-merge.yml) GITHUB_REF is refs/heads/master, and the old expression yielded
+          # VERSION="refs/heads/master" — an invalid Docker tag, so the manual path was broken
+          # after the npm publish had already happened. package.json is the source of truth on
+          # every path; the tag, when present, must agree with it.
+          VERSION=$(node -p "require('./package.json').version")
+          case "$GITHUB_REF" in
+            refs/tags/*)
+              TAG="${GITHUB_REF#refs/tags/}"
+              if [ "${TAG#v}" != "$VERSION" ]; then
+                echo "::error::tag $TAG does not match package.json version $VERSION"; exit 1
+              fi ;;
+            *) TAG="v$VERSION" ;;
+          esac
           echo "tag=$TAG"        >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
