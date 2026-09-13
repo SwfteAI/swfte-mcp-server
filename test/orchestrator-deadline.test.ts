@@ -97,20 +97,37 @@ test('operation deadline also bounds a binary response body after headers arrive
   } finally { globalThis.fetch = original; }
 });
 
+// The component budget is 30ms of *simulated* time, advanced by the stub rather
+// than by the wall clock. Under real time this test raced: the component
+// deadline is fixed at `Date.now() + waitMs` before the build starts, so if the
+// machine stalled for 30ms anywhere in the generate call — another process
+// starting, a GC pause — `remainingMs()` hit zero and the client refused to
+// issue the status request at all, giving 1 call instead of 2. Stubbing the
+// clock, as the tests above and below this one already do, makes the budget
+// arithmetic exact and never reaches a real timer.
 test('component budget stops pending generation even with total time left', async () => {
-  const original = globalThis.fetch; let calls = 0;
+  const originalFetch = globalThis.fetch, originalNow = Date.now;
+  let now = 1000, calls = 0;
+  Date.now = () => now;
   globalThis.fetch = async (url) => {
     calls++;
-    return String(url).endsWith('/generate/async')
-      ? Response.json({ sessionId: 'still-running' })
-      : Response.json({ done: false, status: 'GENERATING' });
+    if (String(url).endsWith('/generate/async')) {
+      // Cheap: the component still has budget left, so the status poll is due.
+      now += 5;
+      return Response.json({ sessionId: 'still-running' });
+    }
+    // The one poll we allow overruns the 30ms component budget, so the loop
+    // exits after it rather than sleeping for another interval.
+    now += 40;
+    return Response.json({ done: false, status: 'GENERATING' });
   };
   try {
     const report = await orchestrateSolution(client(), plan, { waitMs: 30, totalWaitMs: 1000 });
     assert.equal(report.status, 'PARTIAL'); assert.equal(report.components[0].sessionId, 'still-running');
-    assert.equal(report.components[0].state, 'pending'); assert.equal(calls, 2);
+    assert.equal(report.components[0].state, 'pending');
+    assert.equal(calls, 2, 'exactly one generate plus one status poll');
     assert.equal(report.components[1].state, 'skipped');
-  } finally { globalThis.fetch = original; }
+  } finally { globalThis.fetch = originalFetch; Date.now = originalNow; }
 });
 
 test('unexpected verifier exception cannot report READY and retains adopted IDs', async () => {
