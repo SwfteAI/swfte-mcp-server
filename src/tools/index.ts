@@ -1,6 +1,7 @@
 import type { ToolDefinition, ToolGroup } from './_types.js';
 
 // Task-shaped tools — the reason this server exists.
+import { guidanceTools } from './guidance.js';
 import { whoamiTools } from './whoami.js';
 import { shipTools } from './ship.js';
 import { verifyTools } from './verify.js';
@@ -10,6 +11,7 @@ import { orchestrateTools } from './orchestrate.js';
 import { codeTools } from './code.js';
 
 // Domain tools.
+import { widgetTools } from './widgets.js';
 import { agentTools } from './agents.js';
 import { chatFlowTools } from './chatflows.js';
 import { workflowTools } from './workflows.js';
@@ -40,6 +42,7 @@ const tag = (group: ToolGroup, tools: ToolDefinition[]): ToolDefinition[] =>
   tools.map((t) => ({ ...t, group: t.group ?? group }));
 
 export const allTools: ToolDefinition[] = [
+  ...guidanceTools(() => allTools),
   ...whoamiTools,
   ...shipTools,
   ...verifyTools,
@@ -49,6 +52,7 @@ export const allTools: ToolDefinition[] = [
   ...tag('apps', appWizardTools),
   ...tag('custom-nodes', customNodeWizardTools),
 
+  ...tag('widgets', widgetTools),
   ...tag('agents', agentTools),
   ...tag('chatflows', chatFlowTools),
   ...tag('workflows', workflowTools),

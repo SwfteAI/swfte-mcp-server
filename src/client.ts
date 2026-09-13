@@ -90,8 +90,12 @@ const SUGGESTED_ACTIONS: Record<string, string> = {
     'Upgrade in Studio → Billing, then retry.',
   QUOTA_EXCEEDED: 'Workspace quota reached. Raise the cap in Studio → Billing or wait for the period to roll over.',
   WORKFLOW_NOT_PUBLISHED:
-    'Publish the workflow first (swfte_run does this automatically via the draft test path).',
+    'Publish a version to exercise released behavior. swfte_run can fall back to a draft test path, which may mock nodes and is not proof of published execution.',
   VALIDATION_FAILED: 'Fix the reported validation errors with swfte_refine, then retry swfte_create.',
+  HTTP_403: 'Access was rejected. Verify workspace permissions and the documented endpoint/method; retain the response and inspect existing artifacts before retrying a mutation. Unexpected HTML does not establish whether policy, routing or payload caused rejection.',
+  HTTP_405: 'This endpoint does not accept the request method. Consult swfte_capabilities and the current supported update tool; do not repeat the same mutation or assume a different method is safe without its documented contract.',
+  HTTP_409: 'State or version conflict. Read current state and reconcile the intended update before retrying; do not overwrite concurrent changes.',
+  HTTP_429: 'Rate limited. Honor server retry timing and inspect execution/build status before repeating a metered mutation.',
   pat_invalid: 'The personal access token is invalid, expired, or revoked. Mint a new one in Studio → Modules → any module → Documents → Connect CLI.',
   pat_missing: 'No credential reached the server. Check SWFTE_PAT is set in the MCP server environment.',
 };

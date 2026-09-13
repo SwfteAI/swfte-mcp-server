@@ -1,3 +1,4 @@
+import { DesignContext, wizardContext } from '../guidance/index.js';
 import { z } from 'zod';
 import { SwfteApiError, type SwfteClient } from '../client.js';
 import {
@@ -115,13 +116,15 @@ export const shipTools: ToolDefinition[] = [
     group: 'core',
     description:
       `Build a Studio artifact from a natural-language description. Supported kinds: ${kindList}. ` +
+      'First use swfte_solution_advise to distinguish a product, bounded workflow or agentic system; use swfte_capabilities for actual supported verbs/options. Reference cases can be injected with designContext. ' +
       'Starts the generator, polls it to completion, and returns the generated artifact along with ' +
       'the wizard\'s coverage report (what of your request it did and did not satisfy) and process ' +
       'trail. If the build outruns waitMs it returns a sessionId to resume with swfte_build_status ' +
       'rather than failing. Some kinds (chatflow, widget) persist as they build and return an id ' +
-      'directly; the rest need swfte_create afterwards.',
+      'directly; the rest need swfte_create afterwards. A generated artifact or coverage report is not proof of execution, implemented product UI, or deployment.',
     inputSchema: z.object({
       kind: BuildableKindArg,
+      designContext: DesignContext.optional(),
       prompt: z
         .string()
         .min(10)
@@ -134,7 +137,7 @@ export const shipTools: ToolDefinition[] = [
     execute: async (input, { client, config }) => {
       const adapter = requireVerb(input.kind, 'build');
       const { sessionId } = await adapter.build(client, {
-        prompt: input.prompt,
+        prompt: wizardContext(input.prompt, input.designContext),
         model: input.model,
         autoCreate: input.autoCreate,
         options: input.options,
@@ -356,7 +359,7 @@ export const shipTools: ToolDefinition[] = [
       'chose, the runtime profile, and the estimated hourly cost, without provisioning anything. ' +
       'Pass confirm:true to actually provision — which also requires SWFTE_ALLOW_DEPLOY=1 on the ' +
       'server, so an unattended loop cannot spend money on its own. You never name a cloud provider: ' +
-      'the unified deploy router analyses the artifact and picks the target. Use action:"teardown" ' +
+      'the unified deploy router analyses workflow artifacts; explicit workflow capacity options use the managed route. Other kinds have different lifecycle support: consult swfte_capabilities. Activation and accepted provisioning do not prove topology or endpoint health. Use action:"teardown" ' +
       'to release a deployment; that is always permitted.',
     inputSchema: z.object({
       kind: KindArg,
@@ -364,11 +367,21 @@ export const shipTools: ToolDefinition[] = [
       action: z.enum(['preview', 'deploy', 'teardown']).optional().describe('Default "preview".'),
       confirm: z.boolean().optional().describe('Required, with SWFTE_ALLOW_DEPLOY=1, to actually provision.'),
       deploymentId: z.string().optional().describe('Which deployment to tear down.'),
-      option: z.enum(['BYO', 'shared', 'dedicated']).optional().describe('Capacity intent. Omit to let the router decide.'),
+      option: z.enum(['BYO', 'shared', 'dedicated']).optional().describe('Workflow managed capacity intent; application dedicated maps to SERVER. Other adapters may not forward this option. Consult swfte_capabilities; verify resulting target/profile, not just this request.'),
       region: z.string().optional(),
       gpuTier: z.string().optional(),
       lifecycle: z.enum(['ON_DEMAND', 'ALWAYS_ON']).optional(),
-      secretId: z.string().optional(),
+      secretId: z.string().optional().describe('Legacy unsupported field. Rejected; use a cloudConnectionId or providerConfigName for managed credentials.'),
+      provider: z.enum(['kubernetes', 'digitalocean', 'aws', 'awsLambda', 'gcp', 'azure', 'runpod']).optional().describe('Workflow managed provider; backend default kubernetes. This selects the managed route.'),
+      cloudConnectionId: z.string().min(1).optional().describe('Existing tenant cloud connection for BYO deployment; not a raw secret.'),
+      providerConfigName: z.string().min(1).optional().describe('Existing Crossplane ProviderConfig name.'),
+      sizing: z.object({
+        nodeCount: z.number().int().positive().optional(), gpuTier: z.enum(['NONE', 'T4', 'A10', 'A100', 'H100']).optional(),
+        gpuCount: z.number().int().min(0).optional(), cpu: z.string().regex(/^(?:[1-9][0-9]*(?:\.[0-9]+)?|0\.[0-9]+|[1-9][0-9]*m)$/).optional(),
+        memoryGi: z.number().int().positive().optional(), replicas: z.number().int().positive().optional(),
+      }).strict().optional().describe('Managed workflow sizing. Cost estimates are computed by the backend, not supplied here.'),
+      idleTimeoutSec: z.number().int().min(0).optional(),
+      path: z.enum(['crossplane', 'terraform']).optional().describe('Managed backend provisioning path; availability must be verified.'),
       timeoutMs: z.number().int().min(10_000).optional(),
       skipPreflight: z
         .boolean()
@@ -379,12 +392,17 @@ export const shipTools: ToolDefinition[] = [
     }),
     execute: async (input, { client, config }) => {
       const action = input.action ?? 'preview';
+      if (input.secretId !== undefined) throw new Error('UNSUPPORTED_DEPLOY_OPTION: secretId is not consumed by any deployment adapter; use an existing cloudConnectionId or providerConfigName for a managed workflow.');
+      const managedFields = ['provider', 'cloudConnectionId', 'providerConfigName', 'sizing', 'idleTimeoutSec', 'path'];
+      if (input.kind !== 'workflow' && managedFields.some(key => input[key] !== undefined)) throw new Error('UNSUPPORTED_DEPLOY_OPTION: managed provider/connection/sizing fields apply only to workflows.');
       const opts = {
         option: input.option,
         region: input.region,
         gpuTier: input.gpuTier,
         lifecycle: input.lifecycle,
         secretId: input.secretId,
+        provider: input.provider, cloudConnectionId: input.cloudConnectionId, providerConfigName: input.providerConfigName,
+        sizing: input.sizing, idleTimeoutSec: input.idleTimeoutSec, path: input.path,
         timeoutMs: input.timeoutMs,
       };
 
@@ -440,12 +458,18 @@ export const shipTools: ToolDefinition[] = [
       // and every node still reports COMPLETED — so the deployment looks healthy
       // in exactly the way this rule set exists to disprove. Only workflows have
       // a rule set today; other kinds skip and say so rather than pretending.
+      let preDeployEvidence: Record<string, unknown> | undefined;
       if (input.kind === 'workflow' && !input.skipPreflight) {
-        const manifest = await withClientTransport(client, () => deriveFromLive([['workflow', input.id]]));
+        const derived = await withClientTransport(client, () => deriveFromLive([['workflow', input.id]]));
+        // This checks suitability BEFORE deployment. WF-PUBLISHED tests ACTIVE,
+        // which deployment itself sets; requiring it here makes first deploy impossible.
+        // Keep every other rule and report this lifecycle skip explicitly.
+        const manifest = { ...derived, expectLive: false };
         const verdict = await gate(client, manifest as never, {
           force: input.force,
           forceReason: input.forceReason,
         });
+        preDeployEvidence = { stage: 'PRE_DEPLOYMENT', expectLive: false, verdict: verdict.verdict, skippedRules: verdict.report?.skipped ?? [], nextActions: verdict.nextActions };
         if (!verdict.allowed) {
           return {
             dryRun: true,
@@ -467,6 +491,7 @@ export const shipTools: ToolDefinition[] = [
         kind: input.kind,
         id: input.id,
         ...result,
+        ...(preDeployEvidence ? { preflight: preDeployEvidence, readiness: 'DEPLOYMENT_RESULT_REQUIRES_RUNTIME_VERIFICATION', nextChecks: ['Read deployment phase, target/profile and endpoint', 'Verify enabled/ACTIVE workflow and published execution version', 'Run positive and negative inputs through the deployed endpoint and correlate traces/analytics'] } : {}),
         ...(result.timedOut
           ? { note: 'Provisioning is still running — it was not cancelled. Poll swfte_deployments_get for the final phase.' }
           : {}),

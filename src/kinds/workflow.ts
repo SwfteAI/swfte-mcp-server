@@ -167,16 +167,19 @@ async function executeAndPoll(
         path: `${EXECUTIONS}/${encodeURIComponent(String(executionId))}`,
         retries: 1,
       }),
-    (s) => isTerminalRunStatus(s?.status),
+    (s) => isTerminalRunStatus(s?.status) || ['PAUSED', 'WAITING_FOR_INPUT', 'AWAITING_HUMAN'].includes(String(s?.status ?? '').toUpperCase()),
     { timeoutMs: input.timeoutMs ?? 180_000, intervalMs: 3_000 }
   );
 
   // Per-node traces live under outputData._traces, keyed by node id.
   const traces = (snapshot?.outputData?._traces ?? {}) as Record<string, any>;
 
+  const isWaiting = ['PAUSED', 'WAITING_FOR_INPUT', 'AWAITING_HUMAN'].includes(String(snapshot?.status ?? '').toUpperCase());
+  const humanInputs = Object.entries(snapshot?.outputData ?? {}).filter(([, value]: [string, any]) => value && typeof value === 'object' && String(value.status ?? '').toLowerCase() === 'waiting' && Array.isArray(value.required_variables)).map(([nodeId, value]: [string, any]) => ({ nodeId, prompt: value.prompt, requiredVariables: value.required_variables, optionalVariables: value.optional_variables ?? [], inputSchema: value.input_schema, timeoutMs: value.timeout_ms }));
   return {
     ok: isSucceededRunStatus(snapshot?.status),
-    status: timedOut ? `${snapshot?.status ?? 'UNKNOWN'} (still running at timeout)` : String(snapshot?.status ?? 'UNKNOWN'),
+    ...(isWaiting ? { needsHuman: humanInputs.length > 0, waiting: { executionId: String(executionId), status: String(snapshot.status), details: humanInputs, ...(humanInputs.length ? { review: { method: 'POST', path: `${EXECUTIONS}/${encodeURIComponent(String(executionId))}/resume`, bodyContract: '{nodeId: paused node ID, inputs: values matching the returned inputSchema}', requiresHumanDecision: true } } : {}), nextAction: 'Execution is paused, not completed. Review required inputs through the authenticated workflow review UI; do not auto-approve or start a duplicate execution.' } } : {}),
+    status: timedOut && !isWaiting ? `${snapshot?.status ?? 'UNKNOWN'} (still running at timeout)` : String(snapshot?.status ?? 'UNKNOWN'),
     output: snapshot?.outputData,
     nodeTraces: Object.entries(traces).map(([tid, t]: [string, any]) => ({
       id: tid,
@@ -350,7 +353,12 @@ export const workflowAdapter: KindAdapter = {
   async deploy(client, id, opts: DeployOpts): Promise<DeployResult> {
     // Default path: the unified router picks the target. `option` opts into the
     // managed path where the caller wants explicit capacity control.
-    const useManaged = Boolean(opts.option || opts.gpuTier || opts.region);
+    if (opts.secretId !== undefined) throw new Error('UNSUPPORTED_DEPLOY_OPTION: secretId is not a ManagedDeployRequest field. Use cloudConnectionId or providerConfigName.');
+    const legacyGpuTier = opts.gpuTier?.toUpperCase();
+    if (legacyGpuTier && !['NONE', 'T4', 'A10', 'A100', 'H100'].includes(legacyGpuTier)) throw new Error('UNSUPPORTED_DEPLOY_OPTION: workflow gpuTier must be NONE, T4, A10, A100 or H100.');
+    if (legacyGpuTier && opts.sizing?.gpuTier && legacyGpuTier !== opts.sizing.gpuTier.toUpperCase()) throw new Error('CONFLICTING_DEPLOY_OPTIONS: gpuTier and sizing.gpuTier disagree.');
+    const sizing = legacyGpuTier ? { ...opts.sizing, gpuTier: legacyGpuTier } : opts.sizing;
+    const useManaged = Boolean(opts.option || opts.gpuTier || opts.region || opts.provider || opts.cloudConnectionId || opts.providerConfigName || sizing || opts.path || opts.idleTimeoutSec !== undefined || opts.lifecycle);
 
     const started = await client.request<any>(
       useManaged
@@ -358,13 +366,11 @@ export const workflowAdapter: KindAdapter = {
             method: 'POST',
             path: `${WORKFLOWS}/${encodeURIComponent(id)}/deploy/managed`,
             body: {
-              option: opts.option,
+              option: opts.option ? { BYO: 'BYO_CLOUD_DEDICATED', shared: 'SHARED_CLOUD', dedicated: 'DEDICATED_INSTANCE' }[opts.option] : undefined,
               region: opts.region,
               lifecycle: opts.lifecycle,
-              secretId: opts.secretId,
-              // gpuTier travels UPPERCASE on the wire; normalising here rather
-              // than at the tool boundary keeps the caller from having to know.
-              gpuTier: opts.gpuTier ? String(opts.gpuTier).toUpperCase() : undefined,
+              provider: opts.provider, cloudConnectionId: opts.cloudConnectionId, providerConfigName: opts.providerConfigName,
+              sizing, idleTimeoutSec: opts.idleTimeoutSec, path: opts.path,
             },
             expectStatuses: [200, 201, 202],
             retries: 0,
@@ -407,8 +413,8 @@ export const workflowAdapter: KindAdapter = {
     return {
       deploymentId: String(deploymentId),
       phase: String(snapshot?.phase ?? snapshot?.state ?? 'UNKNOWN'),
-      url: snapshot?.url ?? snapshot?.connectionDetails?.url,
-      endpoint: snapshot?.endpoint ?? snapshot?.connectionDetails?.endpoint,
+      url: snapshot?.url ?? snapshot?.endpointUrl ?? snapshot?.connectionDetails?.url ?? started?.url ?? started?.invokeEndpoint ?? started?.endpoint,
+      endpoint: snapshot?.endpoint ?? snapshot?.endpointUrl ?? snapshot?.connectionDetails?.endpoint ?? snapshot?.connectionDetails?.invokeEndpoint ?? started?.invokeEndpoint ?? started?.endpoint,
       timedOut,
       raw: { started, status: snapshot },
     };

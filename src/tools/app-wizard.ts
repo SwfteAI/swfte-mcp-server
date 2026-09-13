@@ -1,3 +1,4 @@
+import { DesignContext, wizardContext } from '../guidance/index.js';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext } from './_types.js';
 import type { RequestOptions } from '../client.js';
@@ -32,14 +33,14 @@ function route(name: string, description: string, schema: z.AnyZodObject, method
 
 // These are hosted AppWizard sessions. The application blueprint adapter remains unchanged.
 export const appWizardTools: ToolDefinition[] = [
-  route('create', 'Create a hosted AppWizard build session (billable container capacity). Distinct from swfte_build kind application, which creates a blueprint. Poll status; retain sessionId for cleanup.',
+  route('create', 'Create a hosted AppWizard build session (billable container capacity). Distinct from swfte_build kind application, which creates a blueprint. Poll status; retain sessionId for cleanup. Optional designContext injects referenced cases and explicit product/workflow/agentic guidance.',
     z.object({ name: z.string().trim().min(1).max(200), prompt: z.string().trim().min(10).max(50_000),
-      description: z.string().max(5000).optional(), mode: z.enum(['HUMAN', 'AGENT']).default('HUMAN'),
+      designContext: DesignContext.optional(), description: z.string().max(5000).optional(), mode: z.enum(['HUMAN', 'AGENT']).default('HUMAN'),
       framework: z.enum(['REACT_VITE']).default('REACT_VITE'), supervisorModel: z.string().min(1).optional(),
       workspaceRules: z.string().max(50_000).optional(), confirm: z.boolean().default(false) }),
-    'POST', () => `${BASE}/create`, ({ confirm, ...body }) => body, true),
+    'POST', () => `${BASE}/create`, ({ confirm, designContext, ...body }) => designContext ? { ...body, prompt: wizardContext(body.prompt, designContext) } : body, true),
   route('prompt', 'Send a follow-up prompt to an existing HUMAN-mode AppWizard session. Do not repeat on timeout; inspect status.',
-    session.extend({ prompt: z.string().trim().min(1).max(50_000) }), 'POST', i => `${sessionPath(i)}/prompt`, i => ({ prompt: i.prompt })),
+    session.extend({ prompt: z.string().trim().min(1).max(50_000), designContext: DesignContext.optional() }), 'POST', i => `${sessionPath(i)}/prompt`, i => ({ prompt: i.designContext ? wizardContext(i.prompt, i.designContext) : i.prompt })),
   ...['status', 'plan', 'preview', 'files'].map(action => route(action, `Read AppWizard session ${action}. Status is returned verbatim; a preview URL alone does not prove build completion.`,
     session, 'GET', i => `${sessionPath(i)}/${action}`)),
   route('file', 'Read a generated source file using a relative path.', session.extend({ path: z.string().min(1).max(1000)

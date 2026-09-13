@@ -69,6 +69,39 @@ async function connectionCheck(
   };
 }
 
+async function verifyArtifact(client: Parameters<typeof connectionCheck>[0], input: {
+  kind: Kind; id: string; run?: boolean; inputs?: Record<string, unknown>;
+  requirePublished?: boolean; timeoutMs?: number;
+}) {
+  const adapter = getAdapter(input.kind);
+  const report = await adapter.verify(client, input.id, {
+    run: input.run,
+    inputs: input.inputs,
+    requirePublished: input.requirePublished,
+    timeoutMs: input.timeoutMs,
+  });
+
+  const connections = await connectionCheck(client, input.kind, input.id);
+  const checks = [...report.checks, connections.check];
+  // A missing credential is a real failure of "does this actually work?",
+  // so it lowers ok rather than sitting in the report as a note nobody acts on.
+  const ok = report.ok && connections.check.ok !== false;
+
+  const failed = checks.filter((c) => c.ok === false);
+  const skipped = checks.filter((c) => c.ok === null);
+
+  return {
+    ...report,
+    ok,
+    checks,
+    nextActions: [...report.nextActions, ...connections.nextActions],
+    summary: ok
+      ? `${checks.length - skipped.length}/${checks.length - skipped.length} checks passed` +
+        (skipped.length ? ` (${skipped.length} skipped)` : '')
+      : `${failed.length} check(s) failed: ${failed.map((c) => c.id).join(', ')}`,
+  };
+}
+
 export const verifyTools: ToolDefinition[] = [
   {
     name: 'swfte_verify',
@@ -99,33 +132,7 @@ export const verifyTools: ToolDefinition[] = [
       timeoutMs: z.number().int().min(5_000).optional(),
     }),
     execute: async (input, { client }) => {
-      const adapter = getAdapter(input.kind);
-      const report = await adapter.verify(client, input.id, {
-        run: input.run,
-        inputs: input.inputs,
-        requirePublished: input.requirePublished,
-        timeoutMs: input.timeoutMs,
-      });
-
-      const connections = await connectionCheck(client, input.kind, input.id);
-      const checks = [...report.checks, connections.check];
-      // A missing credential is a real failure of "does this actually work?",
-      // so it lowers ok rather than sitting in the report as a note nobody acts on.
-      const ok = report.ok && connections.check.ok !== false;
-
-      const failed = checks.filter((c) => c.ok === false);
-      const skipped = checks.filter((c) => c.ok === null);
-
-      return {
-        ...report,
-        ok,
-        checks,
-        nextActions: [...report.nextActions, ...connections.nextActions],
-        summary: ok
-          ? `${checks.length - skipped.length}/${checks.length - skipped.length} checks passed` +
-            (skipped.length ? ` (${skipped.length} skipped)` : '')
-          : `${failed.length} check(s) failed: ${failed.map((c) => c.id).join(', ')}`,
-      };
+      return verifyArtifact(client, input);
     },
   },
 
@@ -151,8 +158,7 @@ export const verifyTools: ToolDefinition[] = [
       const reports = [];
       for (const target of input.targets) {
         try {
-          const adapter = getAdapter(target.kind);
-          reports.push(await adapter.verify(client, target.id, { run: input.run, timeoutMs: input.timeoutMs }));
+          reports.push(await verifyArtifact(client, { ...target, run: input.run, timeoutMs: input.timeoutMs }));
         } catch (err) {
           reports.push({
             ok: false,

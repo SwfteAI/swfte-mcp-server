@@ -787,10 +787,22 @@ rule({
         if (/SUCCE|COMPLETED/i.test(header) && failed.length) {
           out.push(find(this, at, `the executions header says ${header} while ${failed.length} node(s) FAILED (${failed.slice(0, 3).map((t) => t.nodeId ?? t.nodeName).join(', ')}). The header lies in this direction; the traces are the record.`, 'gate on traces, not on the header'));
         }
-        if (/FAIL|ERROR/i.test(header) && failed.length === 0 && completed.length) {
+        if (/FAIL|ERROR/i.test(header) && completed.length === traces.length) {
           out.push(find(this, at, `the executions header says ${header} while all ${completed.length} node(s) COMPLETED. The header lies in this direction too — a failure to persist the audit row is reported as a failed run.`, 'gate on traces, not on the header'));
         }
-        if (envelope && envelope !== header) {
+        // A cancelled human checkpoint is an incomplete review, not a successful
+        // business outcome. Some deployments persist that cancellation as FAILED
+        // on the history row. Retain the discrepancy as a warning ONLY when the
+        // traces corroborate a human pause and contain no failed/running work.
+        const cancelledHumanPause = /^(FAILED|ERROR)$/.test(header)
+          && /^(CANCELLED|CANCELED)$/.test(envelope)
+          && failed.length === 0
+          && traces.some(t => String(t.nodeType ?? t.type ?? '').toUpperCase() === 'HUMAN_INPUT'
+            && /^(PAUSED|CANCELLED|CANCELED)$/.test(String(t.status ?? '').toUpperCase()))
+          && traces.every(t => /^(COMPLETED|SUCCEEDED|SUCCESS|SKIPPED|PAUSED|CANCELLED|CANCELED)$/.test(String(t.status ?? '').toUpperCase()));
+        if (cancelledHumanPause) {
+          out.push({ ...find(this, at, `history reports ${header}, trace envelope reports ${envelope}, and a human checkpoint is paused/cancelled (${completed.length} completed, 0 failed of ${traces.length}). This is an incomplete cancelled review, not business success; the status discrepancy remains observable.`, 'start a new review execution when needed; do not count the cancelled review as a completed business outcome'), severity: 'warn' });
+        } else if (envelope && envelope !== header) {
           out.push(find(this, at, `two platform surfaces disagree about the same run: GET /v2/workflows/{id}/executions says ${header}, GET /v2/workflows/executions/{id}/traces says ${envelope}. Neither is the record; the per-node statuses are (${completed.length} completed, ${failed.length} failed of ${traces.length}).`, 'derive the verdict from the per-node statuses'));
         }
       }

@@ -1,3 +1,4 @@
+import { DesignContext, wizardContext } from '../guidance/index.js';
 import { z } from 'zod';
 import { orchestrateSolution, MAX_ORCHESTRATION_MS, type SolutionPlan } from '../orchestrator.js';
 import { buildKnowledge } from '../knowledge.js';
@@ -74,7 +75,7 @@ export const orchestrateTools: ToolDefinition[] = [
     title: 'Build a whole solution',
     group: 'core',
     description:
-      'Build several artifacts as ONE solution: order them by dependency, give every component the same ' +
+      'Compose multiple artifacts only where required; a single bounded workflow or investigator may be enough. Use swfte_solution_advise first, and supply plan.designContext for referenced wizard guidance. Build several artifacts as ONE solution: order them by dependency, give every component the same ' +
       'shared context, then write the cross-references into the fields the runtime actually reads and ' +
       'verify the whole thing before reporting success. This is the gap swfte_build leaves — it builds one ' +
       'artifact at a time and no artifact can reference a sibling that does not exist yet, so a solution ' +
@@ -87,6 +88,7 @@ export const orchestrateTools: ToolDefinition[] = [
     inputSchema: z.object({
       plan: z.object({
         name: z.string(),
+        designContext: DesignContext.optional(),
         workspaceId: z.string().optional(),
         sharedContext: z
           .string()
@@ -105,7 +107,7 @@ export const orchestrateTools: ToolDefinition[] = [
       includeComponentVerify: z.boolean().optional().describe('Also run each component\'s own sweep in the review pass.'),
     }),
     execute: async (input, { client }) =>
-      orchestrateSolution(client, input.plan as SolutionPlan, {
+      orchestrateSolution(client, { ...input.plan, sharedContext: wizardContext(input.plan.sharedContext ?? '', input.plan.designContext) } as SolutionPlan, {
         dryRun: input.dryRun,
         waitMs: input.waitMs,
         totalWaitMs: input.totalWaitMs,

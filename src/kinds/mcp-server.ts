@@ -108,13 +108,24 @@ export const mcpServerAdapter: KindAdapter = {
   },
 
   async steer(client, sessionId, instruction) {
-    return client.request<any>({
-      method: 'POST',
-      path: `${WIZARD}/${encodeURIComponent(sessionId)}/steer`,
-      body: { message: instruction },
-      expectStatuses: [200, 202, 409],
-      retries: 0,
-    });
+    if (sessionsFor(client).has(sessionId) || sessionId.startsWith('mcpwiz-')) {
+      return { status: 'inactive', accepted: false };
+    }
+    try {
+      await client.request({
+        method: 'POST',
+        path: `${WIZARD}/${encodeURIComponent(sessionId)}/steer`,
+        body: { message: instruction },
+        expectStatuses: [200, 202],
+        retries: 0,
+      });
+      return { status: 'accepted', accepted: true };
+    } catch (error) {
+      if (error instanceof SwfteApiError && error.status === 409) {
+        return { status: 'inactive', accepted: false };
+      }
+      throw error;
+    }
   },
 
   async validate(client, artifact): Promise<ValidationReport> {
@@ -194,7 +205,7 @@ export const mcpServerAdapter: KindAdapter = {
     });
   },
 
-  async verify(client, id, _opts: VerifyOpts): Promise<VerifyReport> {
+  async verify(client, id, opts: VerifyOpts): Promise<VerifyReport> {
     const checks: VerifyCheck[] = [];
     const nextActions: string[] = [];
 
@@ -220,28 +231,41 @@ export const mcpServerAdapter: KindAdapter = {
     });
     if (tools.length === 0) nextActions.push('Regenerate with a prompt that names the operations the server should expose.');
 
-    // The generated code either compiles or it does not; nothing downstream
-    // works if it does not, so this is the check that matters most.
     try {
-      const validation = await this.validate!(client, artifact);
-      checks.push({
-        id: 'builds',
-        ok: validation.valid,
-        detail: validation.valid
-          ? 'Validation/build passed'
-          : validation.findings.map((f) => f.message).join('; ') || 'Validation failed',
-      });
-      if (!validation.valid) nextActions.push('Fix the build errors above, then re-validate.');
-    } catch (err) {
-      checks.push({
-        id: 'builds',
-        ok: null,
-        detail: `Validation unavailable: ${err instanceof SwfteApiError ? err.message : String(err)}`,
-      });
+      const configuration = await this.validate!(client, artifact);
+      checks.push({ id: 'configuration', ok: configuration.valid,
+        detail: configuration.valid ? 'Configuration valid' : configuration.findings.map(f => f.message).join('; ') || 'Configuration invalid' });
+      if (!configuration.valid) nextActions.push('Fix the configuration findings, then re-validate.');
+    } catch (error) {
+      checks.push({ id: 'configuration', ok: false, detail: `Configuration validation unavailable: ${error instanceof Error ? error.message : String(error)}` });
+      nextActions.push('Retry configuration validation when the validator is available.');
     }
 
-    const ok = checks.every((c) => c.ok !== false);
-    if (ok && nextActions.length === 0) nextActions.push('Looks healthy — swfte_deploy to host it.');
+    try {
+      const build = await client.request<any>({
+        method: 'POST', path: `${WIZARD}/validate-build`,
+        // Validate the exact snapshot already retrieved, rather than a potentially
+        // newer artifact revision fetched independently by the compiler service.
+        body: { serverName: artifact.name, code: artifact.generatedCode, packageJson: artifact.packageJson },
+        retries: 0, timeoutMs: opts.timeoutMs ?? 120_000,
+      });
+      const built = build?.success === true && build?.buildAttempted === true;
+      checks.push({ id: 'builds', ok: built,
+        detail: built ? `Build passed (${build.validationMethod ?? 'compiler'})`
+          : build?.buildAttempted !== true ? 'Compilation was not performed; build is unverified'
+          : (build?.errors ?? []).join('; ') || 'Build failed' });
+      if (!built) nextActions.push('Resolve the build failure or unavailable compiler, then verify again.');
+    } catch (error) {
+      checks.push({ id: 'builds', ok: false, detail: `Build validation unavailable: ${error instanceof Error ? error.message : String(error)}` });
+      nextActions.push('Retry build validation when the compiler is available.');
+    }
+
+    if (opts.run) {
+      checks.push({ id: 'execution', ok: false, detail: 'MCP endpoint execution is not supported by this verification adapter.' });
+      nextActions.push('Verify the deployed endpoint using an MCP client; this adapter cannot perform the requested execution check.');
+    }
+    const ok = checks.every((check) => check.ok === true);
+    if (ok) nextActions.push('Configuration and compilation passed; endpoint runtime health remains unverified.');
 
     return { ok, kind: 'mcp-server', id, checks, nextActions };
   },

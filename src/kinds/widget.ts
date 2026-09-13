@@ -21,7 +21,12 @@ export const widgetAdapter: KindAdapter = {
   label: 'Widget',
   notes:
     'The widget wizard persists as part of generation, so there is no separate create, steer, or ' +
-    'refine step. Rebuild with a fuller prompt, or edit the backing chatflow, to change one.',
+    'refine step. Widgets can be CHAT, TABLE, SHEET, DASHBOARD, KPI_CARDS, STATUS_TIMELINE, PROGRESS, FORM or MIXED. ' +
+    'Graphical widgets may use a native workspace data binding instead of a conversational brain. ' +
+    'PUT /api/v2/widgets/{id} supports viewType, binding and dataBindingId; always read back persistence. ' +
+    'Workspace data/forms require authenticated Studio rendering, not a public snapshot. ' +
+    'Native POST /api/v2/widgets/{id}/resume restores an existing release; swfte_deploy does not accept action:resume. ' +
+    'On deploy failure read current history before retrying; key rotation must persist the new signing-key reference.',
 
   async build(client, input: BuildInput) {
     // `attach` points the widget at an existing agent/chatflow/workflow instead
@@ -66,20 +71,34 @@ export const widgetAdapter: KindAdapter = {
   },
 
   async deploy(client, id, _opts: DeployOpts): Promise<DeployResult> {
-    // Widgets deploy to the embed CDN rather than to compute — no sizing, no
-    // provider, and nothing to poll: the response is the deployed state.
+    // Public WidgetControllerV1 rejects inactive configs even if a deployment
+    // record is LIVE. Confirmed deployment includes enabling this surface.
+    const path = `${WIDGETS_V2}/${encodeURIComponent(id)}`;
+    const initial = await client.request<any>({ method: 'GET', path, retries: 1 });
+    if (initial?.active !== true) {
+      await client.request({ method: 'PUT', path, body: { active: true }, retries: 0 });
+      const enabled = await client.request<any>({ method: 'GET', path, retries: 1 });
+      if (enabled?.active !== true) throw new Error('WIDGET_ACTIVATION_NOT_PERSISTED: active:true was not retained; no deployment snapshot was created. Inspect the existing widget before retrying.');
+    }
     const body = await client.request<any>({
-      method: 'POST',
-      path: `${WIDGETS_V2}/${encodeURIComponent(id)}/deploy`,
-      expectStatuses: [200, 201, 202],
-      retries: 0,
-      timeoutMs: 120_000,
+      method: 'POST', path: `${path}/deploy`, expectStatuses: [200, 201, 202], retries: 0, timeoutMs: 120_000,
     });
+    const verificationErrors: string[] = [];
+    let saved: any = null, publicConfig: any = null;
+    try { saved = await client.request({ method: 'GET', path, retries: 1 }); }
+    catch (error) { verificationErrors.push(`Saved readback failed: ${error instanceof Error ? error.message : String(error)}`); }
+    try { publicConfig = await client.request({ method: 'GET', path: `${WIDGETS_V1}/${encodeURIComponent(id)}`, retries: 1 }); }
+    catch (error) { verificationErrors.push(`Public config readback failed: ${error instanceof Error ? error.message : String(error)}`); }
+    const deploymentId = body?.deploymentId ?? body?.id;
+    const live = String(body?.deploymentStatus ?? body?.status ?? '').toUpperCase() === 'LIVE';
+    const active = saved?.active === true;
+    const matches = Boolean(deploymentId && saved?.deploymentId === deploymentId);
     return {
-      deploymentId: body?.deploymentId ?? body?.id,
-      phase: String(body?.deploymentStatus ?? body?.status ?? 'READY'),
+      deploymentId,
+      phase: live && active && matches && publicConfig ? 'LIVE' : 'UNVERIFIED',
       url: body?.url ?? body?.embedUrl,
-      raw: body,
+      raw: { deployed: body, saved, checks: { live, active, deploymentPointerMatches: matches, publicConfigReadable: Boolean(publicConfig), runtimeVerified: false }, verificationErrors,
+        nextAction: saved?.dataBindingId ? 'Verify the authenticated data view and any FORM/MIXED submission readback. LIVE/config does not prove source execution or browser rendering.' : 'Exercise the widget in its allowed browser origin and observe its brain invocation. LIVE/config readback is not conversation or UI evidence.' },
     };
   },
 
@@ -113,7 +132,7 @@ export const widgetAdapter: KindAdapter = {
     });
   },
 
-  async verify(client, id, _opts: VerifyOpts): Promise<VerifyReport> {
+  async verify(client, id, opts: VerifyOpts): Promise<VerifyReport> {
     const checks: VerifyCheck[] = [];
     const nextActions: string[] = [];
 
@@ -127,61 +146,51 @@ export const widgetAdapter: KindAdapter = {
       return { ok: false, kind: 'widget', id, checks, nextActions: ['Widget not found — check the id with swfte_widgets_list.'] };
     }
 
-    // A widget with no backing brain renders but answers nothing.
-    //
-    // `brain` ({kind, id}) is the canonical reference the runtime resolves —
-    // WidgetControllerV1 reads it first and only falls back to the deprecated
-    // top-level `agentId` when it is null. Checking `binding`/`attach`/
-    // `chatflowId` instead, as this did, reads fields the v2 record does not
-    // have: every correctly bound CHATFLOW widget reported "no backing brain".
-    // A false "this is broken" is the expensive kind of wrong, because it sends
-    // someone to rebuild an artifact that was already right.
+    const graphical = widget?.dataBindingId || (widget?.viewType && widget.viewType !== 'CHAT');
     const brain = widget?.brain?.id ? widget.brain : null;
-    const binding = brain ?? widget?.agentId ?? widget?.binding ?? widget?.attach ?? widget?.chatflowId;
-    checks.push({
-      id: 'bound',
-      ok: Boolean(binding),
-      detail: binding
-        ? `Bound to ${brain ? `${brain.kind ?? 'UNKNOWN'} ${brain.id}` : JSON.stringify(binding).slice(0, 120)}`
-        : 'No backing agent/chatflow/workflow — the widget has nothing to answer with',
-    });
-    if (!binding) nextActions.push('Rebuild the widget with an attach target, or bind it to an existing agent/chatflow.');
+    if (graphical) {
+      if (widget?.dataBindingId) {
+        try {
+          const source = await client.request<any>({ method: 'GET', path: `/v1/widget-bindings/${encodeURIComponent(widget.dataBindingId)}`, retries: 1 });
+          const scoped = Boolean(widget?.workspaceId) && source?.id === widget.dataBindingId && String(source?.workspaceId) === String(widget.workspaceId) && Boolean(source?.sourceType);
+          checks.push({ id: 'bound', ok: scoped, detail: scoped ? `Data source ${source.sourceType}; view ${widget.viewType}. Source execution is not established by this record.` : 'Data binding is missing or belongs to another workspace.' });
+          if (source?.sourceType === 'STUDIO_OPERATIONS') nextActions.push('Open the authenticated Studio widget view. Verify actual scoped rows and form save/reload; this source is not an anonymous public embed.');
+        } catch (error) { checks.push({ id: 'bound', ok: false, detail: `Data binding read failed: ${String(error)}` }); }
+      } else {
+        checks.push({ id: 'bound', ok: null, detail: 'Graphical widget has no PULL source; verify its configured PUSH state and rendering before claiming functionality.' });
+        nextActions.push('Attach a data source or exercise the PUSH state producer. A display type alone is not a working data widget.');
+      }
+    } else {
+      const binding = brain ?? widget?.agentId;
+      checks.push({ id: 'bound', ok: Boolean(binding), detail: binding ? `Conversational brain: ${JSON.stringify(binding)}` : 'No backing agent/chatflow/workflow for the conversational widget.' });
+      if (!binding) nextActions.push('Attach an agent/chatflow/workflow for chat, or choose a graphical display with a data source.');
+    }
 
-    const status = String(widget?.deploymentStatus ?? 'draft');
-    const deployed = status === 'deployed';
+    let status = String(widget?.deploymentStatus ?? 'DRAFT').toUpperCase();
+    if (widget?.deploymentId) {
+      try {
+        const history = await client.request<any>({ method: 'GET', path: `${WIDGETS_V2}/${encodeURIComponent(id)}/deployments`, retries: 1 });
+        const entries = Array.isArray(history) ? history : history?.content ?? [];
+        const current = entries.find((d: any) => (d.id ?? d.deploymentId) === widget.deploymentId);
+        status = String(current?.status ?? 'UNKNOWN').toUpperCase();
+      } catch { status = 'UNVERIFIED'; }
+    }
+    const deployed = status === 'LIVE' && widget?.active === true;
+    checks.push({ id: 'active', ok: widget?.active === true ? true : opts.requirePublished ? false : null, detail: `Public runtime requires active:true; saved active=${String(widget?.active)}` });
     checks.push({
       id: 'deployed',
-      ok: deployed ? true : null,
+      ok: deployed ? true : opts.requirePublished ? false : null,
       detail: deployed ? 'Deployed' : `Not deployed (status=${status})`,
     });
 
-    // The embed snippet is the actual deliverable — if it can't be fetched, the
-    // widget is not usable regardless of what its record says.
     if (deployed) {
       try {
-        const embed = await client.request<any>({
-          method: 'GET',
-          path: `${WIDGETS_V1}/${encodeURIComponent(id)}/embed`,
-          retries: 1,
-        });
-        const snippet = embed?.snippet ?? embed?.script ?? embed?.embedCode;
-        checks.push({
-          id: 'embeddable',
-          ok: Boolean(snippet),
-          detail: snippet ? `Embed snippet available (${String(snippet).length} chars)` : 'Embed endpoint returned no snippet',
-        });
-        if (!snippet) nextActions.push('Redeploy the widget — the embed snippet did not generate.');
-      } catch (err) {
-        checks.push({
-          id: 'embeddable',
-          ok: false,
-          detail: err instanceof SwfteApiError ? `${err.status} ${err.message}` : String(err),
-        });
-      }
-    } else {
-      checks.push({ id: 'embeddable', ok: null, detail: 'Skipped — deploy the widget first' });
-      nextActions.push('Deploy the widget with swfte_deploy to get its embed snippet.');
+        const config = await client.request<any>({ method: 'GET', path: `${WIDGETS_V1}/${encodeURIComponent(id)}`, retries: 1 });
+        checks.push({ id: 'public-config', ok: Boolean(config), detail: 'Public configuration read; this does not establish data access, rendering or input persistence.' });
+      } catch (error) { checks.push({ id: 'public-config', ok: false, detail: String(error) }); }
     }
+    checks.push({ id: 'rendering', ok: null, detail: 'Browser rendering and runtime behavior require a separate live check. No native /v1/widgets/{id}/embed endpoint is assumed.' });
+    nextActions.push(graphical ? 'Verify actual data in the Studio view; for FORM/MIXED submit a sourced record and read it back. Test read-only and cross-workspace rejection.' : 'Open the allowed browser origin and verify an actual conversation response.');
 
     const ok = checks.every((c) => c.ok !== false);
     if (ok && nextActions.length === 0) nextActions.push('Looks healthy — drop the embed snippet into a page to try it.');

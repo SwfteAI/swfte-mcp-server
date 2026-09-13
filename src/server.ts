@@ -7,6 +7,7 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 
 import { SwfteApiError, SwfteClient } from './client.js';
 import { loadConfig, type ServerConfig } from './config.js';
+import { UnsupportedKindError, UnsupportedVerbError } from './kinds/index.js';
 import { allTools } from './tools/index.js';
 import type { ToolDefinition } from './tools/_types.js';
 
@@ -108,6 +109,9 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
           content: [{ type: 'text', text: JSON.stringify(err.toJSON(), null, 2) }],
         };
       }
+      if (err instanceof UnsupportedKindError || err instanceof UnsupportedVerbError) {
+        return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'UNSUPPORTED_CAPABILITY', message: err.message, nextAction: 'Call swfte_capabilities to inspect implemented verbs and per-kind lifecycle paths. Artifact form, activation and infrastructure deployment are separate decisions.' }) }] };
+      }
       const message = err instanceof Error ? err.message : String(err);
       return { isError: true, content: [{ type: 'text', text: message }] };
     }
@@ -120,7 +124,7 @@ function zodSchemaToJson(schema: ZodTypeAny): Record<string, unknown> {
   // The MCP SDK expects a JSON-Schema-like object on the wire. `zod-to-json-schema`
   // keeps each tool's input schema faithful and richly annotated for clients
   // (Claude Code/Desktop, Cursor, Cline, etc.).
-  const json = zodToJsonSchema(schema, { target: 'jsonSchema7' }) as Record<string, unknown>;
+  const json = zodToJsonSchema(schema, { target: 'jsonSchema7', $refStrategy: 'none' }) as Record<string, unknown>;
   delete json.$schema;
   return json;
 }

@@ -1,0 +1,1410 @@
+{
+  "schemaVersion": 1,
+  "description": "Illustrative design examples based on the requested Studio operations cases, not claims of deployed customer success. Classification is contextual and does not prove current implementation readiness.",
+  "selectionRules": [
+    {
+      "form": "product",
+      "when": "Multiple people need durable shared records, dashboards, permissions and decision history beyond a single run.",
+      "question": "What shared state and recurring decisions require a dedicated interface?"
+    },
+    {
+      "form": "workflow",
+      "when": "Inputs, stages, branches and completion conditions can be specified before execution.",
+      "question": "Can we name the steps and the evidence that advances or stops each stage?"
+    },
+    {
+      "form": "agentic",
+      "when": "An investigator must choose its next tool or experiment using newly discovered evidence.",
+      "question": "Which decisions cannot be determined until we inspect the environment?"
+    }
+  ],
+  "compositionRule": "A product may contain bounded workflows and agents. Multiple agents or widgets alone do not make a product. Prefer existing company systems when they already provide the required shared state.",
+  "deploymentRule": "Form and hosting are separate choices. Verify supported shared/dedicated paths, dependencies, actual endpoint responses, isolation and telemetry. Activation or a published version is not a successful deployment.",
+  "references": [
+    {
+      "id": "agent-patterns",
+      "title": "Building effective agents — Anthropic",
+      "url": "https://www.anthropic.com/engineering/building-effective-agents",
+      "accessedAt": "2026-09-09",
+      "supports": "Predefined orchestration versus adaptive tool selection, evaluation loops and bounded execution."
+    },
+    {
+      "id": "well-architected",
+      "title": "AWS Well-Architected Framework",
+      "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html",
+      "accessedAt": "2026-09-09",
+      "supports": "Operational excellence, reliability, security, performance and cost as explicit review concerns."
+    },
+    {
+      "id": "telemetry-signals",
+      "title": "Signals — OpenTelemetry",
+      "url": "https://opentelemetry.io/docs/concepts/signals/",
+      "accessedAt": "2026-09-09",
+      "supports": "Traces, metrics and logs capture different evidence about runtime behavior."
+    }
+  ],
+  "cases": [
+    {
+      "id": "S01",
+      "title": "Automated Content and Publishing",
+      "form": "product",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "An editorial team watches approved feeds, reviews cited drafts, adapts approved revisions for six channels and tracks receipts in one shared queue.",
+      "why": "An ongoing editorial operation requires a durable shared candidate queue, article revisions, independent review, human decisions and per-channel publication history. Bounded research/distribution runs support this product.",
+      "alternative": "For one supplied article and a fixed destination, use a writing/review workflow without a new editorial product.",
+      "components": [
+        {
+          "key": "editorial-intake",
+          "kind": "workflow",
+          "role": "Source monitoring and candidate queue"
+        },
+        {
+          "key": "research-writer",
+          "kind": "agent",
+          "role": "Research and composition"
+        },
+        {
+          "key": "adversarial-reviewer",
+          "kind": "agent",
+          "role": "Independent factual challenge"
+        },
+        {
+          "key": "distribution",
+          "kind": "workflow",
+          "role": "Approval, channel variants, publication and tracking"
+        },
+        {
+          "key": "editorial-console",
+          "kind": "widget",
+          "role": "Shared review workspace"
+        },
+        {
+          "key": "editorial-knowledge",
+          "kind": "module",
+          "role": "Versioned editorial grounding"
+        },
+        {
+          "key": "editorial-coordinator",
+          "kind": "agent",
+          "role": "Single widget brain and typed action router"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Exact revision review",
+          "purpose": "Independent review and human approval prevent self-approved publication.",
+          "attachment": "Proposed, pending live attachment verification: distribution validate-approval typed step and editorial-console approve action; server enforces reviewer identity, role, article hash and policy version."
+        },
+        {
+          "name": "Outbound authorization and idempotency",
+          "purpose": "Only approved provider actions run and retries cannot double publish.",
+          "attachment": "Proposed, pending live attachment verification: distribution dispatch-approved-variant typed step with account-specific provider binding, approval reference, receipt store and capability validation."
+        },
+        {
+          "name": "Research bounds",
+          "purpose": "Constrain evidence tools, budgets and revision loops.",
+          "attachment": "Proposed, pending live attachment verification: research-writer/adversarial-reviewer runtime tool allowlists and budget fields; editorial-knowledge grounds bindings; maximum two revision rounds."
+        }
+      ],
+      "sources": [
+        "RSS URLs/cadence, permitted website URLs/extraction policy, news provider/query bindings and additional source adapters",
+        "Editorial audience, taxonomy, relevance rules, voice guide, citation/suitability policy and primary source references",
+        "Configured search/fetch tools and model; per-channel publishing adapters, credentials and account IDs; adapter capability discovery for X, Bluesky, Medium, Substack, LinkedIn and optional other channels",
+        "Tenant-scoped editorial queue/article/receipt backend APIs; reviewer roles/identity; optional Google Sheets spreadsheet ID/schema/OAuth"
+      ],
+      "acceptance": [
+        {
+          "name": "Relevant news to channel receipts",
+          "expected": "One canonical article and distinct X, Bluesky, Medium, Substack, LinkedIn and configured other-channel versions retain evidence; approved adapters return receipts, dashboard and Sheets track states.",
+          "failure": "Unverified adapter acknowledgment cannot count as published."
+        },
+        {
+          "name": "Unavailable source and unsupported adapter",
+          "expected": "Source health shows PARTIAL; essential missing research blocks readiness; approved Substack draft remains EXPORT_READY while capable channels proceed.",
+          "failure": "No fabricated source or publication receipt."
+        },
+        {
+          "name": "Misleading syndicated claim",
+          "expected": "Reviewer notices dependence/date/denominator and requests correction or rejects.",
+          "failure": "Repeated citations are not independent corroboration."
+        },
+        {
+          "name": "Timeout and tracking retry",
+          "expected": "Receipt reconciliation prevents repost; only failed mirror synchronization retries.",
+          "failure": "Successful channels cannot be blindly rerun."
+        },
+        {
+          "name": "Human rejection and revision",
+          "expected": "No rejected draft is sent; new content hash requires new approval and review as applicable.",
+          "failure": "Stale approval cannot authorize changed content."
+        },
+        {
+          "name": "Single widget brain routes every operation",
+          "expected": "Exactly one binds record remains on widget; coordinator selects one declared worker per action, uses configured scoped query API for reads, and typed intake agent node preserves child-run checkpoint. All components are reachable with no artifact dependency cycle.",
+          "failure": "No brain overwrite, detached action, direct widget database assumption, duplicate analysis on retry or circular coordinator reentry."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S02",
+      "title": "AI Production Support Engineer",
+      "form": "agentic",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "An on-call engineer supplies an incident. A worker follows evidence across logs, commits and runbooks, tries reproduction, and proposes a reviewed PR.",
+      "why": "A triggered investigator chooses evidence and reproduction steps for a specific incident, then returns a human-reviewable proposal. Existing incident and source-control systems remain the system of record.",
+      "alternative": "Use a bounded workflow if the inputs, decision branches and stopping point are known; use a product only if shared persistent review is a separate need.",
+      "components": [
+        {
+          "key": "support-intake",
+          "kind": "chatflow",
+          "role": "Conversational incident intake and clarification"
+        },
+        {
+          "key": "support-investigator",
+          "kind": "agent",
+          "role": "AGENTIC production investigator"
+        },
+        {
+          "key": "isolated-reproduction",
+          "kind": "workflow",
+          "role": "Bounded worker lifecycle and patch validation"
+        },
+        {
+          "key": "support-policy",
+          "kind": "module",
+          "role": "Versioned evidence, worker and publication policy"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Incident scope and evidence budget",
+          "purpose": "Prevent irrelevant or unbounded queries; expose service, UTC interval and query/worker budget.",
+          "attachment": "Proposed runtime attachment: support-investigator input schema and tool authorization policy; support-intake edits validated fields."
+        },
+        {
+          "name": "Worker isolation and cleanup",
+          "purpose": "Enforce image digest, no production writes, TTL, quotas and cancellation cleanup.",
+          "attachment": "Proposed runtime attachment: isolated-reproduction provision/execute/finally nodes, enforced by worker provider."
+        },
+        {
+          "name": "Approve report and draft PR",
+          "purpose": "Bind approved content and change hashes to identity; choose configured destination and reviewer; edits require new approval.",
+          "attachment": "Proposed runtime attachment: support-investigator approval/communication/draft-PR adapters; support-intake presents approval endpoint status."
+        }
+      ],
+      "sources": [
+        "Incident webhook or chat input: incidentId, service, environment, observed symptoms, time window, severity and reporter; verify signed webhooks.",
+        "GitHub connection with selected repositories, read-only checkout, deployment SHAs, PR metadata and CODEOWNERS; separately scoped draft-PR writer.",
+        "Scoped log/trace/metric readers and release/deployment history with UTC timestamps and previous known-good revision.",
+        "Runbook/document corpus with source versions and access policy.",
+        "Ephemeral worker provider with image allowlist, resource/time budgets, egress restrictions and synthetic fixtures.",
+        "Configured incident record store and approved Slack/Telegram destination plus human reviewer directory; no destination or reviewer inferred."
+      ],
+      "acceptance": [
+        {
+          "name": "Production regression",
+          "expected": "Immutable revision comparison yields evidence-backed cause, cleanup receipt, tested patch and human-reviewable draft PR; approved findings target configured channel.",
+          "failure": "No production execution, causal certainty without comparison, auto-merge or unapproved message."
+        },
+        {
+          "name": "Unavailable logs or worker",
+          "expected": "NEEDS_CONFIGURATION or BLOCKED lists unavailable evidence and reproduction; partial report remains qualified.",
+          "failure": "No invented logs or claim of reproduction."
+        },
+        {
+          "name": "Misleading deployment correlation",
+          "expected": "Competing causes and negative experiment downgrade deployment hypothesis; escalate with supporting evidence.",
+          "failure": "Do not convert temporal correlation into confirmed root cause."
+        },
+        {
+          "name": "Duplicate trigger after timeout",
+          "expected": "Resume checkpoint and reconcile idempotency key to existing PR and message receipt.",
+          "failure": "No duplicate worker/PR/message."
+        },
+        {
+          "name": "Human rejects patch",
+          "expected": "Retain rejected hash and reason, investigate new context and request fresh approval only for revised artifact.",
+          "failure": "Rejected patch cannot be sent or merged."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S03",
+      "title": "Feature Request Manager",
+      "form": "product",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "Product managers need one persistent view of duplicate requests, customer impact and explainable rankings that they can adjust over time.",
+      "why": "A durable shared demand and planning workspace is needed for evolving clusters, explainable priorities, human adjustments and roadmap decisions. Ingestion and scoring remain bounded workflows.",
+      "alternative": "For a weekly digest in an existing backlog, use a ranking workflow and keep decisions in that backlog.",
+      "components": [
+        {
+          "key": "request-intake",
+          "kind": "workflow",
+          "role": "Multichannel normalization"
+        },
+        {
+          "key": "demand-analyst",
+          "kind": "agent",
+          "role": "Intent and semantic clustering"
+        },
+        {
+          "key": "priority-workflow",
+          "kind": "workflow",
+          "role": "Transparent scoring and decision history"
+        },
+        {
+          "key": "planning-console",
+          "kind": "widget",
+          "role": "Shared evidence and priority dashboard"
+        },
+        {
+          "key": "planning-assistant",
+          "kind": "chatflow",
+          "role": "Conversational intake and challenge"
+        },
+        {
+          "key": "product-context",
+          "kind": "module",
+          "role": "Product strategy and decision grounding"
+        },
+        {
+          "key": "planning-coordinator",
+          "kind": "agent",
+          "role": "Single widget brain and typed action router"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Reproducible priorities",
+          "purpose": "Keep factor uncertainty, human edits and scores auditable.",
+          "attachment": "Proposed, pending live attachment verification: priority-workflow score/apply-decision steps enforce policy version, contribution schema, revision locks and override reasons."
+        },
+        {
+          "name": "Account-scoped evidence",
+          "purpose": "Prevent customer information disclosure.",
+          "attachment": "Proposed, pending live attachment verification: request-intake normalization, demand-analyst search tool, planning-assistant retrieval and planning-console backend authorization."
+        },
+        {
+          "name": "Human planning decisions",
+          "purpose": "Protect ambiguous merges and formal roadmap writes.",
+          "attachment": "Proposed, pending live attachment verification: priority-workflow merge/split and optional issue/roadmap-write nodes require actor role/approval; uncertain merges remain proposals."
+        }
+      ],
+      "sources": [
+        "Customer, support, sales, Slack, email and internal request adapters with authorized event/poll scopes",
+        "Tenant-scoped request/cluster/decision backend APIs and account identity mappings",
+        "CRM customer/revenue context, strategy documents, roadmap snapshots, engineering effort estimates, priority weights and product reviewer identities; optional issue tracker draft API"
+      ],
+      "acceptance": [
+        {
+          "name": "Multichannel demand to ranking",
+          "expected": "Clusters retain evidence and show seven factor contributions, unique counts and roadmap overlap.",
+          "failure": "No discarded source or invented measurement."
+        },
+        {
+          "name": "Missing CRM and effort",
+          "expected": "Provisional score ranges explicitly show missing inputs; original requests remain reviewable.",
+          "failure": "Do not substitute zero revenue or invented effort."
+        },
+        {
+          "name": "False semantic duplicate",
+          "expected": "Distinct intents remain separate with explained relation.",
+          "failure": "Keyword similarity cannot erase difference."
+        },
+        {
+          "name": "Forwarded request and handoff retry",
+          "expected": "One original request has multiple provenance links and stable idempotent score revision.",
+          "failure": "No manufactured demand from copies."
+        },
+        {
+          "name": "Human split and priority challenge",
+          "expected": "Versioned decisions preserve rationale and recompute affected rankings only; original evidence remains.",
+          "failure": "Concurrent stale edit returns conflict."
+        },
+        {
+          "name": "Single widget brain routes every operation",
+          "expected": "Exactly one binds record remains on widget; coordinator selects one declared worker per action, uses configured scoped query API for reads, and typed intake agent node preserves child-run checkpoint. All components are reachable with no artifact dependency cycle.",
+          "failure": "No brain overwrite, detached action, direct widget database assumption, duplicate analysis on retry or circular coordinator reentry."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S04",
+      "title": "Support Request Investigation",
+      "form": "agentic",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "A helpdesk case may require an answer, known-issue diagnosis, bug reproduction or feature escalation. Investigation depth depends on evidence.",
+      "why": "A per-case worker chooses contextual retrieval and investigation steps before answering or escalating. Reuse the existing helpdesk queue rather than creating another standalone product.",
+      "alternative": "Use a bounded workflow if the inputs, decision branches and stopping point are known; use a product only if shared persistent review is a separate need.",
+      "components": [
+        {
+          "key": "support-intake",
+          "kind": "chatflow",
+          "role": "Clarification and case intake"
+        },
+        {
+          "key": "support-investigator",
+          "kind": "agent",
+          "role": "Adaptive understanding and triage"
+        },
+        {
+          "key": "response-composer",
+          "kind": "agent",
+          "role": "Customer answer and internal context package"
+        },
+        {
+          "key": "case-action-workflow",
+          "kind": "workflow",
+          "role": "Draft review, routing and case synchronization"
+        },
+        {
+          "key": "support-knowledge",
+          "kind": "module",
+          "role": "Permission-aware support grounding"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Safe investigation",
+          "purpose": "Bound diagnostics and scope customer data.",
+          "attachment": "Proposed, pending live attachment verification: support-investigator runtime read-only tool allowlist, account filters, timeout and step budget; optional code-search requires binding."
+        },
+        {
+          "name": "Audience and exact-content approval",
+          "purpose": "Prevent unreviewed replies and sensitive information exposure.",
+          "attachment": "Proposed, pending live attachment verification: response-composer schema validation and case-action-workflow APPROVE_SEND validate audience, reviewer role and content hash."
+        },
+        {
+          "name": "Acknowledged escalation",
+          "purpose": "Keep specialist routing and closure traceable.",
+          "attachment": "Proposed, pending live attachment verification: case-action-workflow ESCALATE/SYNC_STATUS enforce destination binding, acknowledgment and authorized closure transition."
+        }
+      ],
+      "sources": [
+        "Helpdesk/customer/internal intake adapter, authenticated requester/account scope, case-store API and permitted history",
+        "Versioned docs, runbooks, known issues, product information and historical tickets with access filters; optional read-only code and diagnostic tools",
+        "Classification/routing policy, team directory, SLA and response guidance; helpdesk outbound adapter, review identity/roles and specialist handoff endpoints"
+      ],
+      "acceptance": [
+        {
+          "name": "Known issue answer",
+          "expected": "Cited answer draft enters review, approved send records receipt in original case.",
+          "failure": "No invented ETA or automatic closure."
+        },
+        {
+          "name": "Potential bug package",
+          "expected": "Package contains problem, history, diagnostics, findings, similar cases and hypotheses; S11 acknowledgment records next step.",
+          "failure": "Do not claim reproduced."
+        },
+        {
+          "name": "Unavailable and restricted knowledge",
+          "expected": "Missing configuration/evidence is explicit and restricted ticket is inaccessible.",
+          "failure": "No fabricated workaround or leaked account history."
+        },
+        {
+          "name": "Misleading wording and old runbook",
+          "expected": "Investigator checks current evidence, explains classification and proposes S08 knowledge correction.",
+          "failure": "Customer wording alone cannot force a feature classification."
+        },
+        {
+          "name": "Duplicate event and ambiguous send",
+          "expected": "Original case persists; receipt lookup prevents second reply and duplicate handoff.",
+          "failure": "No replay-generated customer messages."
+        },
+        {
+          "name": "Human rejects and reroutes",
+          "expected": "Reply stays unsent; revised package retains reason and needs new approval.",
+          "failure": "Old approval does not authorize new text."
+        },
+        {
+          "name": "Complete routing taxonomy",
+          "expected": "Primary labels are ANSWERABLE, KNOWN_ISSUE, POTENTIAL_BUG, FEATURE_REQUEST, DOCUMENTATION_GAP and TEAM_SPECIALIST with evidence/rationale. Draft answer or acknowledged S11/S03/S08/configured-team package follows; active production impact routes S02.",
+          "failure": "No default engineering escalation for every case, no missing specialist destination hidden as delivered, and no invented capability classification."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S05",
+      "title": "AI Incident Investigation System",
+      "form": "agentic",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "A latency alert requires iterative correlation of deployments, customer impact and prior incidents while new events keep arriving.",
+      "why": "An event-driven investigator adapts its evidence collection and updates an existing incident over time. A compact review widget exposes the investigation without introducing a separate incident-management product.",
+      "alternative": "Use a bounded workflow if the inputs, decision branches and stopping point are known; use a product only if shared persistent review is a separate need.",
+      "components": [
+        {
+          "key": "incident-investigator",
+          "kind": "agent",
+          "role": "AGENTIC incremental incident analyst"
+        },
+        {
+          "key": "incident-review",
+          "kind": "widget",
+          "role": "Interactive timeline and hypothesis review"
+        },
+        {
+          "key": "incident-policy",
+          "kind": "module",
+          "role": "Incident correlation and impact rules"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Evidence window and update budget",
+          "purpose": "Bound ongoing investigation and make stale observations visible.",
+          "attachment": "Proposed runtime attachment: incident-investigator typed event/query/checkpoint nodes; incident-review supplies validated filter inputs."
+        },
+        {
+          "name": "Challenge, escalation and closure",
+          "purpose": "Record human challenges, require reviewed revision for outbound escalation or closure.",
+          "attachment": "Proposed runtime attachment: incident-investigator approval adapter and incident record compare-and-set API; incident-review actions use that backend."
+        }
+      ],
+      "sources": [
+        "Signed monitoring/alert webhook, error stream, anomaly events or customer-report intake with eventId and observedAt.",
+        "Scoped logs, traces, metrics, deployment/config/audit changes and topology/service ownership.",
+        "Previous incident/postmortem knowledge with stable references and access controls.",
+        "Customer/service impact mapping with permitted aggregation; never enumerate unrelated customer data.",
+        "Existing durable incident record API supporting versions, compare-and-set updates and idempotency; configured escalation destination and approval endpoint."
+      ],
+      "acceptance": [
+        {
+          "name": "Multi-source incident",
+          "expected": "One investigation correlates events, presents onset interval and supported impact, compares similar historical incident and exposes next queries.",
+          "failure": "No duplicate incidents or unsupported causal declaration."
+        },
+        {
+          "name": "Missing customer mapping",
+          "expected": "Partial incident lists NEEDS_CONFIGURATION for mapping and marks customer impact UNKNOWN.",
+          "failure": "No fabricated customer totals."
+        },
+        {
+          "name": "Counterevidence arrives",
+          "expected": "Append timeline observation, downgrade/retract deployment claim and visibly revise hypothesis history.",
+          "failure": "No silent retention of contradicted root cause."
+        },
+        {
+          "name": "Out-of-order duplicate events",
+          "expected": "Use event identity, observation timestamps and compare-and-set retry to retain both unique observations once.",
+          "failure": "No lost updates, repeated escalation or false late onset."
+        },
+        {
+          "name": "Human rejects closure",
+          "expected": "Keep investigation open, record reason and initiate bounded follow-up queries.",
+          "failure": "No automatic closure or escalation of rejected summary."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S06",
+      "title": "Customer Feedback Intelligence",
+      "form": "product",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "Product and support teams need a durable shared view of themes and trends across surveys, tickets and sales feedback, with traceable roadmap decisions.",
+      "why": "Continuous signals need a longitudinal shared evidence workspace with trends, cluster corrections and roadmap links. Ingestion and investigation components support this durable product.",
+      "alternative": "For a one-time survey export, use a clustering workflow instead of a persistent feedback product.",
+      "components": [
+        {
+          "key": "feedback-intake",
+          "kind": "workflow",
+          "role": "Continuous signal normalization"
+        },
+        {
+          "key": "feedback-analyst",
+          "kind": "agent",
+          "role": "Underlying issue and counterexample analysis"
+        },
+        {
+          "key": "insight-workflow",
+          "kind": "workflow",
+          "role": "Trend analysis, corrections and roadmap linkage"
+        },
+        {
+          "key": "feedback-console",
+          "kind": "widget",
+          "role": "Customer voice and trend review"
+        },
+        {
+          "key": "feedback-context",
+          "kind": "module",
+          "role": "Segments and interpretation policy"
+        },
+        {
+          "key": "feedback-coordinator",
+          "kind": "agent",
+          "role": "Single widget brain and typed action router"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Statistical honesty",
+          "purpose": "Prevent collection changes and missing denominators from creating false trends.",
+          "attachment": "Proposed, pending live attachment verification: insight-workflow COMPUTE validates window alignment, unique counts, source coverage, sampling metadata and uncertainty fields."
+        },
+        {
+          "name": "Human correction",
+          "purpose": "Preserve meaningful distinctions and review consequential insight.",
+          "attachment": "Proposed, pending live attachment verification: insight-workflow REVIEW/MERGE_SPLIT/ACCEPT_INSIGHT enforce actor role/revision lock; feedback-console presents evidence and diffs."
+        },
+        {
+          "name": "Privacy and original-source deduplication",
+          "purpose": "Prevent duplicate demand and protect feedback access.",
+          "attachment": "Proposed, pending live attachment verification: feedback-intake upsert/retention steps, feedback-analyst retrieval and insight-workflow HANDOFF enforce originalSourceId, scope and redaction."
+        }
+      ],
+      "sources": [
+        "Support, reviews, surveys/NPS, sales conversations, community and Slack adapters with authorized account/channel scopes and event/poll bindings",
+        "Account identity map, segments, language/translation handling, retention/consent policy, source timestamps and sampling metadata",
+        "Tenant-scoped signal/cluster/trend/reviewer-decision backend, source volume baselines, configured S03 endpoint and permitted roadmap snapshot"
+      ],
+      "acceptance": [
+        {
+          "name": "Seven sources reveal common need",
+          "expected": "Provenance-preserving cluster shows subgroups and trend; console supports review and accepted S03/roadmap linkage.",
+          "failure": "Clustering cannot prove a deployment caused symptoms."
+        },
+        {
+          "name": "Source outage and unknown population",
+          "expected": "PARTIAL coverage and absolute counts show uncertainty and source-mix warning.",
+          "failure": "No invented denominator or population prevalence."
+        },
+        {
+          "name": "Misleading survey campaign spike",
+          "expected": "Collection change is separated from product experience and trend retains sampling limitations.",
+          "failure": "Raw volume spike alone cannot establish deterioration."
+        },
+        {
+          "name": "Duplicate case and handoff retry",
+          "expected": "One source signal contributes to counts and one acknowledged S03 mapping remains.",
+          "failure": "Copies/retries cannot create customer votes."
+        },
+        {
+          "name": "Human splits and rejects hypothesis",
+          "expected": "Subgroup trends and history recompute; only accepted revised insight can be handed off.",
+          "failure": "Minority needs and original evidence remain visible."
+        },
+        {
+          "name": "Single widget brain routes every operation",
+          "expected": "Exactly one binds record remains on widget; coordinator selects one declared worker per action, uses configured scoped query API for reads, and typed intake agent node preserves child-run checkpoint. All components are reachable with no artifact dependency cycle.",
+          "failure": "No brain overwrite, detached action, direct widget database assumption, duplicate analysis on retry or circular coordinator reentry."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S07",
+      "title": "AI Technical Debt Manager",
+      "form": "workflow",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "Every week, collect a known set of code-health signals, score debt using explicit weights and prepare reviewable remediation proposals.",
+      "why": "A scheduled evidence snapshot, prioritization and small-remediation proposal is a bounded workflow. It writes into the existing engineering backlog rather than requiring a new product dashboard.",
+      "alternative": "Use an agentic investigator only when the next step genuinely depends on unknown evidence; keep approvals and mutations in deterministic controls.",
+      "components": [
+        {
+          "key": "debt-review",
+          "kind": "workflow",
+          "role": "Scheduled technical health assessment"
+        },
+        {
+          "key": "debt-analyst",
+          "kind": "agent",
+          "role": "AGENTIC debt evidence and prioritization specialist"
+        },
+        {
+          "key": "debt-policy",
+          "kind": "module",
+          "role": "Risk weighting and small-change guardrails"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Analysis window and priority weights",
+          "purpose": "Allow reviewers to adjust evidence period and explainable prioritization.",
+          "attachment": "Proposed runtime attachment: debt-review input schema and scoring validation node; workflow invokes debt-analyst through a typed agent node, not an unsupported relationship."
+        },
+        {
+          "name": "Small patch limits and approval",
+          "purpose": "Keep remediation scoped and reviewable, reject high-risk automatic changes.",
+          "attachment": "Proposed runtime attachment: debt-review isolated-patch validation and approved draft-PR nodes."
+        },
+        {
+          "name": "Backlog disposition",
+          "purpose": "Accept, defer with revisit date or reject with reason using versioned records.",
+          "attachment": "Proposed runtime attachment: debt-review backlog reconciliation API and decision input endpoint."
+        }
+      ],
+      "sources": [
+        "Scheduled/manual trigger with repository/service allowlist, analysis window and comparison baseline.",
+        "GitHub source and history, code ownership, static analysis/complexity outputs and dependency findings.",
+        "Incident/change-failure history, CI/deployment duration/failure metrics, performance telemetry and authorized engineering effort/ticket data.",
+        "Security scanner findings with severity and exploitability evidence; sensitive findings restricted to authorized reviewers.",
+        "Engineering backlog and priority/weight configuration; isolated validation worker and separately scoped draft-PR adapter if enabled."
+      ],
+      "acceptance": [
+        {
+          "name": "High-impact recent debt",
+          "expected": "Recent component ranks higher with signal breakdown, security/performance review and scoped recommendation; optional tested patch waits for review.",
+          "failure": "No age-based or TODO-only ranking."
+        },
+        {
+          "name": "Unavailable effort and telemetry",
+          "expected": "Coverage reports missing signals and policy-qualified partial ranking or NEEDS_CONFIGURATION; uncertainty is explicit.",
+          "failure": "Missing evidence must not become zero operational risk."
+        },
+        {
+          "name": "Spurious incident attribution",
+          "expected": "Analyst declines causal attribution, links only supported operational evidence and adjusts confidence.",
+          "failure": "No churn equals incident causality shortcut."
+        },
+        {
+          "name": "Repeated scheduled snapshot",
+          "expected": "Upsert stable candidate identity, preserve history, refresh evidence and reconcile PR idempotency.",
+          "failure": "No duplicate tickets or PRs."
+        },
+        {
+          "name": "Reviewer defers expensive debt",
+          "expected": "Recompute explainable ranking and preserve defer reason/revisit date; no patch is published without fresh approval.",
+          "failure": "No silent override or resurrected rejected proposal."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S08",
+      "title": "AI Documentation & Knowledge Manager",
+      "form": "workflow",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "A code or process change triggers documentation impact analysis, a grounded draft, review and a docs PR in the existing repository.",
+      "why": "Change events and recurring support evidence trigger a bounded documentation gap review and patch proposal. The existing documentation repository or knowledge base remains authoritative.",
+      "alternative": "Use an agentic investigator only when the next step genuinely depends on unknown evidence; keep approvals and mutations in deterministic controls.",
+      "components": [
+        {
+          "key": "knowledge-refresh",
+          "kind": "workflow",
+          "role": "Change-to-documentation proposal pipeline"
+        },
+        {
+          "key": "knowledge-editor",
+          "kind": "agent",
+          "role": "AGENTIC source-grounded documentation editor"
+        },
+        {
+          "key": "knowledge-policy",
+          "kind": "module",
+          "role": "Documentation authority, access and freshness policy"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Source authority and freshness",
+          "purpose": "Set reviewed source precedence, ownership and refresh intervals.",
+          "attachment": "Proposed runtime attachment: knowledge-editor grounding policy and knowledge-refresh input validation; workflow invokes editor with typed agent node."
+        },
+        {
+          "name": "Safe validation and audience",
+          "purpose": "Validate examples without production actions; enforce source-derived ACLs.",
+          "attachment": "Proposed runtime attachment: knowledge-refresh validation nodes and document adapter authorization."
+        },
+        {
+          "name": "Review and publication",
+          "purpose": "Approve exact patch and reject stale base versions before write.",
+          "attachment": "Proposed runtime attachment: knowledge-refresh approval, compare-version and draft/publish nodes."
+        }
+      ],
+      "sources": [
+        "GitHub pull/merge/release events with immutable diffs and API schema changes.",
+        "Infrastructure/configuration change audit, process change records and system ownership metadata.",
+        "Documentation repository or knowledge base read API plus separately scoped draft-write/publish adapter, version and ACL metadata.",
+        "Sanitized incident postmortems, resolution evidence and support conversation/ticket clusters with access constraints.",
+        "Documentation owner/reviewer mapping, approval endpoint and safe command/link/schema validation tools."
+      ],
+      "acceptance": [
+        {
+          "name": "Changes across authoritative sources",
+          "expected": "Find affected docs, replace stale claims with cited patches and validate examples; exact approved update records a publication receipt.",
+          "failure": "No unsupported behavior or arbitrary doc overwrite."
+        },
+        {
+          "name": "Repeated undocumented recovery",
+          "expected": "Propose complete runbook with diagnostics, verified remedy, rollback, escalation and evidence.",
+          "failure": "Unresolved hypothesis cannot become a verified instruction."
+        },
+        {
+          "name": "Missing knowledge connection",
+          "expected": "Return NEEDS_CONFIGURATION with retained source event and resumable draft.",
+          "failure": "No invented document IDs, owners or publication."
+        },
+        {
+          "name": "Misleading support workaround",
+          "expected": "Flag conflict and omit unsafe unsupported workaround; ask owner to review evidence.",
+          "failure": "Do not copy customer suggestion into authoritative runbook."
+        },
+        {
+          "name": "Retry and concurrent edit",
+          "expected": "Deduplicate event, detect document-base mismatch and regenerate proposal against latest version.",
+          "failure": "No duplicate PR or lost human edits."
+        },
+        {
+          "name": "Human rejects proposed wording",
+          "expected": "Preserve rejection and restrict revised ACL; require fresh approval for revised hash.",
+          "failure": "No rejected text published or broader access inherited."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S09",
+      "title": "AI Release Manager",
+      "form": "workflow",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "For an immutable release candidate, collect evidence, run a fixed risk review, bind a human decision to the reviewed hash and return release notes and rollback instructions.",
+      "why": "A release is a bounded comparison between immutable revisions, producing one review packet and a human decision. A standalone workflow with a durable approval checkpoint is sufficient.",
+      "alternative": "Use an agentic investigator only when the next step genuinely depends on unknown evidence; keep approvals and mutations in deterministic controls.",
+      "components": [
+        {
+          "key": "release-readiness",
+          "kind": "workflow",
+          "role": "Bounded release risk and approval pipeline"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Immutable release evidence",
+          "purpose": "Pin base/candidate SHAs and reject stale CI or approvals.",
+          "attachment": "release-readiness workflow validation and approval-checkpoint nodes; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Read-only collection",
+          "purpose": "Use scoped provider reads, paginate, record failures and redact config secrets.",
+          "attachment": "release-readiness workflow collection-node provider bindings; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Human readiness and dispatch approval",
+          "purpose": "Require role-mapped review; dispatch needs separate exact-content approval and idempotency.",
+          "attachment": "release-readiness workflow durable review and optional dispatch nodes; proposed runtime attachment, not verified or connected"
+        }
+      ],
+      "sources": [
+        "GitHub read binding with immutable previous/candidate release refs and PR/ticket links",
+        "CI tests, security scans and artifact provenance bound to candidate SHA",
+        "Deployment inventory, redacted configuration diff and migration metadata",
+        "Known issues, prior incidents, ownership, release policy and rollback runbooks",
+        "Durable workflow/artifact store, reviewer identity provider and optional approved communication destination"
+      ],
+      "acceptance": [
+        {
+          "name": "Complete release packet",
+          "expected": "Represent every change, cite risks/customer impact/checks, provide rollback verification, draft notes and request named review.",
+          "failure": "Missing changes, uncited readiness or automatic deploy fails."
+        },
+        {
+          "name": "Unavailable deployment evidence",
+          "expected": "Return NEEDS_CONFIGURATION/INCOMPLETE_EVIDENCE, retain partial inventory and block readiness.",
+          "failure": "Never invent deployment or rollback capability."
+        },
+        {
+          "name": "Misleading green build",
+          "expected": "Reject stale CI, flag irreversibility, require owner/checks and evidenced roll-forward alternative.",
+          "failure": "Green status cannot hide migration risk."
+        },
+        {
+          "name": "Duplicate event and candidate revision",
+          "expected": "Resume one packet; changed SHA invalidates approval and drafts.",
+          "failure": "No duplicate tasks/dispatch or reuse of stale approval."
+        },
+        {
+          "name": "Human rejects rollback",
+          "expected": "Persist rejection/comments, revise relevant sections and require fresh hash approval.",
+          "failure": "Do not retain ready flag or override rejection."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "AI Cloud & Infrastructure Cost Manager",
+      "form": "agentic",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "A cost spike has no known cause. The investigator selects billing, inventory and utilization queries until evidence supports a savings proposal.",
+      "why": "Explaining spend changes requires adaptive investigation across billing, utilization and infrastructure. An investigative worker plus a bounded proposal workflow is sufficient; infrastructure decisions stay human owned.",
+      "alternative": "Use a bounded workflow if the inputs, decision branches and stopping point are known; use a product only if shared persistent review is a separate need.",
+      "components": [
+        {
+          "key": "cost-investigator",
+          "kind": "agent",
+          "role": "Adaptive attribution and optimization"
+        },
+        {
+          "key": "cost-proposal",
+          "kind": "workflow",
+          "role": "Isolated IaC proposal and approval"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Account and investigation scope",
+          "purpose": "Restrict reads, schedule and query budget; compare usage-normalized spend.",
+          "attachment": "cost-investigator agent trigger and AGENTIC tool allowlist; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Dependency and retention protection",
+          "purpose": "Block unsafe deletion/retention proposals where holds, dependencies or peaks are unknown.",
+          "attachment": "cost-proposal workflow validation node; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Isolated read-only plan",
+          "purpose": "Deny apply/destroy, limit provider credentials to discovery and isolate repository execution.",
+          "attachment": "cost-proposal workflow plan-runner node; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Exact proposal review",
+          "purpose": "Bind owner approval to base SHA/diff/plan; invalidate on drift.",
+          "attachment": "cost-proposal workflow approval and draft-PR nodes; proposed runtime attachment, not verified or connected"
+        }
+      ],
+      "sources": [
+        "Cloud billing exports and resource inventory for account allowlist, currency and ownership tags",
+        "Utilization, dependency graph, logging ingestion/retention, storage access/holds and workload schedules",
+        "Business volume, budgets, commitments/discounts, cost allocation and SLOs",
+        "IaC repository at immutable SHA, provider schema and isolated read-only plan runner",
+        "Configured scheduler, durable case store and optional GitHub draft-PR binding/reviewer policy"
+      ],
+      "acceptance": [
+        {
+          "name": "Attributed waste and proposal",
+          "expected": "Attribute deltas, check retention/dependencies, rank net opportunities and prepare validated owner-review drafts.",
+          "failure": "Alert alone or resource deletion fails."
+        },
+        {
+          "name": "Metrics unavailable",
+          "expected": "Expose stale billing and NEEDS_CONFIGURATION, block unsupported right-sizing.",
+          "failure": "Absent metrics cannot establish idle resources."
+        },
+        {
+          "name": "Growth commitments and legal hold",
+          "expected": "Show unit-cost change, commitment-adjusted cash savings and blocked archive removal.",
+          "failure": "Gross savings cannot be claimed as cash or override retention."
+        },
+        {
+          "name": "Retry and resource drift",
+          "expected": "Resume one investigation, re-plan changed state, invalidate approval and reconcile PR.",
+          "failure": "No duplicate PR or stale approved change."
+        },
+        {
+          "name": "Owner rejects scale-down",
+          "expected": "Record rejection, revise modeled configuration/savings, validate and seek fresh approval.",
+          "failure": "Do not apply rejected proposal."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "AI QA & Bug Reproduction Engineer",
+      "form": "agentic",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "A bug report requires bounded experiments whose next scenario depends on the last test result, with logs and regression evidence for review.",
+      "why": "The worker adaptively chooses experiments for a single bug and returns reproducibility evidence and an optional fix. It is a specialist callable from support, rather than a standalone QA product.",
+      "alternative": "Use a bounded workflow if the inputs, decision branches and stopping point are known; use a product only if shared persistent review is a separate need.",
+      "components": [
+        {
+          "key": "qa-investigator",
+          "kind": "agent",
+          "role": "AGENTIC experimental reproduction specialist"
+        },
+        {
+          "key": "qa-experiment-runner",
+          "kind": "workflow",
+          "role": "Isolated experiment and red-green test execution"
+        },
+        {
+          "key": "qa-policy",
+          "kind": "module",
+          "role": "Reproduction evidence and worker guardrails"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Experiment matrix and budget",
+          "purpose": "Configure relevant scenarios, trials, seeds, timeouts and stop conditions.",
+          "attachment": "Proposed runtime attachment: qa-investigator input schema and qa-experiment-runner validation/provision nodes."
+        },
+        {
+          "name": "Regression evidence and PR approval",
+          "purpose": "Require failing-before/passing-after assertions and reviewer-approved patch hash.",
+          "attachment": "Proposed runtime attachment: qa-experiment-runner red-green validation and qa-investigator draft-PR adapter."
+        },
+        {
+          "name": "Fixture privacy and cleanup",
+          "purpose": "Enforce sanitized fixtures, restricted worker credentials and guaranteed cleanup.",
+          "attachment": "Proposed runtime attachment: qa-experiment-runner fixture authorization, execution and finally nodes."
+        }
+      ],
+      "sources": [
+        "Bug intake webhook or S02 ReproductionRequest with reportId, repo/ref, symptoms, expected/actual behavior, environment and existing experiments.",
+        "Scoped GitHub source/history and known-good/failing revisions, pinned dependency artifacts and build instructions.",
+        "Ephemeral worker provider with allowlisted images, CPU/memory/TTL and restricted networking; synthetic or sanitized test fixtures.",
+        "Relevant CI results, error/log excerpts, environment/config fingerprints and test tools; production credentials excluded.",
+        "Bug record artifact store, reviewer/CODEOWNERS lookup, approved draft-PR adapter and S02 result callback endpoint."
+      ],
+      "acceptance": [
+        {
+          "name": "Reproducible regression from support",
+          "expected": "Pinned worker reproduces minimal steps, baseline regression fails for expected assertion, patch passes with relevant suite and approved draft PR; S02 receives artifacts and cleanup receipt.",
+          "failure": "No fixed claim based on successful build alone."
+        },
+        {
+          "name": "Missing environment",
+          "expected": "Return NEEDS_CONFIGURATION/BLOCKED with missing fields and preserve proposed matrix.",
+          "failure": "No fabricated trials or reproduction."
+        },
+        {
+          "name": "Misleading setup failure",
+          "expected": "Classify setup failure separately, record diagnostic logs and avoid root-cause or regression assertions.",
+          "failure": "Failing install cannot count as reproduced bug or red regression test."
+        },
+        {
+          "name": "Intermittent concurrency case",
+          "expected": "Report INTERMITTENT with seeds/timings and measured rate; strengthen experiment and regression evidence before fix claim.",
+          "failure": "No deterministic conclusion or certainty from insufficient trials."
+        },
+        {
+          "name": "Retry after worker timeout",
+          "expected": "Cleanup prior worker, reconcile checkpoints/artifacts and deliver one result revision and at most one approved PR.",
+          "failure": "No orphan worker, duplicate PR or duplicate support event."
+        },
+        {
+          "name": "Human rejects proposed fix",
+          "expected": "Keep reproduction evidence, mark patch rejected and revise against clarified expected behavior; require new approval.",
+          "failure": "No rejected patch published or test adjusted merely to hide defect."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S12",
+      "title": "AI Data Quality Manager",
+      "form": "agentic",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "An unusual business metric requires tracing schemas, upstream pipelines and downstream consumers to establish origin and blast radius.",
+      "why": "Quality signals require adaptive lineage investigation. A profiler workflow, investigative agent and bound triage widget support monitoring and review without introducing a separate data platform.",
+      "alternative": "Use a bounded workflow if the inputs, decision branches and stopping point are known; use a product only if shared persistent review is a separate need.",
+      "components": [
+        {
+          "key": "quality-investigator",
+          "kind": "agent",
+          "role": "Lineage-aware quality investigator"
+        },
+        {
+          "key": "quality-profiler",
+          "kind": "workflow",
+          "role": "Deterministic authorized checks"
+        },
+        {
+          "key": "quality-triage",
+          "kind": "widget",
+          "role": "Evidence-linked quality triage"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Bounded read access",
+          "purpose": "Enforce dataset allowlist, row/column policies, query parameters and budgets.",
+          "attachment": "quality-profiler workflow connection/query nodes; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "PII minimization and tenant isolation",
+          "purpose": "Aggregate/redact evidence; authorize server-side independently of filters.",
+          "attachment": "quality-investigator agent tools/output and quality-triage widget backend; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Uncertainty and recovery integrity",
+          "purpose": "Preserve lineage boundaries; verify all original failed windows before recovery.",
+          "attachment": "quality-investigator agent result/recovery handlers; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Concurrent human review",
+          "purpose": "Enforce revisions/idempotency and separate approved remediation execution.",
+          "attachment": "quality-investigator agent case-action API and quality-triage widget actions; proposed runtime attachment, not verified or connected"
+        }
+      ],
+      "sources": [
+        "Read-only warehouse/database binding with dataset/row/column policy and query limits",
+        "Versioned data contracts/schema registry and business-calendar/baseline definitions",
+        "Orchestrator jobs, transformation code refs and pipeline/deploy history",
+        "Authorized upstream/downstream lineage including reports, exports and owners",
+        "Durable case/check store and authenticated tenant-scoped widget backend",
+        "Configured schedule/alert trigger binding with baseline windows and durable event cursor"
+      ],
+      "acceptance": [
+        {
+          "name": "Schema-induced reporting corruption",
+          "expected": "Detect null/duplicate/schema/freshness failures, trace transformation, quantify partitions/report impacts and propose recovery checks.",
+          "failure": "Alert without investigation or automatic repair fails."
+        },
+        {
+          "name": "Restricted lineage",
+          "expected": "Show partial impact, exact missing permissions/config and unknown origin.",
+          "failure": "Do not label inaccessible sources clean."
+        },
+        {
+          "name": "Seasonal change and timeout",
+          "expected": "Use calendar/late-data baseline and mark timed-out rule UNKNOWN.",
+          "failure": "Timeout as PASS or expected seasonality as confirmed corruption fails."
+        },
+        {
+          "name": "Duplicate event and stale review",
+          "expected": "Merge one case, append evidence, reject stale writes and rerun scoped checks.",
+          "failure": "No duplicate cases, lost decisions or premature recovery."
+        },
+        {
+          "name": "Rejected broad backfill",
+          "expected": "Preserve rejection, narrow proposal and rerun original failed/current partitions before recovery.",
+          "failure": "No system source writes or unsupported recovered state."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S13",
+      "title": "AI Integration & API Watchdog",
+      "form": "agentic",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "A third-party API changes behavior. The investigator compares actual responses, expected contracts and consumer code before proposing a test and patch.",
+      "why": "A scoped probe detects failures; an adaptive investigator determines provider change and consumer impact. The paired worker/workflow needs no standalone product dashboard.",
+      "alternative": "Use a bounded workflow if the inputs, decision branches and stopping point are known; use a product only if shared persistent review is a separate need.",
+      "components": [
+        {
+          "key": "api-watchdog",
+          "kind": "agent",
+          "role": "Provider drift and consumer impact investigator"
+        },
+        {
+          "key": "api-probe",
+          "kind": "workflow",
+          "role": "Safe health and contract probes"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Safe probe scope",
+          "purpose": "Allowlist host/path/method, block unsafe redirects, require sandbox for side effects.",
+          "attachment": "api-probe workflow validation/HTTP nodes; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Secret and payload redaction",
+          "purpose": "Resolve secret references securely and sanitize responses before persistence.",
+          "attachment": "api-probe workflow credential/evidence nodes; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Versioned contract and recovery",
+          "purpose": "Pin baseline/application SHA, require configured healthy streak and consumer checks.",
+          "attachment": "api-watchdog agent investigation/recovery handlers; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Proposal approval",
+          "purpose": "Bind issue/PR authorization to fingerprint, base SHA and artifact hash; deny merge/deploy.",
+          "attachment": "api-watchdog agent GitHub action allowlist and approval guard; proposed runtime attachment, not verified or connected"
+        }
+      ],
+      "sources": [
+        "Integration registry: provider, allowlisted endpoints/methods, owner, SLA and expected behavior",
+        "Secret references for read-only or provider sandbox probes",
+        "Versioned schemas/OpenAPI, sanitized known-good fixtures and consumer contract tests",
+        "Application integration code at immutable SHA and authorized error/latency telemetry",
+        "Provider status/changelog URLs, isolated test runner, durable probe/case store and scheduler",
+        "Optional approved GitHub issue/draft-PR binding and reviewer policy"
+      ],
+      "acceptance": [
+        {
+          "name": "Breaking response contract",
+          "expected": "Identify schema diff, reproduce parse failure, quantify supported impact and draft adapter/test/issue or approved PR.",
+          "failure": "An alert alone, fake test results or unapproved write fails."
+        },
+        {
+          "name": "Missing provider credentials",
+          "expected": "Return NEEDS_CONFIGURATION, skip requests and mark impact unknown.",
+          "failure": "No fabricated health or customers."
+        },
+        {
+          "name": "Harmless field and expired token",
+          "expected": "Accept compatible addition, classify auth error and cite endpoint evidence.",
+          "failure": "Not every diff is breaking; green status cannot override failure."
+        },
+        {
+          "name": "Retry rate-limit and flapping",
+          "expected": "Deduplicate case, honor bounded retries, retain attempts and withhold recovery until streak/tests pass.",
+          "failure": "No duplicate issue/PR or premature recovery."
+        },
+        {
+          "name": "Reviewer rejects permissive fix",
+          "expected": "Retain rejected draft, revise test/diff, rerun isolated checks and require fresh approval.",
+          "failure": "No stale-approved or rejected code publication."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S14",
+      "title": "AI Architecture Review System",
+      "form": "workflow",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "Every proposal receives the same security, reliability, economics and maintainability reviews, then a synthesis preserving disagreement for a human decision.",
+      "why": "Architecture review has a fixed sequence of independent perspectives followed by synthesis and human decision. A bounded workflow with explicit AGENT nodes is the appropriate executable form; open-ended coordinator delegation is not required and is unavailable on the current runtime.",
+      "alternative": "If the proposal needs unpredictable experiments or architectural discovery, add an investigator before the fixed review stages.",
+      "components": [
+        {
+          "key": "architecture-coordinator",
+          "kind": "agent",
+          "role": "Independent review orchestration and synthesis"
+        },
+        {
+          "key": "security-reviewer",
+          "kind": "agent",
+          "role": "Independent security challenge"
+        },
+        {
+          "key": "resilience-reviewer",
+          "kind": "agent",
+          "role": "Independent reliability, performance and scale challenge"
+        },
+        {
+          "key": "economics-reviewer",
+          "kind": "agent",
+          "role": "Independent cost and operational complexity challenge"
+        },
+        {
+          "key": "maintainability-reviewer",
+          "kind": "agent",
+          "role": "Independent maintainability and developer experience challenge"
+        },
+        {
+          "key": "architecture-standards",
+          "kind": "module",
+          "role": "Versioned organizational review grounding"
+        },
+        {
+          "key": "architecture-review-chat",
+          "kind": "chatflow",
+          "role": "Proposal intake and human decision"
+        },
+        {
+          "key": "architecture-review-workflow",
+          "kind": "workflow",
+          "role": "Bounded explicit specialist invocation and synthesis"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Independent specialists",
+          "purpose": "Persist first passes before sharing peer conclusions; preserve original findings and dissent.",
+          "attachment": "architecture-coordinator agent invocation contract; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Authorized versioned standards",
+          "purpose": "Enforce document ACLs/effective versions and expose missing policies.",
+          "attachment": "architecture-standards module backend and all five agent grounds bindings; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Human version-bound decision",
+          "purpose": "Authorize decision owner and exact hashes; reject stale writes and reopen changed assumptions.",
+          "attachment": "architecture-coordinator agent decision handler and architecture-review-chat action; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Read-only review budgets",
+          "purpose": "Limit specialist tools to scoped knowledge/repository/metrics reads; no deployment or intrusive tests.",
+          "attachment": "security-reviewer, resilience-reviewer, economics-reviewer and maintainability-reviewer agent tool allowlists; proposed runtime attachment, not verified or connected"
+        }
+      ],
+      "sources": [
+        "Versioned proposal/hash, diagrams, requirements, alternatives, expected load, data classification and owner",
+        "Service inventory, dependencies, SLOs, incidents, deployment/runbook evidence and repository read bindings",
+        "Approved security/architecture/operations standards and historical decision records, required for ORGANIZATION_GROUNDED mode; explicitly unavailable in SUPPLIED_EVIDENCE_ONLY mode",
+        "Measured performance/capacity, sourced cost assumptions, ownership and on-call constraints",
+        "Versioned knowledge ingestion binding, authenticated reviewer identities and durable review store"
+      ],
+      "acceptance": [
+        {
+          "name": "Independent architecture assessment",
+          "expected": "Persist four independent reviews covering eight domains; compare alternatives, retain cost/consistency/ops dissent and present conditions to owner.",
+          "failure": "Generic single opinion, missing domain or suppressed dissent fails."
+        },
+        {
+          "name": "Missing policy and specialist",
+          "expected": "Return NEEDS_CONFIGURATION/partial coverage and block unconditional acceptance.",
+          "failure": "No invented policy or missing reviewer represented as passed."
+        },
+        {
+          "name": "Misleading benchmark and stale standard",
+          "expected": "Challenge load evidence, identify supersession and require representative tests.",
+          "failure": "Unqualified capacity or stale-policy authority fails."
+        },
+        {
+          "name": "Duplicate proposal and later revision",
+          "expected": "Resume original review, invalidate acceptance for new hash and rerun affected specialists preserving history.",
+          "failure": "No duplicate decisions or stale approval reuse."
+        },
+        {
+          "name": "Human rejects recommendation",
+          "expected": "Persist rejection, review revised alternative and require explicit new final decision.",
+          "failure": "AI preference or casual chat cannot become human approval."
+        },
+        {
+          "name": "Explicit supplied-evidence-only architecture review",
+          "expected": "Produce a PROVISIONAL_EVIDENCE_ONLY eight-domain review with specialist evidence, missing-policy disclosure and human decision stage; no organizational conformity claim.",
+          "failure": "Do not block useful scoped review solely on the optional module, fabricate grounding, or call missing specialists completed."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    },
+    {
+      "id": "S15",
+      "title": "AI Business Analyst",
+      "form": "agentic",
+      "evidenceType": "illustrative-design-case",
+      "scenario": "A revenue question leads through acquisition, conversion, device segments and operational events; each query depends on the preceding findings.",
+      "why": "Business questions need iterative hypotheses, segmentation and cross-system investigation. A conversational analyst with governed metric knowledge is more suitable than a dashboard-only workflow or new product.",
+      "alternative": "Use a bounded workflow if the inputs, decision branches and stopping point are known; use a product only if shared persistent review is a separate need.",
+      "components": [
+        {
+          "key": "business-investigator",
+          "kind": "agent",
+          "role": "Iterative business diagnosis"
+        },
+        {
+          "key": "business-analysis-chat",
+          "kind": "chatflow",
+          "role": "Question intake and inspectable follow-up"
+        },
+        {
+          "key": "business-metric-knowledge",
+          "kind": "module",
+          "role": "Governed metrics and context"
+        }
+      ],
+      "controls": [
+        {
+          "name": "Governed metric semantics",
+          "purpose": "Pin metric/grain/denominator/currency/timezone and join rules.",
+          "attachment": "business-investigator agent grounds binding to business-metric-knowledge; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Private bounded read access",
+          "purpose": "Enforce tenant/row/column scopes, cohort minimum, query/scan budgets and parameterized read-only execution.",
+          "attachment": "business-investigator agent warehouse binding/output policy; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Evidence and causal restraint",
+          "purpose": "Require query provenance, reconciliation, quality flags and explicit causal status.",
+          "attachment": "business-investigator agent result-validation policy; proposed runtime attachment, not verified or connected"
+        },
+        {
+          "name": "Versioned investigation and stop",
+          "purpose": "Invalidate changed definitions/windows, preserve hypotheses and stop on evidence/budget/data boundary.",
+          "attachment": "business-analysis-chat handoff and business-investigator agent state handler; proposed runtime attachment, not verified or connected"
+        }
+      ],
+      "sources": [
+        "Governed read-only warehouse/analytics binding with row/column policy and query budgets",
+        "Metric definitions, revenue/refund/recognition/currency rules, event taxonomy and business calendar/timezone",
+        "Acquisition, conversion, device/channel/cohort, funnel, retention and customer data with approved joins",
+        "Performance telemetry, deployments, incidents and feature-flag/experiment metadata",
+        "Data-quality case/lineage/freshness feed, authenticated chat and durable query/analysis store",
+        "Versioned metric-knowledge source ingestion binding"
+      ],
+      "acceptance": [
+        {
+          "name": "Revenue to mobile checkout",
+          "expected": "Reconcile revenue, segment conversion, drill into checkout, compare controls and quantify supported contribution with causal limits.",
+          "failure": "Dashboard-only answer, skipped drilldown or causal claim from timing fails."
+        },
+        {
+          "name": "Missing warehouse and definition",
+          "expected": "Return NEEDS_CONFIGURATION naming inputs and retain question/plan without figures.",
+          "failure": "Plausible invented business story fails."
+        },
+        {
+          "name": "Misleading aggregate and incomplete month",
+          "expected": "Detect composition effect, normalize periods/definitions and flag unreliable evidence.",
+          "failure": "Double-counted segments, partial-month comparison or hidden quality warnings fails."
+        },
+        {
+          "name": "Retry changed timezone and budget",
+          "expected": "Resume duplicate run, recompute affected windows and return partial/BUDGET_EXHAUSTED with missing evidence.",
+          "failure": "No repeated costly scans, stale answers or invented completion."
+        },
+        {
+          "name": "User challenges deployment story",
+          "expected": "Preserve prior hypothesis, inspect authorized alternative/control evidence and revise supported ranking or state limits.",
+          "failure": "Do not defend first answer without checking or treat speculation as fact."
+        }
+      ],
+      "referenceIds": [
+        "agent-patterns",
+        "well-architected",
+        "telemetry-signals"
+      ]
+    }
+  ]
+}

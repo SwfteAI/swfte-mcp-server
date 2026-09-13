@@ -187,7 +187,8 @@ describe('advertised surface', () => {
     // reason the solution tools are — a gate anyone can group-filter away is
     // not a gate.
     const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x' } as never));
-    assert.ok(selected.length < 93, `default surface is ${selected.length} tools`);
+    // Chatflow turn input plus read-only status and explicit administrative abandonment complete durable recovery.
+    assert.ok(selected.length <= 95, `default surface is ${selected.length} tools`);
     assert.ok(selected.length > 40, `default surface is only ${selected.length} tools`);
   });
 

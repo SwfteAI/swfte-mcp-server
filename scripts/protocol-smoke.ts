@@ -15,21 +15,30 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ENTRY = join(HERE, '..', 'dist', 'index.js');
+const ENTRY = process.env.SWFTE_SMOKE_ENTRY ?? join(HERE, '..', 'dist', 'index.js');
 
 async function main(): Promise<void> {
   const transport = new StdioClientTransport({
-    command: 'node',
+    command: process.execPath,
     args: [ENTRY],
     env: {
       ...process.env,
       // No network call is made, so a placeholder is fine and keeps CI secret-free.
-      SWFTE_PAT: process.env.SWFTE_PAT ?? 'pat_protocol_smoke_placeholder',
-      SWFTE_TOOLS: process.env.SWFTE_TOOLS ?? 'all',
+      SWFTE_PAT: 'pat_protocol_smoke_placeholder',
+      SWFTE_API_KEY: '',
+      SWFTE_DEBUG: '0',
+      SWFTE_ALLOW_DEPLOY: '0',
+      SWFTE_BASE_URL: 'https://example.invalid',
+      SWFTE_TOOLS: 'all',
     },
   });
 
   const client = new Client({ name: 'protocol-smoke', version: '1.0.0' }, { capabilities: {} });
+  const timeout = setTimeout(() => {
+    console.error('Protocol smoke exceeded 30 seconds');
+    void client.close().finally(() => process.exit(1));
+  }, 30_000);
+  try {
   await client.connect(transport);
   console.log('✓ handshake');
 
@@ -48,6 +57,8 @@ async function main(): Promise<void> {
   // The core tools are the contract; their absence is a wiring failure, not a
   // preference, so check them by name rather than trusting the count.
   const required = [
+    'swfte_solution_advise',
+    'swfte_capabilities',
     'swfte_whoami',
     'swfte_build',
     'swfte_build_status',
@@ -72,14 +83,29 @@ async function main(): Promise<void> {
   if (!badInput.isError) problems.push('invalid input was not rejected');
   else console.log('✓ invalid input → isError');
 
+  // Local guidance tools exercise calls without backend access or credentials.
+  const capabilityReply = await client.callTool({ name: 'swfte_capabilities', arguments: { kind: 'agent' } });
+  const capabilityData = JSON.parse((capabilityReply.content as Array<{text:string}>)[0]!.text);
+  if (capabilityReply.isError || capabilityData.evidenceLevel !== 'LOCAL_IMPLEMENTATION_ONLY' || capabilityData.adapters[0].verbs.includes('deploy')) problems.push('capability tool invents agent deployment support');
+  const adviceReply = await client.callTool({ name: 'swfte_solution_advise', arguments: { facts: { boundedSteps: true, adaptiveInvestigation: false }, caseStudyIds: ['S14'] } });
+  const advice = JSON.parse((adviceReply.content as Array<{text:string}>)[0]!.text);
+  if (adviceReply.isError || advice.recommendation !== 'workflow' || advice.examples[0].id !== 'S14' || advice.caseIndex.length !== 15) problems.push('solution advice/case references failed protocol call');
+  const unsupportedReply = await client.callTool({ name: 'swfte_deploy', arguments: { kind: 'agent', id: 'local-no-network', action: 'teardown' } });
+  const unsupported = JSON.parse((unsupportedReply.content as Array<{text:string}>)[0]!.text);
+  if (!unsupportedReply.isError || unsupported.code !== 'UNSUPPORTED_CAPABILITY' || !unsupported.nextAction.includes('swfte_capabilities')) problems.push('unsupported capability recovery missing');
+  const missingCase = await client.callTool({ name: 'swfte_solution_advise', arguments: { facts: {}, caseStudyIds: ['not-a-real-case'] } });
+  if (!missingCase.isError) problems.push('unknown case study was not rejected');
+  else console.log('✓ guidance calls, adapter limits and unknown reference rejection');
+
   await client.close();
 
   if (problems.length > 0) {
     console.error(`\n✗ ${problems.length} problem(s):`);
     for (const p of problems) console.error(`  - ${p}`);
-    process.exit(1);
+    throw new Error('Protocol contract failed');
   }
   console.log('\n✓ protocol smoke passed');
+  } finally { clearTimeout(timeout); await client.close(); }
 }
 
 main().catch((err) => {

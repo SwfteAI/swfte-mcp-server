@@ -33,6 +33,7 @@ export const TOOL_GROUPS = [
   'workflows',
   'agents',
   'chatflows',
+  'widgets',
   'datasets',
   'modules',
   'rag',

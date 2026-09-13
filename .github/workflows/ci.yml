@@ -4,23 +4,22 @@ on:
   push:
     branches: [master, main]
   pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm install --no-audit --no-fund
-      - run: npm run typecheck
-      - run: npm run build
-      - run: |
-          # smoke: spawn server, send `tools/list`, expect a non-empty response
-          SWFTE_API_KEY=ci-fake-key SWFTE_BASE_URL=https://example.invalid \
-            node dist/index.js < /dev/null & SERVER_PID=$!
-          sleep 1
-          kill $SERVER_PID 2>/dev/null || true
-          echo "smoke ok"
+      - run: node scripts/check-release-version.mjs
+      - run: npm ci --no-audit --no-fund
+      - name: Verify source, tests, protocol and distributable
+        run: npm run verify:offline
