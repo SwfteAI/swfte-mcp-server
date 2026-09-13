@@ -1,5 +1,6 @@
 import type { SwfteClient } from '../client.js';
 import { SwfteApiError } from '../client.js';
+import { TERMINAL_DEPLOY_PHASES, toWireDeployOption } from '../contracts/backend-options.js';
 import {
   isSucceededRunStatus,
   isTerminalRunStatus,
@@ -26,10 +27,25 @@ const WORKFLOWS = '/v2/workflows';
 const EXECUTIONS = '/v2/workflow-executions';
 
 /**
- * Deploy phases, in order. `READY` and `FAILED` are terminal.
- * Mirrors the studio's `WORKFLOW_DEPLOY_PHASE_ORDER`.
+ * Has the managed deploy stopped moving?
+ *
+ * `GET /deploy/{id}/status` returns a `DeploymentStatusEvent`, which carries an
+ * authoritative `terminal` boolean alongside `phase`. Trust the boolean: the
+ * backend's `derivePhase` maps STOPPING and TERMINATING onto phase TERMINATED
+ * while `isTerminal` still reports false, so phase alone would call a
+ * shutting-down deployment finished and return a URL that is going away.
+ *
+ * The phase set is only the fallback for a response that carries no `terminal`
+ * field, and it is read from the options contract rather than guessed — the
+ * previous hand-written set waited for CANCELLED or DESTROYED, neither of which
+ * `DeploymentStatusEvent.Phase` can ever produce, and did not list TERMINATED,
+ * so a torn-down deploy polled until the 10-minute ceiling and was reported as
+ * a timeout instead of a finished teardown.
  */
-const TERMINAL_DEPLOY_PHASES = new Set(['READY', 'FAILED', 'CANCELLED', 'DESTROYED']);
+function deployIsTerminal(snapshot: any): boolean {
+  if (typeof snapshot?.terminal === 'boolean') return snapshot.terminal;
+  return TERMINAL_DEPLOY_PHASES.has(String(snapshot?.phase ?? snapshot?.state ?? '').toUpperCase());
+}
 
 /**
  * The wizard's `GeneratedWorkflow` uses `connections`; the draft store and the
@@ -366,7 +382,7 @@ export const workflowAdapter: KindAdapter = {
             method: 'POST',
             path: `${WORKFLOWS}/${encodeURIComponent(id)}/deploy/managed`,
             body: {
-              option: opts.option ? { BYO: 'BYO_CLOUD_DEDICATED', shared: 'SHARED_CLOUD', dedicated: 'DEDICATED_INSTANCE' }[opts.option] : undefined,
+              option: toWireDeployOption(opts.option),
               region: opts.region,
               lifecycle: opts.lifecycle,
               provider: opts.provider, cloudConnectionId: opts.cloudConnectionId, providerConfigName: opts.providerConfigName,
@@ -406,7 +422,7 @@ export const workflowAdapter: KindAdapter = {
           path: `${WORKFLOWS}/${encodeURIComponent(id)}/deploy/${encodeURIComponent(String(deploymentId))}/status`,
           retries: 1,
         }),
-      (s) => TERMINAL_DEPLOY_PHASES.has(String(s?.phase ?? s?.state ?? '').toUpperCase()),
+      (s) => deployIsTerminal(s),
       { timeoutMs: opts.timeoutMs ?? 600_000, intervalMs: 5_000 }
     );
 

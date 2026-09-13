@@ -14,6 +14,14 @@ import { requiredConnections } from '../connections.js';
 import { gate, withClientTransport } from '../preflight.js';
 import { deriveFromLive } from '../preflight/derive.mjs';
 import type { ToolDefinition } from './_types.js';
+import {
+  DeployOptionEnum,
+  DeployProviderEnum,
+  DeployLifecycleEnum,
+  DeployPathEnum,
+  GpuTierEnum,
+  DEPLOY_OPTIONS,
+} from '../contracts/backend-options.js';
 
 /**
  * Providers this workflow needs that nobody has signed in to yet.
@@ -367,21 +375,21 @@ export const shipTools: ToolDefinition[] = [
       action: z.enum(['preview', 'deploy', 'teardown']).optional().describe('Default "preview".'),
       confirm: z.boolean().optional().describe('Required, with SWFTE_ALLOW_DEPLOY=1, to actually provision.'),
       deploymentId: z.string().optional().describe('Which deployment to tear down.'),
-      option: z.enum(['BYO', 'shared', 'dedicated']).optional().describe('Workflow managed capacity intent; application dedicated maps to SERVER. Other adapters may not forward this option. Consult swfte_capabilities; verify resulting target/profile, not just this request.'),
+      option: DeployOptionEnum.optional().describe(`Workflow managed capacity intent. Accepts the DeployOption wire values the Studio deploy modal sends (${DEPLOY_OPTIONS.join(', ')}) and the short aliases BYO/shared/dedicated. Application: dedicated maps to hosting tier SERVER. Other adapters may not forward this option. Consult swfte_capabilities; verify the resulting target/profile, not just this request.`),
       region: z.string().optional(),
       gpuTier: z.string().optional(),
-      lifecycle: z.enum(['ON_DEMAND', 'ALWAYS_ON']).optional(),
+      lifecycle: DeployLifecycleEnum.optional(),
       secretId: z.string().optional().describe('Legacy unsupported field. Rejected; use a cloudConnectionId or providerConfigName for managed credentials.'),
-      provider: z.enum(['kubernetes', 'digitalocean', 'aws', 'awsLambda', 'gcp', 'azure', 'runpod']).optional().describe('Workflow managed provider; backend default kubernetes. This selects the managed route.'),
+      provider: DeployProviderEnum.optional().describe('Workflow managed provider; backend default kubernetes. This selects the managed route.'),
       cloudConnectionId: z.string().min(1).optional().describe('Existing tenant cloud connection for BYO deployment; not a raw secret.'),
       providerConfigName: z.string().min(1).optional().describe('Existing Crossplane ProviderConfig name.'),
       sizing: z.object({
-        nodeCount: z.number().int().positive().optional(), gpuTier: z.enum(['NONE', 'T4', 'A10', 'A100', 'H100']).optional(),
+        nodeCount: z.number().int().positive().optional(), gpuTier: GpuTierEnum.optional(),
         gpuCount: z.number().int().min(0).optional(), cpu: z.string().regex(/^(?:[1-9][0-9]*(?:\.[0-9]+)?|0\.[0-9]+|[1-9][0-9]*m)$/).optional(),
         memoryGi: z.number().int().positive().optional(), replicas: z.number().int().positive().optional(),
       }).strict().optional().describe('Managed workflow sizing. Cost estimates are computed by the backend, not supplied here.'),
       idleTimeoutSec: z.number().int().min(0).optional(),
-      path: z.enum(['crossplane', 'terraform']).optional().describe('Managed backend provisioning path; availability must be verified.'),
+      path: DeployPathEnum.optional().describe('Managed backend provisioning path; availability must be verified.'),
       timeoutMs: z.number().int().min(10_000).optional(),
       skipPreflight: z
         .boolean()

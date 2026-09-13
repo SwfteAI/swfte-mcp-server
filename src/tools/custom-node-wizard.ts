@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ToolDefinition } from './_types.js';
+import { CustomNodeModeEnum } from '../contracts/backend-options.js';
 const id = () => z.string().trim().min(1).max(200).refine(v => v !== '.' && v !== '..', 'Invalid identifier');
 const base = (workspaceId: string) => `/v2/workspaces/${encodeURIComponent(workspaceId)}/custom-nodes`;
 
@@ -29,7 +30,7 @@ export const customNodeWizardTools: ToolDefinition[] = [
   {
     name: 'swfte_custom_nodes_generate',
     description: 'Generate a custom workflow node from PROMPT, DOC, URL, or a small base64 SCREENSHOT. Optional autoCreate persists it. This starts a billable generation even though the backend uses GET; never retry automatically. Input is query transported, limited to 6000 characters.',
-    inputSchema: z.object({ workspaceId: id(), mode: z.enum(['PROMPT', 'DOC', 'URL', 'SCREENSHOT']), input: z.string().trim().min(1).max(6000),
+    inputSchema: z.object({ workspaceId: id(), mode: CustomNodeModeEnum, input: z.string().trim().min(1).max(6000),
       autoCreate: z.boolean().default(false), model: z.string().min(1).optional() }),
     execute: async (input, { client }) => customNodeTerminal(await client.request({
       method: 'GET', path: `${base(input.workspaceId)}/wizard/generate/stream`, workspaceId: input.workspaceId,

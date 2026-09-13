@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ToolDefinition } from './_types.js';
+import { ChatflowChannelEnum, ChatflowInputTypeEnum } from '../contracts/backend-options.js';
 
 const Workspace = z.object({
   workspaceId: z.string().optional(),
@@ -9,7 +10,7 @@ const SessionInput = Workspace.extend({
   sessionId: z.string().min(1),
   operationId: z.string().trim().min(1).max(128),
   input: z.string(),
-  inputType: z.enum(['TEXT', 'VOICE_TRANSCRIPT', 'DTMF', 'SESSION_START']).default('TEXT'),
+  inputType: ChatflowInputTypeEnum.default('TEXT'),
   metadata: z.record(z.unknown()).optional(),
 }).strict();
 
@@ -116,7 +117,7 @@ export const chatFlowTools: ToolDefinition[] = [
     description: 'Start a new conversational session for a deployed chatflow.',
     inputSchema: Workspace.extend({
       chatFlowId: z.string(),
-      channel: z.enum(['WEB_CHAT', 'WHATSAPP', 'TELEGRAM', 'VOICE', 'WIDGET']).optional(),
+      channel: ChatflowChannelEnum.optional().describe('Session channel. SMS was previously unreachable here even though ChannelType and the Studio session drawer both offer it.'),
       userId: z.string().optional(),
       metadata: z.record(z.unknown()).optional(),
     }),

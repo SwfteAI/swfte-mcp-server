@@ -5,6 +5,7 @@ import { buildKnowledge } from '../knowledge.js';
 import { checkGroundingIsUsable, moduleForDataset, writeWire, type SolutionKindLike } from '../wiring.js';
 import { RELATIONS } from '../solution.js';
 import type { ToolDefinition } from './_types.js';
+import { IndexingTechniqueEnum } from '../contracts/backend-options.js';
 
 /** Datasets are wire endpoints and knowledge sources, though no wizard builds one. */
 const KindArg = z.enum([
@@ -41,7 +42,7 @@ const KnowledgeSchema = z.object({
       })
     )
     .min(1),
-  indexingTechnique: z.enum(['HIGH_QUALITY', 'ECONOMY']).optional(),
+  indexingTechnique: IndexingTechniqueEnum.optional(),
   permission: z.string().optional(),
   probeQuery: z.string().optional().describe('Query used for the retrieval probe. Defaults to the description.'),
   waitMs: z.number().int().min(10_000).max(MAX_ORCHESTRATION_MS).optional(),
