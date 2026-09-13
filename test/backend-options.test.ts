@@ -4,6 +4,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { allTools } from '../src/tools/index.js';
+import { selectTools } from '../src/server.js';
+import { loadConfig } from '../src/config.js';
 import {
   BACKEND_OPTION_CONTRACT,
   DEPLOY_OPTIONS,
@@ -134,4 +136,20 @@ test('zod really rejects a value outside a governed list', () => {
   const schema = toolNamed('swfte_widgets_configure').inputSchema as z.ZodTypeAny;
   assert.throws(() => schema.parse({ widgetId: 'w', configuration: { viewType: 'NOT_A_VIEW' } }));
   assert.ok(schema.safeParse({ widgetId: 'w', configuration: { viewType: 'TABLE' } }).success);
+});
+
+test('the documented tool counts are the real ones', () => {
+  // README.md, docs/TOOLS.md and docs/ATTACH.md all advertised 119/69 while the
+  // server registered 183 and advertised 96. A count in prose is a claim like
+  // any other, and this is the cheapest place to keep it true.
+  const total = allTools.length;
+  const advertised = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x' } as never)).length;
+  for (const file of ['README.md', 'docs/TOOLS.md', 'docs/ATTACH.md']) {
+    const text = readFileSync(file, 'utf8');
+    assert.ok(text.includes(String(total)), `${file} does not mention the real tool count (${total})`);
+    assert.ok(text.includes(String(advertised)), `${file} does not mention the real default count (${advertised})`);
+    assert.ok(!/\b119 tools\b/.test(text), `${file} still claims 119 tools`);
+  }
+  const config = readFileSync('src/config.ts', 'utf8');
+  assert.ok(!/~?119 tools/.test(config), 'src/config.ts still claims 119 tools');
 });

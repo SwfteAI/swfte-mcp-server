@@ -55,7 +55,7 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is ~119 tools, which measurably degrades a model's ability
+ * The full surface is 183 tools, which measurably degrades a model's ability
  * to pick the right one. This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
  * `SWFTE_TOOLS=all` advertises everything, and `swfte_whoami` reports which

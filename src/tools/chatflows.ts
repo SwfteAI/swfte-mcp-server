@@ -86,7 +86,13 @@ export const chatFlowTools: ToolDefinition[] = [
   {
     name: 'swfte_chatflows_deploy',
     title: 'Deploy chatflow',
-    description: 'Deploy a chatflow so live sessions can use it.',
+    description:
+      'Deploy a chatflow — POST /v2/chatflows/{id}/deploy — so live sessions can use it. This is a ' +
+      'promotion boundary: it changes what real callers reach. It returns the backend response and ' +
+      'nothing more — it does not read the chatflow back, does not confirm the bound agent resolves, ' +
+      'and does not start a session. A 200 here means the deploy request was accepted; use ' +
+      'swfte_chatflows_get for the persisted state and swfte_chatflows_session_start for proof that a ' +
+      'turn actually completes.',
     inputSchema: Workspace.extend({ chatFlowId: z.string() }),
     execute: async (input, { client }) =>
       client.request({
@@ -98,7 +104,12 @@ export const chatFlowTools: ToolDefinition[] = [
   {
     name: 'swfte_chatflows_publish',
     title: 'Publish chatflow as widget',
-    description: 'Publish a chatflow and produce a Swfte Widget configuration usable by the chat-flow widget SDK.',
+    description:
+      'Publish a chatflow — POST /v2/chatflows/{id}/publish — producing a Swfte Widget configuration ' +
+      'for the chat-flow widget SDK. Promotion boundary, and it mints a public surface: the returned ' +
+      'configuration is what an embedding page will use. It does not verify allowed origins, does not ' +
+      'confirm the widget renders, and does not prove the brain answers. Verify with ' +
+      'swfte_widgets_get and a real session before treating the embed as working.',
     inputSchema: Workspace.extend({
       chatFlowId: z.string(),
       publishConfig: z.record(z.unknown()).optional(),

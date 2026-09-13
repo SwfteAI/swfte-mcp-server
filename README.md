@@ -45,7 +45,7 @@ widget, application, or MCP server**.
   server-side page cap, read-merge-write updates where the raw PATCH would wipe
   omitted fields, retry with load-shedding detection, and typed error envelopes
   carrying the backend's own code plus a suggested action.
-- **119 tools available, 69 advertised by default**, adjustable via `SWFTE_TOOLS`.
+- **183 tools available, 96 advertised by default**, adjustable via `SWFTE_TOOLS`.
 - **Stdio transport**, multi-arch Docker image, and Zod-typed inputs published
   as JSON Schema over `tools/list`.
 
@@ -180,8 +180,8 @@ or `mcp-server`.
 | Audit | `swfte_audit_*` | `audit` | |
 | Cost control | `swfte_cost_*` | `cost` | |
 
-Advertising all 119 tools measurably degrades a model's ability to pick the
-right one, so 69 are advertised by default. `SWFTE_TOOLS=all` widens it, and
+Advertising all 183 tools measurably degrades a model's ability to pick the
+right one, so 96 are advertised by default. `SWFTE_TOOLS=all` widens it, and
 `swfte_whoami` reports which groups are live and what is hidden — nothing
 disappears silently.
 

@@ -1,6 +1,6 @@
 # Tool reference
 
-`@swfte/mcp-server` exposes **119 tools**, of which a curated **69** are
+`@swfte/mcp-server` exposes **183 tools**, of which a curated **96** are
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
 
 Tools that take a `workspaceId` only honour it for **API-key** credentials. A
