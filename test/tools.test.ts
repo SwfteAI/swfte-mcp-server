@@ -188,7 +188,12 @@ describe('advertised surface', () => {
     // not a gate.
     const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x' } as never));
     // Chatflow turn input plus read-only status and explicit administrative abandonment complete durable recovery.
-    assert.ok(selected.length <= 95, `default surface is ${selected.length} tools`);
+    // 96: swfte_composition_classify joined the always-on set. It answers a
+    // question swfte_solution_advise cannot — the two axes are independent, and
+    // advise's five booleans cannot carry audience, budget, side effects or
+    // deployment needs. The ceiling moves by exactly one, deliberately; it is
+    // still a ceiling.
+    assert.ok(selected.length <= 96, `default surface is ${selected.length} tools`);
     assert.ok(selected.length > 40, `default surface is only ${selected.length} tools`);
   });
 

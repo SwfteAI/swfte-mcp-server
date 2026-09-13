@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { ADAPTERS, type Kind } from '../kinds/index.js';
 import catalog from './case-studies.json';
+import { classifyComposition, type Signals } from './composition.js';
+
+export * from './composition.js';
 
 export const Form = z.enum(['product', 'workflow', 'agentic']);
 export const DesignContext = z.object({
@@ -57,6 +60,17 @@ export function advise(facts: Facts, ids?: string[]) {
     examples,
     references: catalog.references.filter(r => referenceIds.has(r.id)),
     examplesAre: 'Illustrative designs, not customer success stories or deployed capability evidence.',
+    // The single-word form above is kept for callers that already depend on it,
+    // but it collapses two independent choices into one and so reads "agentic"
+    // as "product". The two-axis answer is the one the wizard UI renders.
+    compositionAxes: classifyComposition({
+      deterministicSteps: facts.boundedSteps === true ? ['caller reported that the trigger, stages and stopping condition can be named in advance'] : facts.boundedSteps === false ? [] : undefined,
+      uncertainSteps: facts.adaptiveInvestigation === true ? ['caller reported that evidence selects the next step'] : facts.adaptiveInvestigation === false ? [] : undefined,
+      sharedDurableRecords: facts.sharedState,
+      sharedReviewInterface: facts.sharedReviewUI,
+      existingSystemOfRecord: facts.existingSystemOfRecord,
+    } as Signals),
+    compositionAxesNote: 'swfte_composition_classify asks the full question set; these axes are derived from the five legacy decision facts only, so their confidence is correspondingly low.',
     lifecycle: ['Discover capabilities and connections', 'Generate with case references and explicit acceptance criteria', 'Validate and persist', 'Read back effective bindings', 'Execute positive and negative cases', 'Publish/activate appropriate artifacts', 'Preview capacity where supported', 'Deploy and read actual topology', 'Probe endpoint and correlate execution, analytics and UI evidence'],
   };
 }

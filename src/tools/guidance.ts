@@ -1,5 +1,12 @@
 import { z } from 'zod';
 import { adapterCapabilities, advise, DecisionFacts } from '../guidance/index.js';
+import {
+  CASE_COMPOSITIONS,
+  CompositionSignals,
+  classifyComposition,
+  DELIVERY_SURFACES,
+  EXECUTION_APPROACHES,
+} from '../guidance/composition.js';
 import { IMPLEMENTED_KINDS, type Kind } from '../kinds/index.js';
 import type { ToolDefinition, ToolContext } from './_types.js';
 
@@ -11,6 +18,22 @@ export function guidanceTools(registry: () => ToolDefinition[]): ToolDefinition[
       description: 'Choose an architectural form from explicit requirements before building. Returns justified product/workflow/agentic recommendation, missing design facts, illustrative cases with references, composition and acceptance stages. This is local decision guidance; it does not claim live capabilities or deploy artifacts. Product is not an artifact kind. Use swfte_capabilities for supported verbs and topology paths; pass chosen case IDs as designContext to swfte_build or swfte_solution_build.',
       inputSchema: z.object({ facts: DecisionFacts, caseStudyIds: z.array(z.string()).max(5).optional() }),
       execute: async (input, ctx) => ({ ...advise(input.facts, input.caseStudyIds), tools: available(registry(), ctx).filter(t => ['swfte_capabilities', 'swfte_build', 'swfte_solution_build', 'swfte_solution_verify', 'swfte_run'].includes(t.name)).map(t => t.name) }),
+    },
+    {
+      name: 'swfte_composition_classify', title: 'Classify execution approach and delivery surface', readOnly: true,
+      description:
+        'Place a request on two INDEPENDENT axes before building: execution approach (' + EXECUTION_APPROACHES.join(' | ') + ') and delivery surface (' + DELIVERY_SURFACES.join(' | ') + '). ' +
+        'Returns the smallest sufficient composition on each axis, why, what would justify the next rung up, the case study that lands the same way, and the facts the recommendation rests on. ' +
+        'Unanswered questions come back as missingSignals with value:null and confidence UNDETERMINED — this tool does not guess, because a guessed recommendation is indistinguishable from a measured one once it reaches a screen. ' +
+        '"Agentic" is not a synonym for "product": a bounded workflow can be delivered as a widget and an agentic investigation can be pure internal automation. ' +
+        'Local decision guidance only: it observes no workspace, entitlement or runtime, and the rationale is NOT persisted with the artifact — no agents-service wizard endpoint accepts this shape yet. ' +
+        'Prefer this over swfte_solution_advise, which collapses both axes into one word.',
+      inputSchema: z.object({ signals: CompositionSignals }),
+      execute: async (input, ctx) => ({
+        ...classifyComposition(input.signals),
+        caseIndex: CASE_COMPOSITIONS.map(c => ({ id: c.caseStudyId, title: c.title, executionApproach: c.executionApproach, deliverySurface: c.deliverySurface, entryPointKind: c.entryPointKind })),
+        nextTools: available(registry(), ctx).filter(t => ['swfte_capabilities', 'swfte_build', 'swfte_solution_build'].includes(t.name)).map(t => t.name),
+      }),
     },
     {
       name: 'swfte_capabilities', title: 'Discover implemented paths and verification requirements', readOnly: true,
