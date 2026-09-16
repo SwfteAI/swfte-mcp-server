@@ -122,13 +122,14 @@ test('both deploy option spellings normalise to the wire value', () => {
   assert.throws(() => toWireDeployOption('SHARED'), /UNSUPPORTED_DEPLOY_OPTION/);
 });
 
-test('a source type with no registered adapter is advertised as unresolvable, not as working', () => {
+test('a source type that resolves no rows is advertised as unresolvable, not as working', () => {
   assert.deepEqual([...UNRESOLVED_BINDING_SOURCE_TYPES], ['STUDIO_OPERATIONS']);
   for (const v of UNRESOLVED_BINDING_SOURCE_TYPES) {
     assert.ok(WIDGET_BINDING_SOURCE_TYPES.includes(v), `${v} must still be creatable — the wizard writes it`);
   }
   const why = (BACKEND_OPTION_CONTRACT.options['widget.bindingSourceType'] as any).persistedButUnresolved.why;
-  assert.match(String(why), /no WidgetDataSourceAdapter/i);
+  assert.match(String(why), /resolves no rows/i);
+  assert.match(String(why), /unavailable/i);
 });
 
 test('zod really rejects a value outside a governed list', () => {

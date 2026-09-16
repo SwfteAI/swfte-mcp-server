@@ -176,7 +176,7 @@ test('the recommendation carries the disclosure fields the wizard must render', 
 test('the recommendation states plainly that nothing persists it', () => {
   const r = classifyComposition({ deterministicSteps: ['a'], uncertainSteps: [], expectedAudience: 'team' });
   assert.equal(r.persistence.persistedWithArtifact, false);
-  assert.match(String(r.persistence.blocker), /wizard endpoint/);
+  assert.match(String(r.persistence.blocker), /compositionRationale/);
   assert.match(String(r.persistence.blocker), /browser state/);
 });
 

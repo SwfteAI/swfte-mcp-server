@@ -48,10 +48,12 @@ export const WidgetBrainKindEnum = enumOf('widget.brainKind');
 export const WidgetBindingSourceTypeEnum = enumOf('widget.bindingSourceType');
 
 /**
- * Source types that persist but have no registered `WidgetDataSourceAdapter`,
- * so `WidgetDataBindingResolver.resolve` returns empty and the widget serves the
- * last stored snapshot instead of live rows. Callers are told this rather than
- * left to infer it from an empty table.
+ * Source types a widget binding can persist that resolve no live rows, because
+ * agents-service keeps no store behind them. A PULL/HYBRID read of one now comes
+ * back with `sourceStatus: "UNAVAILABLE"` and a `sourceUnavailableReason`, and
+ * serves the last stored snapshot if there is one. Callers are told this rather
+ * than left to infer it from an empty table — which is the point, since an empty
+ * table asserts something about the workspace that nobody measured.
  */
 export const UNRESOLVED_BINDING_SOURCE_TYPES: readonly string[] =
   (contract.options['widget.bindingSourceType'] as any).persistedButUnresolved?.values ?? [];

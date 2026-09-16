@@ -95,7 +95,7 @@
           "file": "src/main/java/com/swfte/scp/agentservice/services/wizard/WidgetWizardService.java",
           "extract": "javaStringLiteralPresent"
         },
-        "why": "WidgetWizardService persists sourceType STUDIO_OPERATIONS, but no WidgetDataSourceAdapter registers that type, so WidgetDataBindingResolver.resolve returns empty and /state falls back to the last stored snapshot. Advertise it (the wizard really writes it) and say plainly that a PULL read will not resolve until an adapter exists."
+        "why": "WidgetWizardService persists sourceType STUDIO_OPERATIONS and agents-service keeps no Studio operations record store behind any accepted sourceRef, so a PULL read yields no live rows. Since agents-service 45c1f04e9 that is stated rather than silent: StudioOperationsWidgetDataSourceAdapter claims the type and declares each binding unavailable with a reason, and GET /widgets/{id}/state carries sourceStatus=UNAVAILABLE plus sourceUnavailableReason instead of an empty payload. Advertise the type (the wizard really writes it) and say plainly that it resolves no rows — the widget reports its source as unavailable, it does not claim the workspace is empty."
       },
       "note": "The WidgetDataBinding javadoc also names MODULE and EXECUTION. No adapter implements either, so they are not advertised."
     },

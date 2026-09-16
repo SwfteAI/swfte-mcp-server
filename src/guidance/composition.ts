@@ -464,7 +464,7 @@ export function classifyComposition(signals: Signals): CompositionRecommendation
     persistence: {
       persistedWithArtifact: false,
       blocker:
-        'No agents-service wizard endpoint accepts or returns this shape today, so the rationale is not stored with the artifact. Until the DTO named in COMPOSITION-CONTRACT.md exists, treat the recommendation as advice the caller must restate in the build prompt — do not let a UI keep it only in browser state.',
+        'Classifying stores nothing: POST /v2/studio/compositions/classify computes and returns, it never writes. To keep the rationale with the artifact, send this recommendation as the nullable compositionRationale field on the artifact itself (WorkflowV2, Agent, ChatFlow, WidgetConfig, AppArtifact) when you create or update it; the per-kind GET returns it unchanged. An artifact without the field reads as unknown, never as a measured blank — so do not park the rationale in browser state and call it saved.',
     },
   };
 }

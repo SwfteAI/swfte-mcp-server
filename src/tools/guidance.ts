@@ -26,7 +26,8 @@ export function guidanceTools(registry: () => ToolDefinition[]): ToolDefinition[
         'Returns the smallest sufficient composition on each axis, why, what would justify the next rung up, the case study that lands the same way, and the facts the recommendation rests on. ' +
         'Unanswered questions come back as missingSignals with value:null and confidence UNDETERMINED — this tool does not guess, because a guessed recommendation is indistinguishable from a measured one once it reaches a screen. ' +
         '"Agentic" is not a synonym for "product": a bounded workflow can be delivered as a widget and an agentic investigation can be pure internal automation. ' +
-        'Local decision guidance only: it observes no workspace, entitlement or runtime, and the rationale is NOT persisted with the artifact — no agents-service wizard endpoint accepts this shape yet. ' +
+        'Local decision guidance only: it observes no workspace, entitlement or runtime, and classifying persists nothing. ' +
+        'agents-service answers the same shape at POST /v2/studio/compositions/classify, and stores it only when you send it as the nullable compositionRationale field on the artifact you create or update (WorkflowV2, Agent, ChatFlow, WidgetConfig, AppArtifact). An artifact without that field reads as unknown, never as an empty rationale. ' +
         'Prefer this over swfte_solution_advise, which collapses both axes into one word.',
       inputSchema: z.object({ signals: CompositionSignals }),
       execute: async (input, ctx) => ({
