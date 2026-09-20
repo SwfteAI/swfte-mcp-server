@@ -125,6 +125,27 @@ describe('findPlaceholders', () => {
     assert.deepEqual(hits.map((h) => h.label).sort(), ['example.com placeholder host', 'unresolved {{TODO}} template']);
   });
 
+  test('an unanswered {{ASK}} question counts as a required input', () => {
+    // The wizard writes {{ASK: …}} for a value that was never its to choose, and saves
+    // the artifact as NEEDS_INPUT rather than INCOMPLETE. That is right on the canvas,
+    // where someone is there to answer it. It is the wrong thing to relax here:
+    // unanswered, it fails on first execution exactly like a {{TODO}}, so a solution
+    // carrying three of them must not report READY.
+    const wf = {
+      nodes: { send: { configuration: { credentialId: '{{ASK: which AWS credential to send with}}' } } },
+    };
+    const hits = findPlaceholders(wf, 'nodes');
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].label, 'unanswered {{ASK}} question');
+  });
+
+  test('a node whose id starts with ask- is not mistaken for an unanswered question', () => {
+    // `{{ask-user-step.answer}}` reads a real upstream node's output. The marker is
+    // `{{ASK` as the head token, not the letters a-s-k appearing anywhere.
+    const wf = { nodes: { w: { configuration: { rows: '{{ask-user-step.answer}}' } } } };
+    assert.deepEqual(findPlaceholders(wf, 'nodes'), []);
+  });
+
   test('a fully configured workflow reports nothing', () => {
     const wf = { nodes: { a: { configuration: { url: 'https://real.example-broker.co.uk/feed', key: 'live' } } } };
     assert.deepEqual(findPlaceholders(wf, 'nodes'), []);

@@ -440,6 +440,17 @@ function leaves(value: unknown, path = '$', out: Array<{ path: string; value: st
 
 const PLACEHOLDER_PATTERNS: Array<{ re: RegExp; label: string }> = [
   { re: /\{\{\s*TODO\b[^}]*\}\}/i, label: 'unresolved {{TODO}} template' },
+  // The wizard now separates a value it could not determine ({{TODO}}) from one that
+  // was never its to choose — which credential, which recipient — and writes
+  // {{ASK: label}} for the latter. That artifact is SAVED and reported as NEEDS_INPUT
+  // rather than INCOMPLETE, which is right for someone sitting at the canvas and the
+  // wrong thing to be relaxed about here: an unanswered {{ASK}} fails on first
+  // execution exactly like a {{TODO}}. Without this line a solution carrying three
+  // unanswered questions reports READY.
+  // Matched as a HEAD TOKEN, not a substring: `{{ask-user-step.answer}}` is one node
+  // reading another's output, and flagging it would bury the real questions in noise.
+  // The backend validator makes the same distinction for the same reason.
+  { re: /\{\{\s*(ASK|ASK_USER|ASKUSER|USER_INPUT)\s*(?::[^}]*)?\s*\}\}/i, label: 'unanswered {{ASK}} question' },
   { re: /\bTODO\b\s*:/i, label: 'literal TODO' },
   { re: /\bapi\.example\.com\b/i, label: 'example.com placeholder host' },
   { re: /\bexample\.(com|org|net)\/(?!$)/i, label: 'example domain' },
