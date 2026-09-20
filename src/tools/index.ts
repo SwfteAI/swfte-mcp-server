@@ -30,6 +30,7 @@ import { analyticsTools } from './analytics.js';
 import { experimentTools } from './experiments.js';
 import { connectTools } from './connect.js';
 import { deploymentTools } from './deployments.js';
+import { agentMailTools } from './agent-mail.js';
 import { appWizardTools } from './app-wizard.js';
 import { customNodeWizardTools } from './custom-node-wizard.js';
 
@@ -72,6 +73,7 @@ export const allTools: ToolDefinition[] = [
   ...tag('experiments', experimentTools),
   ...tag('connect', connectTools),
   ...tag('deployments', deploymentTools),
+  ...tag('agent-mail', agentMailTools),
 ];
 
 export type { ToolDefinition, ToolContext } from './_types.js';
