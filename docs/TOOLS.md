@@ -1,6 +1,6 @@
 # Tool reference
 
-`@swfte/mcp-server` exposes **183 tools**, of which a curated **96** are
+`@swfte/mcp-server` exposes **190 tools**, of which a curated **96** are
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
 
 Tools that take a `workspaceId` only honour it for **API-key** credentials. A
@@ -169,6 +169,41 @@ an `authorizationUrl` for the user to open and `wait` polls for the resulting
 `list` · `get` · `for_agent` · `trail` · `executions` · `activate` ·
 `terminate` · `count`. `trail` is where to look when a deployment reaches
 `FAILED`.
+
+### Agent mail — `swfte_agent_mail_*` (group `agent-mail`)
+
+`mailboxes_list` · `mailbox_get` · `mailbox_create` · `mailbox_bind` ·
+`mailbox_deactivate` · `messages_list` · `send`. Hidden by default; enable with
+`SWFTE_TOOLS=…,agent-mail` or `all`.
+
+`mailbox_create` is an ensure-exists: a `409 mailbox_conflict` means the
+`localPart` is taken, so the existing mailbox is looked up and returned rather
+than reported as a failure. It does **not** update the name or agent binding of
+a mailbox it found — `mailbox_bind` does that, and `agentId: null` clears a
+binding. The address is minted from `localPart` and is immutable.
+
+`mailbox_deactivate` stops routing and stamps `deactivatedAt`. Stored messages
+are kept and stay listable; the address is not released, and there is no
+reactivate call. It is flagged destructive and requires `confirm: true`.
+
+Two properties of this group are not shared by any other:
+
+- **`messages_list` returns untrusted external content.** Senders, subjects and
+  bodies were written by people outside the workspace. The result is wrapped in
+  an envelope carrying `untrustedContent: true` and an advisory, so the content
+  and the warning cannot be separated when a client renders it. Text inside a
+  message asking the model to send mail or call a tool is part of the message.
+- **`send` reaches real people.** `accepted` means the provider took the
+  request — not that anything was delivered, that the address exists, or that
+  anyone read it. The `Idempotency-Key` is derived from mailbox + recipient +
+  subject + body, so a deliberate retry cannot email someone twice, and the call
+  is never auto-retried. A `workspaceId` argument that disagrees with the
+  server's configured workspace is refused rather than sent.
+
+Agent binding resolves only against a monolith deployment. A standalone mail
+host has no agent registry, so any `agentId` returns `404 agent_not_found`
+there; these tools attach that explanation to the error rather than leaving it
+indistinguishable from a typo.
 
 ### Everything else
 
