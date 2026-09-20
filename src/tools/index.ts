@@ -33,6 +33,9 @@ import { deploymentTools } from './deployments.js';
 import { agentMailTools } from './agent-mail.js';
 import { appWizardTools } from './app-wizard.js';
 import { customNodeWizardTools } from './custom-node-wizard.js';
+import { journeyTools } from './journeys.js';
+import { relayRunTools } from './relay-runs.js';
+import { relayMailboxTools } from './relay-mailboxes.js';
 
 /**
  * Tag a whole module's tools with a group, so `SWFTE_TOOLS` can trim them
@@ -74,6 +77,12 @@ export const allTools: ToolDefinition[] = [
   ...tag('connect', connectTools),
   ...tag('deployments', deploymentTools),
   ...tag('agent-mail', agentMailTools),
+
+  // Grouped rather than left untagged so SWFTE_TOOLS can trim them like
+  // everything else — an untagged tool is advertised unconditionally.
+  ...tag('journeys', journeyTools),
+  ...tag('relay', relayRunTools),
+  ...tag('relay', relayMailboxTools),
 ];
 
 export type { ToolDefinition, ToolContext } from './_types.js';

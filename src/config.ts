@@ -51,6 +51,11 @@ export const TOOL_GROUPS = [
   // Managed agent mailboxes. Opt-in on purpose: one of its tools emails real
   // people, and it returns external message bodies that a model will read.
   'agent-mail',
+  // Relay product surface. Registered so SWFTE_TOOLS can name them;
+  // deliberately NOT in DEFAULT_GROUPS below — see the note there about the
+  // tool-surface budget.
+  'journeys',
+  'relay',
 ] as const;
 
 export type ToolGroup = (typeof TOOL_GROUPS)[number];
@@ -80,6 +85,13 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   // trimming the surface does not apply to the tools that make the advertised
   // ones work.
   'connect',
+  // `journeys` and `relay` are deliberately absent, and that is a decision to
+  // revisit rather than a default to inherit. The surface already sits at 81
+  // against a bound of 85 — a bound that exists because a large advertised
+  // surface measurably degrades a model's ability to pick the right tool. Adding
+  // three more modules would push past it. They stay reachable through
+  // SWFTE_TOOLS; whether an agent should reach for Relay tools unprompted is a
+  // product question, not a merge resolution.
 ];
 
 export interface ServerConfig {

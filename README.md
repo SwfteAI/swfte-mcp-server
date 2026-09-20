@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![swfte.com](https://img.shields.io/badge/swfte.com-website-7c3aed)](https://www.swfte.com)
 
-`@swfte/mcp-server` exposes the [Swfte API](https://www.swfte.com/developers) as a [Model Context Protocol](https://modelcontextprotocol.io) server, so Claude Desktop, Claude Code, Cursor, Cline, Zed, and any MCP-compliant client can manage Swfte agents, chatflows, workflows, RAG datasets, voice calls, and marketplace modules — without writing a line of HTTP plumbing.
+`@swfte/mcp-server` exposes the [Swfte API](https://www.swfte.com/developers) as a [Model Context Protocol](https://modelcontextprotocol.io) server, so Claude Desktop, Claude Code, Cursor, Cline, Zed, and any MCP-compliant client can manage Swfte agents, chatflows, workflows, Relay journeys, RAG datasets, voice calls, and marketplace modules — without writing a line of HTTP plumbing.
 
 If you don't know what Swfte is, [start here](https://www.swfte.com). It's the unified AI platform for **agents, workflows, chatflows, RAG, voice, and MCP servers** — one API, 200+ models, batteries-included.
 
@@ -17,6 +17,12 @@ If you don't know what Swfte is, [start here](https://www.swfte.com). It's the u
 
 ## What this gives you
 
+- **99 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
+- **Stdio transport** — works out of the box with Claude Desktop and Claude Code.
+- **Workspace-scoped** — set `SWFTE_WORKSPACE_ID` once, or pass `workspaceId` per call.
+- **Zero-config security** — your API key stays on the machine running the MCP server, never in the LLM context.
+- **Multi-arch Docker image** — `swfte/mcp-server` on Docker Hub for amd64 + arm64.
+- **TypeScript-first** — every input is typed via Zod, schemas surfaced to the client as JSON-Schema.
 **Build a complete Studio artifact from one sentence, then prove it works — without leaving your editor.**
 
 ```
@@ -45,7 +51,7 @@ widget, application, or MCP server**.
   server-side page cap, read-merge-write updates where the raw PATCH would wipe
   omitted fields, retry with load-shedding detection, and typed error envelopes
   carrying the backend's own code plus a suggested action.
-- **190 tools available, 96 advertised by default**, adjustable via `SWFTE_TOOLS`.
+- **214 tools available, 103 advertised by default**, adjustable via `SWFTE_TOOLS`.
 - **Stdio transport**, multi-arch Docker image, and Zod-typed inputs published
   as JSON Schema over `tools/list`.
 
@@ -149,6 +155,28 @@ guide, [`docs/RECIPES.md`](./docs/RECIPES.md) for worked examples, and
 
 ## Available tools
 
+| Domain | Tool prefix | Highlights |
+|---|---|---|
+| **Agents** | `swfte_agents_*` | list, get, create, update, delete, find by name/type/capability, wizard generate/quick/templates |
+| **ChatFlows** | `swfte_chatflows_*` | list/get/create, validate, deploy, publish, session start/get, builder templates |
+| **Workflows** | `swfte_workflows_*` | list, get, create, validate, clone, export, publish, deployment status, pre-deploy, execute, list/get/pause/resume executions, node-level traces |
+| **Journeys** | `swfte_journeys_*` | list/get/create/update/delete templates, generate from prompt, deploy/run/test a journey, app-level multi-journey deploy |
+| **Relay Runs** | `swfte_relay_runs_*` | list, get, conversation snapshot, cancel, resolve a paused gate |
+| **Relay Mailboxes** | `swfte_relay_mailboxes_*` | resolve a connected mailbox's address for a journey's email trigger |
+| **Conversations** | `swfte_conversations_*` | initiate, list, get, transcript, terminate |
+| **Datasets** | `swfte_datasets_*` | list, get, create, documents list/create/status |
+| **Files** | `swfte_files_*` | list, config, get, delete |
+| **RAG** | `swfte_rag_*` | hybrid search, rerank, embedding/reranker model lists, strategies |
+| **MCP-on-MCP** | `swfte_mcp_*` | servers list/connect, tools list/schema/execute, health-check |
+| **Modules** | `swfte_modules_*` | list, get, create, build, versions |
+| **Marketplace** | `swfte_marketplace_*` | browse, get, install, installations |
+| **Voice** | `swfte_voice_*` | list calls, in-progress, get, transcript, recording |
+| **Audit** | `swfte_audit_*` | events, resource events, my events |
+| **Cost Control** | `swfte_cost_*` | routing rules, usage caps, usage stats |
+
+Every tool's input schema is published over MCP `tools/list` so your client can autocomplete and validate.
+
+Full endpoint→tool mapping is in [`docs/TOOLS.md`](docs/TOOLS.md). Underlying API reference: [swfte.com/developers](https://www.swfte.com/developers) and [swfte.com/resources](https://www.swfte.com/resources).
 ### Core — 11 tools, every artifact kind
 
 `swfte_whoami` · `swfte_build` · `swfte_build_status` · `swfte_build_steer` ·
@@ -181,7 +209,7 @@ or `mcp-server`.
 | Cost control | `swfte_cost_*` | `cost` | |
 | Agent mail | `swfte_agent_mail_*` | `agent-mail` | |
 
-Advertising all 190 tools measurably degrades a model's ability to pick the
+Advertising all 214 tools measurably degrades a model's ability to pick the
 right one, so 96 are advertised by default. `SWFTE_TOOLS=all` widens it, and
 `swfte_whoami` reports which groups are live and what is hidden — nothing
 disappears silently.
@@ -201,6 +229,13 @@ Full reference: [`docs/TOOLS.md`](docs/TOOLS.md). API docs:
 - *"Connect our Slack workspace so the notify step can post."*
 - *"Re-check every workflow I built this week and tell me which are broken."*
 
+- *"Browse the Swfte marketplace for customer-support modules and install the top one into my workspace."*
+- *"List all chatflows in workspace ws-acme, then deploy any that are in DRAFT status."*
+- *"Generate a sales-qualification agent from this prompt, then publish it as a widget."*
+- *"Draft a Relay journey for inbound insurance claims from this description, deploy it, and show me any runs that are paused for a gate approval."*
+- *"Run a hybrid RAG search across dataset ds-help-center for 'refund policy' and rerank the top 20."*
+- *"Show me last week's voice calls that lasted more than 5 minutes, with their transcripts."*
+- *"Set a $100 weekly spend cap on the workspace and show me current usage."*
 More, with what each one does underneath: [`docs/RECIPES.md`](./docs/RECIPES.md).
 
 ---
