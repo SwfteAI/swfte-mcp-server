@@ -87,13 +87,16 @@ async function chatOnce(
     };
   }
 
-  // The reply key is `response` on this endpoint, not `message` or `reply`.
-  const reply = String(raw?.response ?? raw?.reply ?? raw?.message ?? '');
+  // Current chat responses use content; retain older response aliases.
+  // Never turn an object or an empty alias into a successful textual reply.
+  const reply = [raw?.content, raw?.response, raw?.reply, raw?.message]
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0) ?? '';
+  const hasReply = reply.trim().length > 0;
   const emptyShed = reply.trim().length === 0 && (raw?.inputTokens === 0 || raw?.inputTokens == null);
 
   return {
-    ok: !emptyShed,
-    status: emptyShed ? 'EMPTY_SHED' : 'OK',
+    ok: hasReply,
+    status: emptyShed ? 'EMPTY_SHED' : hasReply ? 'OK' : 'EMPTY_RESPONSE',
     degraded: emptyShed,
     output: reply,
     elapsedMs: Date.now() - started,
@@ -172,10 +175,20 @@ export const agentAdapter: KindAdapter = {
   },
 
   async create(client, artifact) {
+    // The endpoint binds `CreateAgentRequest { generatedAgent, attachStrictChatflow }`
+    // and dereferences `generatedAgent.getAgentName()` before any null check, so a
+    // bare agent body lands as an unhandled NPE — a 500 that reads like a platform
+    // outage rather than the shape error it is. Wrap it, unless the caller already
+    // passed the envelope.
+    const enveloped =
+      artifact && typeof artifact === 'object' && 'generatedAgent' in artifact
+        ? artifact
+        : { generatedAgent: artifact };
+
     const body = await client.request<any>({
       method: 'POST',
       path: `${WIZARD}/create`,
-      body: artifact,
+      body: enveloped,
       expectStatuses: [200, 201],
       retries: 0,
       timeoutMs: 90_000,
@@ -236,7 +249,7 @@ export const agentAdapter: KindAdapter = {
     let agent: any = null;
     try {
       agent = await client.request<any>({ method: 'GET', path: `${AGENTS}/${encodeURIComponent(id)}`, retries: 1 });
-      checks.push({ id: 'persisted', ok: true, detail: `GET ${AGENTS}/${id} → 200 ("${agent?.name ?? 'unnamed'}")` });
+      checks.push({ id: 'persisted', ok: true, detail: `GET ${AGENTS}/${id} → 200 ("${agent?.name ?? agent?.agentName ?? 'unnamed'}")` });
     } catch (err) {
       const msg = err instanceof SwfteApiError ? `${err.status} ${err.message}` : String(err);
       checks.push({ id: 'persisted', ok: false, detail: `GET ${AGENTS}/${id} → ${msg}` });
@@ -252,7 +265,7 @@ export const agentAdapter: KindAdapter = {
     // A wizard publish that raced a degraded backend leaves a half-created
     // record: no model, agentType NONE_SELECTED. That record is immutable —
     // every subsequent PUT 500s — so the only fix is delete and rebuild.
-    const halfCreated = !agent?.model || String(agent?.agentType ?? '') === 'NONE_SELECTED';
+    const halfCreated = !agent?.model || /^(none|null|todo|placeholder)$/i.test(String(agent.model).trim()) || String(agent?.agentType ?? '') === 'NONE_SELECTED';
     checks.push({
       id: 'complete',
       ok: !halfCreated,
@@ -297,17 +310,12 @@ export const agentAdapter: KindAdapter = {
       detail: knowledge.length > 0 ? `${knowledge.length} knowledge module(s) linked` : 'No knowledge modules linked',
     });
 
-    // The systemPrompt is ignored unless persona AND instructions are both blank.
-    if (agent?.systemPrompt && (agent?.persona || agent?.instructions)) {
-      checks.push({
-        id: 'prompt-effective',
-        ok: false,
-        detail: 'systemPrompt is set but persona/instructions are also set — the runtime ignores systemPrompt unless both are blank',
-      });
-      nextActions.push('Move the systemPrompt content into instructions, or clear persona+instructions to let systemPrompt apply.');
-    } else {
-      checks.push({ id: 'prompt-effective', ok: true, detail: 'Prompt configuration is unambiguous' });
-    }
+    // The backend combines systemPrompt with persona/instructions. Static
+    // configuration cannot prove instruction fidelity; execution tests must.
+    const hasPrompt = [agent?.systemPrompt, agent?.persona, agent?.instructions]
+      .some(value => typeof value === 'string' && value.trim().length > 0);
+    checks.push({ id: 'prompt-effective', ok: hasPrompt,
+      detail: hasPrompt ? 'Prompt configured; use a task-specific execution assertion to verify behavior' : 'No prompt instructions configured' });
 
     if (opts.run) {
       const result = await this.run!(client, id, { message: opts.inputs?.message as string, timeoutMs: opts.timeoutMs });

@@ -1,7 +1,7 @@
 {
   "name": "@swfte/mcp-server",
   "version": "0.2.0",
-  "description": "Official Model Context Protocol (MCP) server for the Swfte AI platform — build, validate, and deploy complete workflows, agents, chatflows, widgets, applications and MCP servers from Claude Code, Claude Desktop, Cursor, or any MCP client.",
+  "description": "Official Model Context Protocol (MCP) server for the Swfte AI platform \u2014 build, validate, and deploy complete workflows, agents, chatflows, widgets, applications and MCP servers from Claude Code, Claude Desktop, Cursor, or any MCP client.",
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -43,7 +43,8 @@
     "docs",
     "README.md",
     "ABOUT.md",
-    "LICENSE"
+    "LICENSE",
+    "src/preflight"
   ],
   "engines": {
     "node": ">=18.17"
@@ -53,14 +54,18 @@
     "dev": "tsup --watch",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "smoke": "bash scripts/smoke.sh",
-    "prepublishOnly": "node -e \"if(!process.env.SWFTE_PUBLISH_CONFIRMED){console.error('\\n[guard] @swfte/mcp-server is published only via the GitHub Actions release workflow.\\n        Set SWFTE_PUBLISH_CONFIRMED=1 to override.\\n');process.exit(1)}\" && npm run build",
+    "smoke": "npm run smoke:protocol",
+    "preflight": "node src/preflight/cli.mjs",
+    "preflight:derive": "node src/preflight/derive.mjs",
+    "preflight:mutation": "node src/preflight/mutation.mjs",
+    "prepublishOnly": "node -e \"if(!process.env.SWFTE_PUBLISH_CONFIRMED){console.error('\\n[guard] @swfte/mcp-server is published only via the GitHub Actions release workflow.\\n        Set SWFTE_PUBLISH_CONFIRMED=1 to override.\\n');process.exit(1)}\" && npm run verify:offline",
     "e2e": "tsx scripts/e2e.ts",
     "bench": "tsx scripts/bench.ts",
-    "smoke:protocol": "npm run build && tsx scripts/protocol-smoke.ts",
-    "test": "tsx --test test/*.test.ts",
+    "smoke:protocol": "npm run build && node --import tsx scripts/protocol-smoke.ts",
+    "test": "node --import tsx --test test/*.test.ts test/*.test.mjs",
     "probe:paths": "tsx scripts/probe-paths.ts",
-    "verify": "npm run typecheck && npm run test && npm run smoke:protocol && npm run probe:paths"
+    "verify": "npm run typecheck && npm run test && npm run preflight:mutation && npm run smoke:protocol && npm run probe:paths",
+    "verify:offline": "npm run typecheck && npm test && npm run preflight:mutation && npm run build && node --import tsx scripts/protocol-smoke.ts && node scripts/package-smoke.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.0",

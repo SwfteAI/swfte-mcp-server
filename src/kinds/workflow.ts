@@ -1,5 +1,6 @@
 import type { SwfteClient } from '../client.js';
 import { SwfteApiError } from '../client.js';
+import { TERMINAL_DEPLOY_PHASES, toWireDeployOption } from '../contracts/backend-options.js';
 import {
   isSucceededRunStatus,
   isTerminalRunStatus,
@@ -26,10 +27,25 @@ const WORKFLOWS = '/v2/workflows';
 const EXECUTIONS = '/v2/workflow-executions';
 
 /**
- * Deploy phases, in order. `READY` and `FAILED` are terminal.
- * Mirrors the studio's `WORKFLOW_DEPLOY_PHASE_ORDER`.
+ * Has the managed deploy stopped moving?
+ *
+ * `GET /deploy/{id}/status` returns a `DeploymentStatusEvent`, which carries an
+ * authoritative `terminal` boolean alongside `phase`. Trust the boolean: the
+ * backend's `derivePhase` maps STOPPING and TERMINATING onto phase TERMINATED
+ * while `isTerminal` still reports false, so phase alone would call a
+ * shutting-down deployment finished and return a URL that is going away.
+ *
+ * The phase set is only the fallback for a response that carries no `terminal`
+ * field, and it is read from the options contract rather than guessed — the
+ * previous hand-written set waited for CANCELLED or DESTROYED, neither of which
+ * `DeploymentStatusEvent.Phase` can ever produce, and did not list TERMINATED,
+ * so a torn-down deploy polled until the 10-minute ceiling and was reported as
+ * a timeout instead of a finished teardown.
  */
-const TERMINAL_DEPLOY_PHASES = new Set(['READY', 'FAILED', 'CANCELLED', 'DESTROYED']);
+function deployIsTerminal(snapshot: any): boolean {
+  if (typeof snapshot?.terminal === 'boolean') return snapshot.terminal;
+  return TERMINAL_DEPLOY_PHASES.has(String(snapshot?.phase ?? snapshot?.state ?? '').toUpperCase());
+}
 
 /**
  * The wizard's `GeneratedWorkflow` uses `connections`; the draft store and the
@@ -167,16 +183,19 @@ async function executeAndPoll(
         path: `${EXECUTIONS}/${encodeURIComponent(String(executionId))}`,
         retries: 1,
       }),
-    (s) => isTerminalRunStatus(s?.status),
+    (s) => isTerminalRunStatus(s?.status) || ['PAUSED', 'WAITING_FOR_INPUT', 'AWAITING_HUMAN'].includes(String(s?.status ?? '').toUpperCase()),
     { timeoutMs: input.timeoutMs ?? 180_000, intervalMs: 3_000 }
   );
 
   // Per-node traces live under outputData._traces, keyed by node id.
   const traces = (snapshot?.outputData?._traces ?? {}) as Record<string, any>;
 
+  const isWaiting = ['PAUSED', 'WAITING_FOR_INPUT', 'AWAITING_HUMAN'].includes(String(snapshot?.status ?? '').toUpperCase());
+  const humanInputs = Object.entries(snapshot?.outputData ?? {}).filter(([, value]: [string, any]) => value && typeof value === 'object' && String(value.status ?? '').toLowerCase() === 'waiting' && Array.isArray(value.required_variables)).map(([nodeId, value]: [string, any]) => ({ nodeId, prompt: value.prompt, requiredVariables: value.required_variables, optionalVariables: value.optional_variables ?? [], inputSchema: value.input_schema, timeoutMs: value.timeout_ms }));
   return {
     ok: isSucceededRunStatus(snapshot?.status),
-    status: timedOut ? `${snapshot?.status ?? 'UNKNOWN'} (still running at timeout)` : String(snapshot?.status ?? 'UNKNOWN'),
+    ...(isWaiting ? { needsHuman: humanInputs.length > 0, waiting: { executionId: String(executionId), status: String(snapshot.status), details: humanInputs, ...(humanInputs.length ? { review: { method: 'POST', path: `${EXECUTIONS}/${encodeURIComponent(String(executionId))}/resume`, bodyContract: '{nodeId: paused node ID, inputs: values matching the returned inputSchema}', requiresHumanDecision: true } } : {}), nextAction: 'Execution is paused, not completed. Review required inputs through the authenticated workflow review UI; do not auto-approve or start a duplicate execution.' } } : {}),
+    status: timedOut && !isWaiting ? `${snapshot?.status ?? 'UNKNOWN'} (still running at timeout)` : String(snapshot?.status ?? 'UNKNOWN'),
     output: snapshot?.outputData,
     nodeTraces: Object.entries(traces).map(([tid, t]: [string, any]) => ({
       id: tid,
@@ -350,7 +369,12 @@ export const workflowAdapter: KindAdapter = {
   async deploy(client, id, opts: DeployOpts): Promise<DeployResult> {
     // Default path: the unified router picks the target. `option` opts into the
     // managed path where the caller wants explicit capacity control.
-    const useManaged = Boolean(opts.option || opts.gpuTier || opts.region);
+    if (opts.secretId !== undefined) throw new Error('UNSUPPORTED_DEPLOY_OPTION: secretId is not a ManagedDeployRequest field. Use cloudConnectionId or providerConfigName.');
+    const legacyGpuTier = opts.gpuTier?.toUpperCase();
+    if (legacyGpuTier && !['NONE', 'T4', 'A10', 'A100', 'H100'].includes(legacyGpuTier)) throw new Error('UNSUPPORTED_DEPLOY_OPTION: workflow gpuTier must be NONE, T4, A10, A100 or H100.');
+    if (legacyGpuTier && opts.sizing?.gpuTier && legacyGpuTier !== opts.sizing.gpuTier.toUpperCase()) throw new Error('CONFLICTING_DEPLOY_OPTIONS: gpuTier and sizing.gpuTier disagree.');
+    const sizing = legacyGpuTier ? { ...opts.sizing, gpuTier: legacyGpuTier } : opts.sizing;
+    const useManaged = Boolean(opts.option || opts.gpuTier || opts.region || opts.provider || opts.cloudConnectionId || opts.providerConfigName || sizing || opts.path || opts.idleTimeoutSec !== undefined || opts.lifecycle);
 
     const started = await client.request<any>(
       useManaged
@@ -358,13 +382,11 @@ export const workflowAdapter: KindAdapter = {
             method: 'POST',
             path: `${WORKFLOWS}/${encodeURIComponent(id)}/deploy/managed`,
             body: {
-              option: opts.option,
+              option: toWireDeployOption(opts.option),
               region: opts.region,
               lifecycle: opts.lifecycle,
-              secretId: opts.secretId,
-              // gpuTier travels UPPERCASE on the wire; normalising here rather
-              // than at the tool boundary keeps the caller from having to know.
-              gpuTier: opts.gpuTier ? String(opts.gpuTier).toUpperCase() : undefined,
+              provider: opts.provider, cloudConnectionId: opts.cloudConnectionId, providerConfigName: opts.providerConfigName,
+              sizing, idleTimeoutSec: opts.idleTimeoutSec, path: opts.path,
             },
             expectStatuses: [200, 201, 202],
             retries: 0,
@@ -400,15 +422,15 @@ export const workflowAdapter: KindAdapter = {
           path: `${WORKFLOWS}/${encodeURIComponent(id)}/deploy/${encodeURIComponent(String(deploymentId))}/status`,
           retries: 1,
         }),
-      (s) => TERMINAL_DEPLOY_PHASES.has(String(s?.phase ?? s?.state ?? '').toUpperCase()),
+      (s) => deployIsTerminal(s),
       { timeoutMs: opts.timeoutMs ?? 600_000, intervalMs: 5_000 }
     );
 
     return {
       deploymentId: String(deploymentId),
       phase: String(snapshot?.phase ?? snapshot?.state ?? 'UNKNOWN'),
-      url: snapshot?.url ?? snapshot?.connectionDetails?.url,
-      endpoint: snapshot?.endpoint ?? snapshot?.connectionDetails?.endpoint,
+      url: snapshot?.url ?? snapshot?.endpointUrl ?? snapshot?.connectionDetails?.url ?? started?.url ?? started?.invokeEndpoint ?? started?.endpoint,
+      endpoint: snapshot?.endpoint ?? snapshot?.endpointUrl ?? snapshot?.connectionDetails?.endpoint ?? snapshot?.connectionDetails?.invokeEndpoint ?? started?.invokeEndpoint ?? started?.endpoint,
       timedOut,
       raw: { started, status: snapshot },
     };

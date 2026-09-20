@@ -27,10 +27,13 @@ export type CredentialKind = 'pat' | 'api-key';
  * say, build+analytics can ask for exactly that.
  */
 export const TOOL_GROUPS = [
+  'custom-nodes',
+  'apps', // Hosted AppWizard sessions; opt in explicitly or use all.
   'core', // whoami + the 8 ship tools + verify — the reason this server exists
   'workflows',
   'agents',
   'chatflows',
+  'widgets',
   'datasets',
   'modules',
   'rag',
@@ -45,9 +48,12 @@ export const TOOL_GROUPS = [
   'experiments',
   'connect',
   'deployments',
-  // Relay product surface, from the PR this merge brings in. Registered so
-  // SWFTE_TOOLS can name them; deliberately NOT in DEFAULT_GROUPS below — see
-  // the note there about the tool-surface budget.
+  // Managed agent mailboxes. Opt-in on purpose: one of its tools emails real
+  // people, and it returns external message bodies that a model will read.
+  'agent-mail',
+  // Relay product surface. Registered so SWFTE_TOOLS can name them;
+  // deliberately NOT in DEFAULT_GROUPS below — see the note there about the
+  // tool-surface budget.
   'journeys',
   'relay',
 ] as const;
@@ -57,7 +63,7 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is ~119 tools, which measurably degrades a model's ability
+ * The full surface is 190 tools, which measurably degrades a model's ability
  * to pick the right one. This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
  * `SWFTE_TOOLS=all` advertises everything, and `swfte_whoami` reports which

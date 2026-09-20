@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "description": "Single source of truth for every enumerated option this server advertises that is also an enumerated contract in agents-service. Each entry carries machine-readable provenance so a checker can re-derive the backend set from Java source without executing anything. Tools import these lists from backend-options.ts instead of restating literals, so drift is a one-line fix in one place.",
+  "backendRepo": "/Users/dejanmaksimovic/Projects/Swfte/agents-service",
+  "uiRepo": "/Users/dejanmaksimovic/Projects/Swfte/websites/studio-web-app",
+  "rules": {
+    "subset": "Every value advertised by MCP must exist in the backend set. Advertising a value the backend rejects turns a tool call into a 400 the model cannot diagnose.",
+    "uiReachability": "Every value the Studio UI exposes to a human must also be reachable from MCP, otherwise the two clients cannot build the same artifact.",
+    "declaredNarrowing": "MCP may deliberately advertise fewer values than the backend accepts, but only where `narrowedFrom` explains why and the omitted values are not exposed by the UI."
+  },
+  "options": {
+    "widget.viewType": {
+      "values": [
+        "CHAT",
+        "TABLE",
+        "SHEET",
+        "KPI_CARDS",
+        "DASHBOARD",
+        "FORM",
+        "MIXED",
+        "STATUS_TIMELINE",
+        "PROGRESS"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/services/v2/widget/WidgetServiceV2.java",
+        "extract": "javaSetOfNear",
+        "anchor": "Unsupported widget viewType"
+      },
+      "ui": {
+        "file": "app/components/studio/widget/views/types.ts",
+        "extract": "tsConstStringArray",
+        "anchor": "WIDGET_VIEW_TYPES",
+        "searchRoots": [
+          "app/components/studio/widget",
+          "app/components/studio/canvas/panels/widget"
+        ],
+        "note": "Read the exported constant, not a text anchor inside a component. The previous anchor was a local `displayTypes` variable in the widget editor; leaf-1.2.3 refactored that file and the anchor vanished, failing this check for a reason that had nothing to do with drift. views/types.ts is what other modules import, so it cannot move quietly."
+      },
+      "note": "PUT /api/v2/widgets/{id} validates against this set; the narrower Java enum WidgetViewType only describes the snapshot payload shape and is NOT the request contract."
+    },
+    "widget.binding": {
+      "values": [
+        "PUSH",
+        "PULL",
+        "HYBRID"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/services/v2/widget/WidgetServiceV2.java",
+        "extract": "javaSetOfNear",
+        "anchor": "Unsupported widget binding"
+      },
+      "note": "PULL and HYBRID additionally require a dataBindingId; the backend rejects the write without one."
+    },
+    "widget.stateScope": {
+      "values": [
+        "PUBLIC",
+        "PER_VISITOR"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/services/v2/widget/WidgetServiceV2.java",
+        "extract": "javaSetOfNear",
+        "anchor": "stateScope must be PUBLIC or PER_VISITOR"
+      },
+      "note": "Chooses shared versus visitor-keyed state. It is not a workspace ACL and must never be described as one."
+    },
+    "widget.brainKind": {
+      "values": [
+        "AGENT",
+        "CHATFLOW",
+        "WORKFLOW",
+        "DASHBOARD"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/models/widget/BrainKind.java",
+        "extract": "javaEnumConstants",
+        "anchor": "BrainKind"
+      }
+    },
+    "widget.bindingSourceType": {
+      "values": [
+        "HTTP",
+        "DATASOURCE",
+        "STUDIO_OPERATIONS"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/services/widget/datasource",
+        "extract": "javaAdapterSourceTypes",
+        "anchor": "sourceType"
+      },
+      "persistedButUnresolved": {
+        "values": [
+          "STUDIO_OPERATIONS"
+        ],
+        "witness": {
+          "file": "src/main/java/com/swfte/scp/agentservice/services/wizard/WidgetWizardService.java",
+          "extract": "javaStringLiteralPresent"
+        },
+        "why": "WidgetWizardService persists sourceType STUDIO_OPERATIONS and agents-service keeps no Studio operations record store behind any accepted sourceRef, so a PULL read yields no live rows. Since agents-service 45c1f04e9 that is stated rather than silent: StudioOperationsWidgetDataSourceAdapter claims the type and declares each binding unavailable with a reason, and GET /widgets/{id}/state carries sourceStatus=UNAVAILABLE plus sourceUnavailableReason instead of an empty payload. Advertise the type (the wizard really writes it) and say plainly that it resolves no rows — the widget reports its source as unavailable, it does not claim the workspace is empty."
+      },
+      "note": "The WidgetDataBinding javadoc also names MODULE and EXECUTION. No adapter implements either, so they are not advertised."
+    },
+    "chatflow.channel": {
+      "values": [
+        "VOICE",
+        "SMS",
+        "WEB_CHAT",
+        "WIDGET",
+        "WHATSAPP",
+        "TELEGRAM"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/models/chatflow/enums/ChannelType.java",
+        "extract": "javaEnumConstants",
+        "anchor": "ChannelType"
+      },
+      "ui": {
+        "file": "types/chatflow.ts",
+        "extract": "tsEnumValues",
+        "anchor": "ChannelType"
+      },
+      "narrowedFrom": {
+        "omitted": [
+          "WEB_VOICE",
+          "PRESENTER",
+          "ROOM"
+        ],
+        "why": "Those three channels are driven by the presenter and browser-voice subsystems, not by the chatflow session API this server calls, and the Studio UI does not offer them on a chatflow session either."
+      }
+    },
+    "chatflow.inputType": {
+      "values": [
+        "TEXT",
+        "VOICE_TRANSCRIPT",
+        "DTMF",
+        "SESSION_START"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/models/dto/chatflow/ProcessInputRequest.java",
+        "extract": "javaAllowableValues",
+        "anchor": "allowableValues"
+      }
+    },
+    "deploy.option": {
+      "values": [
+        "BYO_CLOUD_DEDICATED",
+        "SHARED_CLOUD",
+        "DEDICATED_INSTANCE"
+      ],
+      "aliases": {
+        "BYO": "BYO_CLOUD_DEDICATED",
+        "shared": "SHARED_CLOUD",
+        "dedicated": "DEDICATED_INSTANCE"
+      },
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/enums/cloud/DeployOption.java",
+        "extract": "javaEnumConstants",
+        "anchor": "DeployOption"
+      },
+      "ui": {
+        "file": "app/components/studio/canvas/workflow/WorkflowDeployModal.tsx",
+        "extract": "tsQuotedValuesForKey",
+        "anchor": "slug"
+      },
+      "note": "The wire values are what the UI sends and what DeployOption.fromWire accepts; the short aliases are a convenience this server maps before the request leaves."
+    },
+    "deploy.provider": {
+      "values": [
+        "kubernetes",
+        "digitalocean",
+        "aws",
+        "awsLambda",
+        "gcp",
+        "azure",
+        "runpod"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/models/v2/deploy/ManagedDeployRequest.java",
+        "extract": "javaDocPipeList",
+        "anchor": "provider"
+      }
+    },
+    "deploy.lifecycle": {
+      "values": [
+        "ON_DEMAND",
+        "ALWAYS_ON"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/models/v2/deploy/ManagedDeployRequest.java",
+        "extract": "javaDocPipeList",
+        "anchor": "lifecycle"
+      }
+    },
+    "deploy.path": {
+      "values": [
+        "crossplane",
+        "terraform"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/models/v2/deploy/ManagedDeployRequest.java",
+        "extract": "javaDocPipeList",
+        "anchor": "path"
+      }
+    },
+    "deploy.gpuTier": {
+      "values": [
+        "NONE",
+        "T4",
+        "A10",
+        "A100",
+        "H100"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/enums/cloud/GpuTier.java",
+        "extract": "javaEnumConstants",
+        "anchor": "GpuTier"
+      }
+    },
+    "deploy.phase": {
+      "values": [
+        "QUEUED",
+        "SIZING",
+        "PROVISIONING",
+        "DEPLOYING",
+        "READY",
+        "FAILED",
+        "TERMINATED",
+        "UNKNOWN"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/models/v2/deploy/DeploymentStatusEvent.java",
+        "extract": "javaEnumConstants",
+        "anchor": "Phase"
+      },
+      "terminalValues": [
+        "READY",
+        "FAILED",
+        "TERMINATED"
+      ],
+      "note": "GET /v2/workflows/{id}/deploy/{deploymentId}/status returns a DeploymentStatusEvent carrying both `phase` and an authoritative `terminal` boolean. Prefer `terminal`: derivePhase maps STOPPING and TERMINATING to phase TERMINATED while isTerminal still reports false, so phase alone would call a shutting-down deployment finished."
+    },
+    "dataset.indexingTechnique": {
+      "values": [
+        "HIGH_QUALITY",
+        "ECONOMY"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/models/v2/dataset/DatasetV2.java",
+        "extract": "javaEnumConstants",
+        "anchor": "IndexingTechnique"
+      }
+    },
+    "customNode.mode": {
+      "values": [
+        "PROMPT",
+        "URL",
+        "DOC",
+        "SCREENSHOT"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/services/wizard/dto/WizardMode.java",
+        "extract": "javaEnumConstants",
+        "anchor": "WizardMode"
+      }
+    },
+    "app.framework": {
+      "values": [
+        "REACT_VITE"
+      ],
+      "backend": {
+        "file": "src/main/java/com/swfte/scp/agentservice/services/wizard/FrameworkConfig.java",
+        "extract": "javaMapOfKeys",
+        "anchor": "REGISTRY"
+      },
+      "narrowedFrom": {
+        "omitted": [
+          "NEXTJS",
+          "FLASK",
+          "EXPRESS",
+          "SPRING_BOOT",
+          "BLANK"
+        ],
+        "why": "FrameworkConfig registers six frameworks, but AppWizardService defaults every path to REACT_VITE and the Studio applications surface offers no other choice, so the other five are unexercised. Advertising them would invite builds nobody has verified."
+      }
+    }
+  }
+}

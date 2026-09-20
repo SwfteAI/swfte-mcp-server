@@ -79,7 +79,12 @@ export const deploymentTools: ToolDefinition[] = [
   {
     name: 'swfte_deployments_activate',
     title: 'Activate a deployment',
-    description: 'Bring a provisioned-but-inactive deployment into service.',
+    description:
+      'Bring a provisioned-but-inactive deployment into service — POST /v1/deployments/{id}/activate. ' +
+      'Accepts 200 and 202, and does not retry: activation is not idempotent from the caller\'s side. ' +
+      'Activation is not deployment and not health — the record moving to active proves neither that ' +
+      'the endpoint answers nor that the topology is what was asked for. Read swfte_deployments_get ' +
+      'for the actual target and profile, then execute through the endpoint.',
     inputSchema: z.object({ deploymentId: z.string() }),
     execute: async (input, { client }) =>
       client.request({

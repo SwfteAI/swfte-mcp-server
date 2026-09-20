@@ -1,6 +1,6 @@
 # Tool reference
 
-`@swfte/mcp-server` exposes **119 tools**, of which a curated **69** are
+`@swfte/mcp-server` exposes **214 tools**, of which a curated **103** are
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
 
 Tools that take a `workspaceId` only honour it for **API-key** credentials. A
@@ -71,9 +71,36 @@ same eleven tools cover every artifact type.
 | `swfte_create` | Persist. A `422` returns structured findings, not an opaque error. |
 | `swfte_refine` | Iterate with plain-language feedback. |
 | `swfte_run` | Execute to terminal, with per-node traces. |
-| `swfte_deploy` | Preview / deploy / teardown. **Previews by default.** |
+| `swfte_deploy` | Preview / deploy / teardown. **Previews by default**, and gated on preflight for workflows. |
 | `swfte_verify` | Kind-appropriate assertion sweep — "does this actually work?" |
 | `swfte_verify_batch` | The same, over up to 25 artifacts. |
+| `swfte_preflight` | 28 rules over a whole solution, each a way the platform reports success while doing nothing. Read-only. |
+| `swfte_preflight_manifest` | Derive preflight's input from an id registry, a spec, or seed ids. |
+| `swfte_publish` | `POST /v2/workflows/{id}/publish`, refused unless preflight passes. |
+
+### What `swfte_preflight` checks, and why it is separate
+
+`swfte_verify` asks whether one artifact is sound. `swfte_solution_verify` asks
+whether a set of artifacts forms the solution it claims to be. Preflight asks
+the third question neither can: whether this solution has walked into one of the
+platform's known silent-failure modes — a `{{node.field}}` reference to a code
+node that files that field under `.result`; `rows` handed in as an object so
+templates never resolve; a `DATA_TABLE` filter carrying `{{…}}` the executor
+never resolves; a templated table name that get-or-creates a brand-new empty
+table; an execution header that disagrees with its own traces; an output over
+the size guard that empties the variable pool downstream; a dataset reporting
+`COMPLETED` over zero segments; an `AGENTIC` agent whose only knowledge
+retrieves nothing, so it answers with an empty string.
+
+None of these fail a structural check. All of them ship.
+
+Every rule has been shown to fail under a deliberate mutation
+(`npm run preflight:mutation`, currently `28 rules · 73/73 · 0 broken`). A rule
+no mutation can kill is reported BROKEN there rather than counted as passing.
+
+A rule that cannot run reports **skip**, and a skip is never a pass. See
+[PUBLISH-GATE.md](./PUBLISH-GATE.md) for the gate, its three verdicts, and the
+two overrides.
 
 ### What `swfte_verify` checks
 
@@ -188,6 +215,41 @@ an `authorizationUrl` for the user to open and `wait` polls for the resulting
 `list` · `get` · `for_agent` · `trail` · `executions` · `activate` ·
 `terminate` · `count`. `trail` is where to look when a deployment reaches
 `FAILED`.
+
+### Agent mail — `swfte_agent_mail_*` (group `agent-mail`)
+
+`mailboxes_list` · `mailbox_get` · `mailbox_create` · `mailbox_bind` ·
+`mailbox_deactivate` · `messages_list` · `send`. Hidden by default; enable with
+`SWFTE_TOOLS=…,agent-mail` or `all`.
+
+`mailbox_create` is an ensure-exists: a `409 mailbox_conflict` means the
+`localPart` is taken, so the existing mailbox is looked up and returned rather
+than reported as a failure. It does **not** update the name or agent binding of
+a mailbox it found — `mailbox_bind` does that, and `agentId: null` clears a
+binding. The address is minted from `localPart` and is immutable.
+
+`mailbox_deactivate` stops routing and stamps `deactivatedAt`. Stored messages
+are kept and stay listable; the address is not released, and there is no
+reactivate call. It is flagged destructive and requires `confirm: true`.
+
+Two properties of this group are not shared by any other:
+
+- **`messages_list` returns untrusted external content.** Senders, subjects and
+  bodies were written by people outside the workspace. The result is wrapped in
+  an envelope carrying `untrustedContent: true` and an advisory, so the content
+  and the warning cannot be separated when a client renders it. Text inside a
+  message asking the model to send mail or call a tool is part of the message.
+- **`send` reaches real people.** `accepted` means the provider took the
+  request — not that anything was delivered, that the address exists, or that
+  anyone read it. The `Idempotency-Key` is derived from mailbox + recipient +
+  subject + body, so a deliberate retry cannot email someone twice, and the call
+  is never auto-retried. A `workspaceId` argument that disagrees with the
+  server's configured workspace is refused rather than sent.
+
+Agent binding resolves only against a monolith deployment. A standalone mail
+host has no agent registry, so any `agentId` returns `404 agent_not_found`
+there; these tools attach that explanation to the error rather than leaving it
+indistinguishable from a typo.
 
 ### Everything else
 

@@ -83,6 +83,8 @@ export interface RunResult {
   status: string;
   /** Backend load-shed or gateway timeout — infra, not artifact misconfiguration. */
   degraded?: boolean;
+  needsHuman?: boolean;
+  waiting?: { executionId: string; status: string; details: unknown; nextAction: string; review?: { method: string; path: string; bodyContract: string; requiresHumanDecision: boolean } };
   output?: unknown;
   /** Per-node execution trace, for graph kinds. */
   nodeTraces?: Array<{ id: string; status: string; type?: string; error?: string }>;
@@ -102,6 +104,12 @@ export interface DeployOpts {
   gpuTier?: string;
   lifecycle?: 'ON_DEMAND' | 'ALWAYS_ON';
   secretId?: string;
+  provider?: string;
+  cloudConnectionId?: string;
+  providerConfigName?: string;
+  sizing?: { nodeCount?: number; gpuTier?: string; gpuCount?: number; cpu?: string; memoryGi?: number; replicas?: number };
+  idleTimeoutSec?: number;
+  path?: 'crossplane' | 'terraform';
   timeoutMs?: number;
 }
 

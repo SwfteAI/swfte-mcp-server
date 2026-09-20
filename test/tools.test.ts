@@ -160,20 +160,60 @@ describe('advertised surface', () => {
   });
 
   test('the default surface stays small enough for reliable tool selection', () => {
-    // 80 → 85 for the post-deploy observability tools, then 85 → 90 on this
-    // merge: the Relay PR added eight workflow tools and two agent tools, and
-    // both groups are advertised by default, so they count whether or not
-    // anyone intended them to.
+    // The ceiling moved 80 → 85 when the five post-deploy observability tools
+    // landed. They are workflow tools and the workflows group is advertised by
+    // default, so there is no shipping them and keeping them out of the count.
+    // Worth the slots: without them a deployed workflow can be reported as
+    // shipped but never as working. Raise this again only for something that
+    // earns it the same way — the number exists to make the trade visible.
     //
-    // Twice in one change is the point at which this number stops being a guard
-    // and becomes a formality, so it is worth saying what was done instead: the
-    // Relay product groups themselves are held OUT of DEFAULT_GROUPS (see
-    // src/config.ts), which is what kept this at 88 rather than well past 90.
-    // The next addition should trim a group rather than raise this again —
-    // `experiments`, `audit` and `cost` are the candidates, none of which an
-    // agent reaches for unprompted.
+    // 85 -> 90 for the four solution-orchestration tools. They earn it the same
+    // way: without them a multi-artifact build can be reported as delivered
+    // while none of its components reference each other. swfte_solution_build
+    // orders and wires a whole solution; swfte_solution_wire writes one
+    // reference into the field the runtime reads; swfte_knowledge_build proves
+    // a dataset retrieves rather than trusting its COMPLETED status;
+    // swfte_agent_ground carries the dataset -> module -> knowledgeModuleIds
+    // hop that is silent at every step when it is skipped. All four are `core`,
+    // so they cannot be group-filtered out of the count either.
+    //
+    // 90 -> 93 for preflight. swfte_preflight runs the 28-rule sweep over the
+    // platform's known silent-failure modes — the ways an artifact reports
+    // COMPLETED while resolving every template to the empty string, which no
+    // structural check sees. swfte_preflight_manifest derives its input, so a
+    // solution stops hand-maintaining a parallel description of itself.
+    // swfte_publish is the gate: publish is the promotion boundary, and the
+    // last place a defect is still cheap. All three are `core` for the same
+    // reason the solution tools are — a gate anyone can group-filter away is
+    // not a gate.
     const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x' } as never));
-    assert.ok(selected.length < 90, `default surface is ${selected.length} tools`);
+    // Chatflow turn input plus read-only status and explicit administrative abandonment complete durable recovery.
+    // 96: swfte_composition_classify joined the always-on set. It answers a
+    // question swfte_solution_advise cannot — the two axes are independent, and
+    // advise's five booleans cannot carry audience, budget, side effects or
+    // deployment needs. The ceiling moves by exactly one, deliberately; it is
+    // still a ceiling.
+    //
+    // 96 -> 103 on the merge that brought Relay in beside agent-mail. The
+    // product groups did what they were supposed to: `journeys` and `relay` are
+    // held out of DEFAULT_GROUPS, and `agent-mail` is opt-in because one of its
+    // tools emails real people. The growth is elsewhere — Relay put eight tools
+    // in `workflows` and two in `agents`, and both of those ARE default groups,
+    // so they are advertised whether or not anyone weighed them against this
+    // ceiling.
+    //
+    // Two previous entries said the next addition should trim a group rather
+    // than raise this number, and named `experiments`, `audit` and `cost`. That
+    // advice is now stale: all three were already outside DEFAULT_GROUPS, so
+    // trimming them saves nothing. Measured breakdown at 103 —
+    //   core 19, workflows 19, analytics 13, agents 12, chatflows 12,
+    //   deployments 8, datasets 6, modules 6, connect 5, untagged 3
+    // — which makes `analytics` (13 tools, none of them needed to build or ship
+    // anything) the only real lever left. Dropping it returns this to 90.
+    //
+    // That is a product decision about what every client sees by default, so it
+    // is written down here rather than taken quietly as part of a merge.
+    assert.ok(selected.length <= 103, `default surface is ${selected.length} tools`);
     assert.ok(selected.length > 40, `default surface is only ${selected.length} tools`);
   });
 

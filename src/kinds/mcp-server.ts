@@ -1,4 +1,4 @@
-import { SwfteApiError } from '../client.js';
+import { SwfteApiError, type SwfteClient } from '../client.js';
 import {
   pickId,
   toFindings,
@@ -23,7 +23,15 @@ const DEPLOYMENTS = '/v2/mcp/deployments';
  * build → status → create shape the tools expect, rather than forcing every
  * caller to special-case this kind.
  */
-const syntheticSessions = new Map<string, BuildSnapshot>();
+const syntheticSessions = new WeakMap<SwfteClient, Map<string, BuildSnapshot>>();
+function sessionsFor(client: SwfteClient): Map<string, BuildSnapshot> {
+  let sessions = syntheticSessions.get(client);
+  if (!sessions) {
+    sessions = new Map();
+    syntheticSessions.set(client, sessions);
+  }
+  return sessions;
+}
 
 let counter = 0;
 const nextSessionId = (): string => `mcpwiz-${Date.now().toString(36)}-${(counter += 1)}`;
@@ -36,7 +44,11 @@ export const mcpServerAdapter: KindAdapter = {
     'Artifacts are versioned in git — see the swfte_mcp_* tools for fork/commit/publish.',
 
   async build(client, input: BuildInput) {
+    const extras = input.options ?? {};
+    const options = (extras.options ?? {}) as Record<string, unknown>;
+    if (extras.autoDeploy || options.autoDeploy) throw new Error('Build cannot auto-deploy. Use swfte_deploy with its deployment controls.');
     const sessionId = nextSessionId();
+    const sessions = sessionsFor(client);
 
     const body = await client.request<any>({
       method: 'POST',
@@ -51,9 +63,9 @@ export const mcpServerAdapter: KindAdapter = {
       timeoutMs: 300_000,
     });
 
-    syntheticSessions.set(sessionId, {
+    sessions.set(sessionId, {
       sessionId,
-      status: body?.status ?? 'COMPLETED',
+      status: body?.status ?? 'UNKNOWN',
       message: body?.message ?? null,
       progress: 100,
       done: true,
@@ -66,16 +78,16 @@ export const mcpServerAdapter: KindAdapter = {
     });
 
     // Bounded: this map only exists to bridge sync → poll within one session.
-    if (syntheticSessions.size > 32) {
-      const oldest = syntheticSessions.keys().next().value;
-      if (oldest) syntheticSessions.delete(oldest);
+    if (sessions.size > 32) {
+      const oldest = sessions.keys().next().value;
+      if (oldest) sessions.delete(oldest);
     }
 
     return { sessionId };
   },
 
-  async status(_client, sessionId): Promise<BuildSnapshot> {
-    const snap = syntheticSessions.get(sessionId);
+  async status(client, sessionId): Promise<BuildSnapshot> {
+    const snap = sessionsFor(client).get(sessionId);
     if (!snap) {
       throw new Error(
         `No MCP wizard session "${sessionId}" in this process. ` +
@@ -87,22 +99,33 @@ export const mcpServerAdapter: KindAdapter = {
 
   extractArtifact(snapshot) {
     const fr = snapshot.finalResponse as any;
-    return fr?.artifact ?? fr?.server ?? fr;
+    return fr?.generatedServer ?? fr?.artifact ?? fr?.server ?? fr;
   },
 
   extractId(snapshot) {
     const fr = snapshot.finalResponse as any;
-    return pickId(fr?.artifact) ?? pickId(fr);
+    return fr?.savedArtifactId ?? pickId(fr?.artifact) ?? pickId(fr);
   },
 
   async steer(client, sessionId, instruction) {
-    return client.request<any>({
-      method: 'POST',
-      path: `${WIZARD}/${encodeURIComponent(sessionId)}/steer`,
-      body: { message: instruction },
-      expectStatuses: [200, 202, 409],
-      retries: 0,
-    });
+    if (sessionsFor(client).has(sessionId) || sessionId.startsWith('mcpwiz-')) {
+      return { status: 'inactive', accepted: false };
+    }
+    try {
+      await client.request({
+        method: 'POST',
+        path: `${WIZARD}/${encodeURIComponent(sessionId)}/steer`,
+        body: { message: instruction },
+        expectStatuses: [200, 202],
+        retries: 0,
+      });
+      return { status: 'accepted', accepted: true };
+    } catch (error) {
+      if (error instanceof SwfteApiError && error.status === 409) {
+        return { status: 'inactive', accepted: false };
+      }
+      throw error;
+    }
   },
 
   async validate(client, artifact): Promise<ValidationReport> {
@@ -122,19 +145,32 @@ export const mcpServerAdapter: KindAdapter = {
   },
 
   async deploy(client, id, _opts: DeployOpts): Promise<DeployResult> {
+    const artifact = await client.request<any>({
+      method: 'GET', path: `${WIZARD}/artifacts/${encodeURIComponent(id)}`,
+    });
+    if (!artifact || !artifact.name) throw new Error('Cannot deploy: the saved MCP artifact has no server definition.');
+    const server = {
+      ...artifact,
+      configuration: artifact.configuration ?? {
+        transport: artifact.transport ?? 'stdio',
+        port: artifact.port,
+        environment: artifact.environment,
+        requiredSecrets: artifact.requiredSecrets,
+      },
+    };
     const body = await client.request<any>({
       method: 'POST',
       path: `${WIZARD}/deploy`,
-      body: { artifactId: id },
+      body: { server },
       expectStatuses: [200, 201, 202],
       retries: 0,
       timeoutMs: 300_000,
     });
     return {
-      deploymentId: body?.deploymentId ?? body?.id,
-      phase: String(body?.status ?? 'DEPLOYED'),
-      url: body?.url ?? body?.endpoint,
-      endpoint: body?.endpoint ?? body?.url,
+      deploymentId: body?.deployment?.id ?? body?.deploymentId,
+      phase: String(body?.deployment?.state ?? body?.status ?? 'UNKNOWN'),
+      url: body?.deployment?.endpoint ?? body?.url,
+      endpoint: body?.deployment?.endpoint ?? body?.endpoint,
       raw: body,
     };
   },
@@ -169,7 +205,7 @@ export const mcpServerAdapter: KindAdapter = {
     });
   },
 
-  async verify(client, id, _opts: VerifyOpts): Promise<VerifyReport> {
+  async verify(client, id, opts: VerifyOpts): Promise<VerifyReport> {
     const checks: VerifyCheck[] = [];
     const nextActions: string[] = [];
 
@@ -195,28 +231,41 @@ export const mcpServerAdapter: KindAdapter = {
     });
     if (tools.length === 0) nextActions.push('Regenerate with a prompt that names the operations the server should expose.');
 
-    // The generated code either compiles or it does not; nothing downstream
-    // works if it does not, so this is the check that matters most.
     try {
-      const validation = await this.validate!(client, artifact);
-      checks.push({
-        id: 'builds',
-        ok: validation.valid,
-        detail: validation.valid
-          ? 'Validation/build passed'
-          : validation.findings.map((f) => f.message).join('; ') || 'Validation failed',
-      });
-      if (!validation.valid) nextActions.push('Fix the build errors above, then re-validate.');
-    } catch (err) {
-      checks.push({
-        id: 'builds',
-        ok: null,
-        detail: `Validation unavailable: ${err instanceof SwfteApiError ? err.message : String(err)}`,
-      });
+      const configuration = await this.validate!(client, artifact);
+      checks.push({ id: 'configuration', ok: configuration.valid,
+        detail: configuration.valid ? 'Configuration valid' : configuration.findings.map(f => f.message).join('; ') || 'Configuration invalid' });
+      if (!configuration.valid) nextActions.push('Fix the configuration findings, then re-validate.');
+    } catch (error) {
+      checks.push({ id: 'configuration', ok: false, detail: `Configuration validation unavailable: ${error instanceof Error ? error.message : String(error)}` });
+      nextActions.push('Retry configuration validation when the validator is available.');
     }
 
-    const ok = checks.every((c) => c.ok !== false);
-    if (ok && nextActions.length === 0) nextActions.push('Looks healthy — swfte_deploy to host it.');
+    try {
+      const build = await client.request<any>({
+        method: 'POST', path: `${WIZARD}/validate-build`,
+        // Validate the exact snapshot already retrieved, rather than a potentially
+        // newer artifact revision fetched independently by the compiler service.
+        body: { serverName: artifact.name, code: artifact.generatedCode, packageJson: artifact.packageJson },
+        retries: 0, timeoutMs: opts.timeoutMs ?? 120_000,
+      });
+      const built = build?.success === true && build?.buildAttempted === true;
+      checks.push({ id: 'builds', ok: built,
+        detail: built ? `Build passed (${build.validationMethod ?? 'compiler'})`
+          : build?.buildAttempted !== true ? 'Compilation was not performed; build is unverified'
+          : (build?.errors ?? []).join('; ') || 'Build failed' });
+      if (!built) nextActions.push('Resolve the build failure or unavailable compiler, then verify again.');
+    } catch (error) {
+      checks.push({ id: 'builds', ok: false, detail: `Build validation unavailable: ${error instanceof Error ? error.message : String(error)}` });
+      nextActions.push('Retry build validation when the compiler is available.');
+    }
+
+    if (opts.run) {
+      checks.push({ id: 'execution', ok: false, detail: 'MCP endpoint execution is not supported by this verification adapter.' });
+      nextActions.push('Verify the deployed endpoint using an MCP client; this adapter cannot perform the requested execution check.');
+    }
+    const ok = checks.every((check) => check.ok === true);
+    if (ok) nextActions.push('Configuration and compilation passed; endpoint runtime health remains unverified.');
 
     return { ok, kind: 'mcp-server', id, checks, nextActions };
   },

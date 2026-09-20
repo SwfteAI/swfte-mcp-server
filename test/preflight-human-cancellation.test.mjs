@@ -1,0 +1,11 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {RULES} from '../src/preflight/lib/rules.mjs';
+const rule=RULES.find(r=>r.id==='RUN-HEADER-VS-TRACES');
+const completed={nodeId:'analyst',nodeType:'AGENT',status:'COMPLETED'};const pause={nodeId:'review',nodeType:'HUMAN_INPUT',status:'PAUSED'};const skipped={nodeId:'other',nodeType:'END',status:'SKIPPED'};
+const check=(header,envelope,traces)=>rule.run({executions:{case:[{header:{id:'run',status:header},envelopeStatus:envelope,traces}]}});
+test('cancelled human review remains visible warning and never falsely all-completed',()=>{const findings=check('FAILED','CANCELLED',[completed,skipped,pause]);assert.equal(findings.length,1);assert.equal(findings[0].severity,'warn');assert.match(findings[0].detail,/incomplete cancelled review, not business success/);assert(!findings.some(f=>f.detail.includes('while all')));});
+test('success with failed node remains blocking',()=>{assert(check('SUCCEEDED','SUCCEEDED',[completed,{...pause,status:'FAILED'}]).some(f=>f.severity==='block'));});
+test('all completed with failed header remains blocking',()=>{assert(check('FAILED','FAILED',[completed]).some(f=>f.severity==='block'&&f.detail.includes('while all 1')));});
+test('cancelled envelope cannot conceal failed work',()=>{assert(check('FAILED','CANCELLED',[completed,pause,{nodeId:'bad',status:'FAILED'}]).some(f=>f.severity==='block'));});
+test('unknown pause type does not establish human cancellation',()=>{assert(check('FAILED','CANCELLED',[completed,{status:'PAUSED'}]).some(f=>f.severity==='block'));});
+test('running work or successful header disagreement remains blocking',()=>{assert(check('FAILED','CANCELLED',[completed,pause,{status:'RUNNING'}]).some(f=>f.severity==='block'));assert(check('SUCCEEDED','CANCELLED',[completed,pause]).some(f=>f.severity==='block'));});
+test('partial failure is not described as all completed',()=>{const findings=check('FAILED','FAILED',[completed,pause]);assert(!findings.some(f=>f.detail.includes('while all')));});

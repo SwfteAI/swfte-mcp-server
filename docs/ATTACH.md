@@ -97,8 +97,8 @@ copy the secret into a header that has no use for it.
 
 ### Tool groups
 
-The full surface is 119 tools. Advertising all of them measurably degrades a
-model's ability to pick the right one, so a **69-tool default** is advertised:
+The full surface is 214 tools. Advertising all of them measurably degrades a
+model's ability to pick the right one, so a **103-tool default** is advertised:
 
 ```
 core, workflows, agents, chatflows, datasets, modules, deployments, analytics
@@ -114,7 +114,12 @@ SWFTE_TOOLS=core,voice,conversations  # a voice-ops session
 
 Available groups: `core`, `workflows`, `agents`, `chatflows`, `datasets`,
 `modules`, `rag`, `voice`, `marketplace`, `files`, `conversations`, `audit`,
-`cost`, `mcp`, `analytics`, `experiments`, `connect`, `deployments`.
+`cost`, `mcp`, `analytics`, `experiments`, `connect`, `deployments`,
+`agent-mail`.
+
+`agent-mail` is opt-in deliberately, not merely for the tool count: one of its
+tools sends email to real people, and its read tools return message bodies
+written outside the workspace. A surface that can do that should be asked for.
 
 `core` is always included, and `swfte_whoami` reports which groups are live plus
 what is hidden — nothing disappears silently.

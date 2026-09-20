@@ -67,7 +67,7 @@ export const whoamiTools: ToolDefinition[] = [
         failures.every((f) => f.status === 401 || f.status === 403);
 
       return {
-        connected: !allAuthFailed,
+        connected: results.some((result) => result.ok),
         endpoint: client.baseUrl,
         credentialKind: config.credentialKind,
         ...(allAuthFailed
