@@ -21,7 +21,7 @@ import { UnsupportedKindError, UnsupportedVerbError } from './kinds/index.js';
 import { allTools } from './tools/index.js';
 import type { ToolDefinition } from './tools/_types.js';
 import { RESOURCE_TEMPLATES, STATIC_RESOURCES, ResourceNotFoundError, readResource } from './resources.js';
-import { PROMPTS, PromptNotFoundError, getPrompt } from './prompts.js';
+import { PROMPTS, getPrompt } from './prompts.js';
 
 const PACKAGE_NAME = '@swfte/mcp-server';
 const PACKAGE_VERSION = '0.2.0';
@@ -162,7 +162,8 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
     try {
       return getPrompt(req.params.name, (req.params.arguments ?? {}) as Record<string, string>);
     } catch (err) {
-      if (err instanceof PromptNotFoundError || err instanceof Error) throw new McpError(ErrorCode.InvalidParams, err.message);
+      // Unknown prompt or a missing required argument: the caller's request is at fault.
+      if (err instanceof Error) throw new McpError(ErrorCode.InvalidParams, err.message);
       throw err;
     }
   });

@@ -111,7 +111,7 @@ Widen or narrow it explicitly:
 
 ```bash
 SWFTE_TOOLS=all                       # everything
-SWFTE_TOOLS=core,workflows            # 17 tools — a focused workflow session
+SWFTE_TOOLS=core,workflows            # 52 tools — a focused workflow session
 SWFTE_TOOLS=core,voice,conversations  # a voice-ops session
 ```
 

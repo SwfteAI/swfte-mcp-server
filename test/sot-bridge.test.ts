@@ -511,7 +511,12 @@ describe('hosted (inline) mode and file-safety edge cases', () => {
     assert.ok(res.files.every((f: any) => typeof f.content === 'string'));
     assert.equal(existsSync(join(tmp, 'src')), false, 'hosted mode wrote to the server disk');
     // Confinement still applies to the paths it hands back.
-    await assert.rejects(hostedRun('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: '../outside' }), /outside/);
+    seen = [];
+    await assert.rejects(
+      hostedRun('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: '../outside' }),
+      /outside the working directory/
+    );
+    assert.equal(seen.length, 0, 'hosted traversal must be refused before any request');
     await assert.rejects(hostedRun('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: '/etc' }), /relative to the project root/);
   });
 
