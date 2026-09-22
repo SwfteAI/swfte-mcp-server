@@ -97,12 +97,15 @@ copy the secret into a header that has no use for it.
 
 ### Tool groups
 
-The full surface is 214 tools. Advertising all of them measurably degrades a
-model's ability to pick the right one, so a **103-tool default** is advertised:
+The full surface is 225 tools. Advertising all of them measurably degrades a
+model's ability to pick the right one, so a **101-tool default** is advertised:
 
 ```
-core, workflows, agents, chatflows, datasets, modules, deployments, analytics
+core, workflows, agents, chatflows, datasets, modules, deployments, connect
 ```
+
+`analytics` (13 read-only reporting tools) is opt-in: add it with
+`SWFTE_TOOLS=core,workflows,agents,chatflows,datasets,modules,deployments,connect,analytics`.
 
 Widen or narrow it explicitly:
 

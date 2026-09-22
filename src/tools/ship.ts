@@ -116,6 +116,11 @@ async function pollToTerminal(
   return { ...terminalPayload(adapter, snapshot), elapsedMs, polls };
 }
 
+/** Carried on every build response, so the reuse check stays in front of the next build too. */
+export const REUSE_FIRST_NOTE =
+  'Generation is the expensive path. Before the next build, call swfte_find_existing — a REUSE recommendation ' +
+  'avoids the generation entirely and brings run evidence with it; bake a reused artifact in with swfte_scaffold_client.';
+
 export const shipTools: ToolDefinition[] = [
   // -------------------------------------------------------------------------
   {
@@ -123,6 +128,7 @@ export const shipTools: ToolDefinition[] = [
     title: 'Build from a description',
     group: 'core',
     description:
+      'CALL swfte_find_existing FIRST: reusing a catalog artifact that already has run evidence costs no generation tokens and ships something proven; build only when it recommends BUILD. ' +
       `Build a Studio artifact from a natural-language description. Supported kinds: ${kindList}. ` +
       'First use swfte_solution_advise to distinguish a product, bounded workflow or agentic system; use swfte_capabilities for actual supported verbs/options. Reference cases can be injected with designContext. ' +
       'Starts the generator, polls it to completion, and returns the generated artifact along with ' +
@@ -150,7 +156,8 @@ export const shipTools: ToolDefinition[] = [
         autoCreate: input.autoCreate,
         options: input.options,
       });
-      return pollToTerminal(client, adapter, sessionId, input.waitMs ?? config.defaultWaitMs);
+      const result = await pollToTerminal(client, adapter, sessionId, input.waitMs ?? config.defaultWaitMs);
+      return { ...result, reuseFirst: REUSE_FIRST_NOTE };
     },
   },
 

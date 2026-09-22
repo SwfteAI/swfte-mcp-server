@@ -69,6 +69,18 @@ async function main(): Promise<void> {
     'swfte_run',
     'swfte_deploy',
     'swfte_verify',
+    // Studio as source of truth: reuse-first, code bridge, approval-gated wiring.
+    'swfte_find_existing',
+    'swfte_get_context',
+    'swfte_get_evidence',
+    'swfte_trace_dependencies',
+    'swfte_scaffold_client',
+    'swfte_embed_widget',
+    'swfte_request_approval',
+    'swfte_execute_approved_action',
+    'swfte_get_action_status',
+    'swfte_wire_analytics',
+    'swfte_wire_payments',
   ];
   const names = new Set(tools.map((t) => t.name));
   for (const r of required) if (!names.has(r)) problems.push(`missing required tool: ${r}`);
@@ -96,6 +108,28 @@ async function main(): Promise<void> {
   const missingCase = await client.callTool({ name: 'swfte_solution_advise', arguments: { facts: {}, caseStudyIds: ['not-a-real-case'] } });
   if (!missingCase.isError) problems.push('unknown case study was not rejected');
   else console.log('✓ guidance calls, adapter limits and unknown reference rejection');
+
+  // Resources and prompts are advertised over the protocol, not just registered.
+  const caps = client.getServerCapabilities();
+  if (!caps?.resources || !caps?.prompts) problems.push('server does not advertise resources and prompts capabilities');
+  const { resources } = await client.listResources();
+  if (!resources.some((r) => r.uri === 'swfte://capabilities')) problems.push('swfte://capabilities resource missing');
+  const { resourceTemplates } = await client.listResourceTemplates();
+  if (!resourceTemplates.some((t) => t.uriTemplate === 'swfte://catalog/{kind}/{id}')) problems.push('swfte://catalog/{kind}/{id} template missing');
+  const capRes = await client.readResource({ uri: 'swfte://capabilities' });
+  const capBody = JSON.parse(String((capRes.contents[0] as { text?: string }).text ?? '{}'));
+  if (!capBody.catalog?.kinds?.includes('workflow') || !capBody.actions?.capabilities?.includes('app.payments.enable')) problems.push('capabilities resource content incomplete');
+  const { prompts } = await client.listPrompts();
+  for (const p of ['reuse-then-build', 'ship-with-analytics-and-payments', 'bake-into-codebase']) {
+    if (!prompts.some((x) => x.name === p)) problems.push(`missing prompt: ${p}`);
+  }
+  const rendered = await client.getPrompt({ name: 'reuse-then-build', arguments: { goal: 'invoice extraction' } });
+  const renderedText = (rendered.messages[0]?.content as { text?: string })?.text ?? '';
+  if (!renderedText.includes('swfte_find_existing')) problems.push('reuse-then-build prompt does not start from swfte_find_existing');
+  // A traversal targetDir is refused before any request (the credential here is a placeholder).
+  const traversal = await client.callTool({ name: 'swfte_scaffold_client', arguments: { catalogRef: 'workflow:x', language: 'typescript', targetDir: '../outside' } });
+  if (!traversal.isError || !JSON.stringify(traversal.content).includes('outside the working directory')) problems.push('scaffold traversal was not refused');
+  console.log(`✓ resources (${resources.length} + ${resourceTemplates.length} template), prompts (${prompts.length}), scaffold confinement`);
 
   await client.close();
 

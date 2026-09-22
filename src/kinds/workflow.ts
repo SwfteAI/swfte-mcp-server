@@ -146,17 +146,33 @@ function scanForPlaintextSecrets(artifact: unknown): string[] {
   return hits;
 }
 
+/**
+ * /invoke answers 409 PUBLISHED_SNAPSHOT_UNAVAILABLE for a workflow with no
+ * active published snapshot (a draft, or a published-but-disabled one). An
+ * older backend without /invoke answers 404/405. Both mean "use the
+ * pre-existing /execute path", nothing more.
+ */
+function isNoPublishedSnapshot(err: unknown): boolean {
+  if (!(err instanceof SwfteApiError)) return false;
+  if (err.status === 404 || err.status === 405) return /\/invoke$/.test(err.path);
+  return err.status === 409 && /PUBLISHED_SNAPSHOT_UNAVAILABLE|NOT_PUBLISHED/i.test(`${err.code} ${err.message}`);
+}
+
 async function executeAndPoll(
   client: SwfteClient,
   id: string,
   input: RunInput,
-  opts: { testingFlag: boolean }
+  opts: { testingFlag: boolean; path?: 'invoke' | 'execute' }
 ): Promise<RunResult> {
   const started = Date.now();
+  // /invoke runs the immutable published snapshot (what a deployed caller
+  // gets); /execute runs the live draft record. testingFlag is rejected by
+  // /invoke, so the draft test path always goes through /execute.
+  const route = opts.testingFlag ? 'execute' : (opts.path ?? 'execute');
 
   const start = await client.request<any>({
     method: 'POST',
-    path: `${WORKFLOWS}/${encodeURIComponent(id)}/execute`,
+    path: `${WORKFLOWS}/${encodeURIComponent(id)}/${route}`,
     query: opts.testingFlag ? { skipValidation: true } : undefined,
     body: { inputs: input.inputs ?? {}, ...(opts.testingFlag ? { testingFlag: true } : {}) },
     expectStatuses: [200, 201, 202],
@@ -323,6 +339,14 @@ export const workflowAdapter: KindAdapter = {
   },
 
   async run(client, id, input): Promise<RunResult> {
+    // Published workflows run through /invoke — the released snapshot a
+    // deployed caller would reach, not whatever the draft autosaved last.
+    try {
+      const result = await executeAndPoll(client, id, input, { testingFlag: false, path: 'invoke' });
+      return { ...result, raw: { ...(result.raw as object), path: 'invoke', note: 'Ran the published snapshot via POST /v2/workflows/{id}/invoke.' } };
+    } catch (err) {
+      if (!isNoPublishedSnapshot(err)) throw err;
+    }
     try {
       return await executeAndPoll(client, id, input, { testingFlag: false });
     } catch (err) {

@@ -1,6 +1,6 @@
 # Tool reference
 
-`@swfte/mcp-server` exposes **214 tools**, of which a curated **103** are
+`@swfte/mcp-server` exposes **225 tools**, of which a curated **101** are
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
 
 Tools that take a `workspaceId` only honour it for **API-key** credentials. A
@@ -8,6 +8,24 @@ PAT carries its own workspace binding, injected server-side, and any value sent
 alongside it is overridden.
 
 ---
+
+## Studio as source of truth (core)
+
+| Tool | Method | Path |
+|---|---|---|
+| `swfte_find_existing` | GET | `/v2/catalog/search` |
+| `swfte_get_context` | GET | `/v2/catalog/{kind}/{id}` + `/v2/catalog/{kind}/{id}/contract` |
+| `swfte_get_evidence` | GET | `/v2/catalog/{kind}/{id}` |
+| `swfte_trace_dependencies` | GET | `/v2/catalog/{kind}/{id}` (+ the artifact's own record; upstream scans `/v2/catalog/search`) |
+| `swfte_scaffold_client` | GET | `/v2/catalog/{kind}/{id}` + `/contract` — writes locally |
+| `swfte_embed_widget` | GET | `/v2/catalog/{kind}/{id}/contract` — writes locally |
+| `swfte_request_approval` | POST | `/v2/actions` |
+| `swfte_execute_approved_action` | POST | `/v2/actions/{id}/execute` |
+| `swfte_get_action_status` | GET | `/v2/actions/{id}` · `/v2/actions?status=` |
+| `swfte_wire_analytics` | POST/GET | `/v2/actions` (analytics.enable) → `/v2/actions/{id}/execute` — writes locally |
+| `swfte_wire_payments` | POST/GET | `/v2/actions` (app.payments.enable) → `/v2/actions/{id}/execute` — writes locally |
+
+## Agents — `swfte_agents_*`
 
 | Tool | Method | Path |
 |---|---|---|

@@ -6,6 +6,7 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { loadConfig, type ServerConfig } from '../src/config.js';
 import { SwfteClient } from '../src/client.js';
@@ -213,8 +214,45 @@ describe('advertised surface', () => {
     //
     // That is a product decision about what every client sees by default, so it
     // is written down here rather than taken quietly as part of a merge.
+    //
+    // Taken, deliberately, when the Studio-as-source-of-truth bridge landed:
+    // eleven tools joined `core` (catalog reuse, scaffold, approval-gated
+    // actions, analytics/payments wiring). They have to be `core` — a
+    // reuse-before-build step a group filter can hide is a step that gets
+    // skipped. Rather than raise this ceiling to 114, `analytics` left
+    // DEFAULT_GROUPS. Measured at 101 —
+    //   core 30, workflows 19, agents 12, chatflows 12, deployments 8,
+    //   datasets 6, modules 6, connect 5, untagged 3.
+    // The next addition has no free lever left in the default groups; it has
+    // to argue for raising this number.
     assert.ok(selected.length <= 103, `default surface is ${selected.length} tools`);
     assert.ok(selected.length > 40, `default surface is only ${selected.length} tools`);
+  });
+
+  test('the budget comment carries the measured counts', () => {
+    // A count in a comment is a claim. This keeps src/config.ts honest the way
+    // backend-options.test.ts keeps the README honest: if the surface moves,
+    // the comment has to move with it.
+    const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x' } as never));
+    const byGroup = new Map<string, number>();
+    for (const t of selected) byGroup.set(t.group ?? 'untagged', (byGroup.get(t.group ?? 'untagged') ?? 0) + 1);
+    const text = readFileSync('src/config.ts', 'utf8');
+    assert.ok(text.includes(`full surface is ${allTools.length} tools`), `config.ts does not state the real total (${allTools.length})`);
+    assert.ok(text.includes(`${allTools.length} registered, ${selected.length} advertised`), `config.ts does not state ${allTools.length} registered / ${selected.length} advertised`);
+    for (const [group, n] of byGroup) {
+      assert.ok(text.includes(`${group} ${n}`), `config.ts breakdown is missing "${group} ${n}"`);
+    }
+    assert.ok(!/\b190 tools\b/.test(text), 'config.ts still claims 190 tools');
+  });
+
+  test('the source-of-truth tools are core, so no group filter hides them', () => {
+    const names = [
+      'swfte_find_existing', 'swfte_get_context', 'swfte_get_evidence', 'swfte_trace_dependencies',
+      'swfte_scaffold_client', 'swfte_embed_widget', 'swfte_request_approval', 'swfte_execute_approved_action',
+      'swfte_get_action_status', 'swfte_wire_analytics', 'swfte_wire_payments',
+    ];
+    const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x', SWFTE_TOOLS: 'voice' } as never));
+    for (const n of names) assert.ok(selected.some((t) => t.name === n), `${n} hidden by SWFTE_TOOLS=voice`);
   });
 
   test('core tools survive every group filter', () => {

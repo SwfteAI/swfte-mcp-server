@@ -29,7 +29,7 @@ export type CredentialKind = 'pat' | 'api-key';
 export const TOOL_GROUPS = [
   'custom-nodes',
   'apps', // Hosted AppWizard sessions; opt in explicitly or use all.
-  'core', // whoami + the 8 ship tools + verify — the reason this server exists
+  'core', // ship/verify/solution/preflight + catalog reuse, scaffold, actions, wiring — always advertised
   'workflows',
   'agents',
   'chatflows',
@@ -63,8 +63,9 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is 190 tools, which measurably degrades a model's ability
- * to pick the right one. This subset covers building, shipping, and inspecting
+ * The full surface is 225 tools, which measurably degrades a model's ability
+ * to pick the right one (test/tools.test.ts "the budget comment carries the measured counts" keeps
+ * these two numbers true). This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
  * `SWFTE_TOOLS=all` advertises everything, and `swfte_whoami` reports which
  * groups are live so nothing is hidden silently.
@@ -77,7 +78,17 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   'datasets',
   'modules',
   'deployments',
-  'analytics',
+  // `analytics` (13 read-only reporting tools) left the default set when the
+  // eleven Studio-as-source-of-truth tools joined `core` (find_existing,
+  // get_context, get_evidence, trace_dependencies, scaffold_client,
+  // embed_widget, request_approval, execute_approved_action,
+  // get_action_status, wire_analytics, wire_payments). Measured at that point:
+  // 225 registered, 101 advertised against a ceiling of 103 —
+  //   core 30, workflows 19, agents 12, chatflows 12, deployments 8,
+  //   datasets 6, modules 6, connect 5, untagged 3.
+  // Keeping analytics would have made it 114. None of its tools is needed to
+  // build, reuse or ship anything; it was the lever the budget note in
+  // test/tools.test.ts named. `SWFTE_TOOLS=core,…,analytics` brings it back.
   // Small (5 tools) and load-bearing: this is the only way to get a user signed
   // in to a provider their workflow needs. Hidden, an agent cannot repair — or
   // even name — a missing credential, so an integration workflow fails at
@@ -86,10 +97,10 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   // ones work.
   'connect',
   // `journeys` and `relay` are deliberately absent, and that is a decision to
-  // revisit rather than a default to inherit. The surface already sits at 81
-  // against a bound of 85 — a bound that exists because a large advertised
-  // surface measurably degrades a model's ability to pick the right tool. Adding
-  // three more modules would push past it. They stay reachable through
+  // revisit rather than a default to inherit. The surface sits at 101 against
+  // a ceiling of 103 — a ceiling that exists because a large advertised surface
+  // measurably degrades a model's ability to pick the right tool. Adding them
+  // (17 tools) would push well past it. They stay reachable through
   // SWFTE_TOOLS; whether an agent should reach for Relay tools unprompted is a
   // product question, not a merge resolution.
 ];

@@ -51,7 +51,7 @@ widget, application, or MCP server**.
   server-side page cap, read-merge-write updates where the raw PATCH would wipe
   omitted fields, retry with load-shedding detection, and typed error envelopes
   carrying the backend's own code plus a suggested action.
-- **214 tools available, 103 advertised by default**, adjustable via `SWFTE_TOOLS`.
+- **225 tools available, 101 advertised by default**, adjustable via `SWFTE_TOOLS`.
 - **Stdio transport**, multi-arch Docker image, and Zod-typed inputs published
   as JSON Schema over `tools/list`.
 
@@ -196,9 +196,9 @@ or `mcp-server`.
 | Datasets | `swfte_datasets_*` | `datasets` | ✓ |
 | Modules | `swfte_modules_*` | `modules` | ✓ |
 | Deployments | `swfte_deployments_*` | `deployments` | ✓ |
-| Analytics | `swfte_analytics_*` | `analytics` | ✓ |
+| Analytics | `swfte_analytics_*` | `analytics` | |
 | A/B experiments | `swfte_experiments_*` | `experiments` | |
-| OAuth connect | `swfte_connect_*` | `connect` | |
+| OAuth connect | `swfte_connect_*` | `connect` | ✓ |
 | Conversations | `swfte_conversations_*` | `conversations` | |
 | RAG | `swfte_rag_*` | `rag` | |
 | Voice | `swfte_voice_*` | `voice` | |
@@ -209,13 +209,71 @@ or `mcp-server`.
 | Cost control | `swfte_cost_*` | `cost` | |
 | Agent mail | `swfte_agent_mail_*` | `agent-mail` | |
 
-Advertising all 214 tools measurably degrades a model's ability to pick the
-right one, so 96 are advertised by default. `SWFTE_TOOLS=all` widens it, and
+Advertising all 225 tools measurably degrades a model's ability to pick the
+right one, so 101 are advertised by default. `SWFTE_TOOLS=all` widens it, and
 `swfte_whoami` reports which groups are live and what is hidden — nothing
 disappears silently.
 
 Full reference: [`docs/TOOLS.md`](docs/TOOLS.md). API docs:
 [swfte.com/developers](https://www.swfte.com/developers).
+
+---
+
+## Use Studio as your source of truth from Claude Code
+
+Swfte Studio keeps a catalog of every workflow, agent, chatflow, widget,
+application, MCP server, model, module and solution in your workspace (plus the
+public catalog), each with an **evidence level** computed from real runs, evals
+and reviews: `unmeasured → observed → corroborated → validated → verified`,
+plus `stale` and `disputed`. This server makes that catalog the first thing a
+coding agent consults, and the path by which proven artifacts land in your code.
+
+**1. Reuse before you generate.** `swfte_find_existing {query}` searches the
+catalog and returns ranked matches with their evidence level, the reasons they
+matched, and a recommendation — `REUSE`, `INSPECT_BEFORE_REUSE` or `BUILD` —
+with an estimate of the generation a reuse avoids. `swfte_build` says so in its
+description and repeats it in every response. If Jev re-ranking is unavailable
+the search still answers and lists it under `degraded`.
+
+**2. Read the context package.** `swfte_get_context {catalogRef}` returns the
+invocation contract (method, path, auth, async status path, input/output JSON
+Schemas, snippets, embed), evidence and its reasons, Jev facets (proposed vs
+confirmed), the stored design rationale, reviews and dependencies.
+`swfte_get_evidence` and `swfte_trace_dependencies` (downstream, or a bounded
+upstream scan before you change something others reuse) go deeper.
+
+**3. Bake it into the codebase.** `swfte_scaffold_client {catalogRef, language:
+"typescript" | "python", targetDir}` writes a dependency-free typed client
+(types generated from the contract's schemas; async workflows are polled to
+completion), merges `SWFTE_API_KEY` / `SWFTE_BASE_URL` / `SWFTE_WORKSPACE_ID`
+into `.env.example`, and records `{catalogRef, updatedAt, contractHash}` in
+`swfte.json` — commit it, and a changed contract hash tells you the artifact
+moved. `swfte_embed_widget` writes an artifact's embed markup instead. Writes
+are confined to the directory the server runs in (`..` and outside absolute
+paths are refused), never overwrite an existing file without `force: true`
+(nothing is written if any file would be), and never contain a credential.
+
+**4. Wire analytics, payments and deploys — with approval.** Platform changes go
+through approval-gated actions: `swfte_request_approval` proposes one (deploy,
+host, payments, connect, analytics), a human approves it in Studio → Actions,
+and `swfte_execute_approved_action` runs it (`409` = not approved yet, `410` =
+expired — both reported as explicit outcomes). There is deliberately no approve
+tool. `swfte_wire_analytics` and `swfte_wire_payments` wrap that flow: the
+first call proposes the action; the second, with the `actionId`, executes it
+and writes an `@swfte/analytics` init module (publishable `swfte_pk_` key in
+your env file) or a server-side checkout helper (runtime token read from
+`SWFTE_APP_RUNTIME_TOKEN`, never written). Deploys stay with `swfte_deploy`,
+which previews by default.
+
+`swfte_run` on a workflow now runs the **published** snapshot through
+`POST /v2/workflows/{id}/invoke`; a workflow with no active published version
+falls back to `/execute` and then to the draft test path, and says which path
+it took.
+
+Resources and prompts carry the same flow for clients that use them:
+`swfte://capabilities`, `swfte://catalog/{kind}/{id}` (the context package),
+and the prompts `reuse-then-build`, `ship-with-analytics-and-payments` and
+`bake-into-codebase`.
 
 ---
 
