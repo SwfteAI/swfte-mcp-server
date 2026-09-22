@@ -77,7 +77,8 @@ export function defaultOutDir(framework: Framework, det: StackDetection | null):
       return src ? 'src/swfte' : 'swfte';
     case 'fastapi':
     case 'plain-python':
-      return det?.layout.pythonPackage ? `${det.layout.pythonPackage}/swfte` : 'swfte';
+      // Never a bare `swfte` package: it would shadow the Swfte Python SDK (`import swfte`).
+      return det?.layout.pythonPackage ? `${det.layout.pythonPackage}/swfte_clients` : 'swfte_clients';
   }
 }
 
@@ -146,7 +147,7 @@ export interface BakeResult {
   contractHashWarning?: string;
   contractChanged?: { from: string; to: string; note: string };
   pinnedVersion: string | null;
-  lock: { path: string; migrated: boolean; legacySources: string[] };
+  lock: { path: string; migrated: boolean; legacySources: string[]; note?: string };
   usage: string;
   evidenceLevel: string;
 }
@@ -200,7 +201,13 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
   const spec = buildSpec(config, r.ref, alias, detail, contract, hashInfo.hash, loaded.lock.baseUrl);
   const clientRel = normalizeRel(`${outDir}/${clientFileName(alias, language)}`);
   const clientAbs = writer.resolve(clientRel);
-  writer.create(clientAbs, render(spec, language), input.force);
+  // A client this tool generated for this artifact, unedited, is ours to regenerate; anything else needs force.
+  const ours = (() => {
+    if (writer.inline || !existsSync(clientAbs)) return false;
+    const info = inspectGenerated(readFileSync(clientAbs, 'utf8'));
+    return info.generated && info.catalogRef === r.ref && info.intact === true;
+  })();
+  writer.create(clientAbs, render(spec, language), input.force || ours);
 
   const adapter = planAdapter({
     framework,
@@ -254,7 +261,14 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
       ? { contractChanged: { from: previous!.contractHash, to: hashInfo.hash, note: 'The contract moved since the last add; review call sites against the regenerated types.' } }
       : {}),
     pinnedVersion,
-    lock: { path: LOCK_FILE, migrated: loaded.migrated, legacySources: loaded.legacySources },
+    lock: {
+      path: LOCK_FILE,
+      migrated: loaded.migrated,
+      legacySources: loaded.legacySources,
+      ...(writer.inline
+        ? { note: 'Hosted server: the returned swfte.json and .env.example hold only this artifact — merge them into the project\'s files rather than replacing them, or run `npx -p @swfte/mcp-server swfte add` in the repo.' }
+        : {}),
+    },
     usage: adapter.usage,
     evidenceLevel: detail.evidence?.level ?? 'unmeasured',
   };

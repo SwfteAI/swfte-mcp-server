@@ -111,14 +111,16 @@ Widen or narrow it explicitly:
 
 ```bash
 SWFTE_TOOLS=all                       # everything
-SWFTE_TOOLS=core,workflows            # 52 tools — a focused workflow session
+SWFTE_TOOLS=core,workflows            # 55 tools — a focused workflow session
 SWFTE_TOOLS=core,voice,conversations  # a voice-ops session
 ```
 
 Available groups: `core`, `workflows`, `agents`, `chatflows`, `datasets`,
 `modules`, `rag`, `voice`, `marketplace`, `files`, `conversations`, `audit`,
 `cost`, `mcp`, `analytics`, `experiments`, `connect`, `deployments`,
-`agent-mail`.
+`agent-mail`, `journeys`, `relay`, `extras` (three convenience duplicates of
+advertised tools, kept off the default surface), `apps`, `custom-nodes`,
+`widgets`.
 
 `agent-mail` is opt-in deliberately, not merely for the tool count: one of its
 tools sends email to real people, and its read tools return message bodies

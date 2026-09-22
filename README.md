@@ -242,18 +242,25 @@ confirmed), the stored design rationale, reviews and dependencies.
 `swfte_get_evidence` and `swfte_trace_dependencies` (downstream, or a bounded
 upstream scan before you change something others reuse) go deeper.
 
-**3. Bake it into the codebase.** `swfte_scaffold_client {catalogRef, language:
-"typescript" | "python", targetDir}` writes a dependency-free typed client
-(types generated from the contract's schemas; async workflows are polled to
-completion), merges `SWFTE_API_KEY` / `SWFTE_BASE_URL` / `SWFTE_WORKSPACE_ID`
-into `.env.example`, and records `{catalogRef, updatedAt, contractHash}` in
-`swfte.json` — commit it, and a changed contract hash tells you the artifact
-moved. `swfte_embed_widget` writes an artifact's embed markup instead. Writes
-are confined to the directory the server runs in (`..` and outside absolute
-paths are refused), never overwrite an existing file without `force: true`
-(nothing is written if any file would be), and never contain a credential.
+**3. Check fit, then adopt — the Solution Hub.** Every entry shows who made it
+and why (`provenance`: author, why, forkedFrom, licence) and what its evidence
+rests on (independent workspaces, a Wilson interval around the success rate,
+freshness; a fork's inherited `parentEvidence` is shown apart, never merged).
+`swfte_fit_check {catalogRef, problem}` asks how well it fits *your* problem and
+stack — the stack is detected from this repo when you leave it out — and lists
+gaps and missing connections. `swfte_adopt {catalogRef, problem?, notes?,
+deploy?}` copies it into your workspace, tailored, with lineage recorded; it
+surfaces `needsInput` and missing connections (with the `swfte_connect_start`
+call that fixes each) and, if you asked for a deploy, a **PROPOSED** action a
+human approves — never executed by the adopt itself. `swfte_get_timeline` is
+the entry's diary. The prompt `pick-up-tailor-deploy` chains find → fit → adopt
+→ bake → approval → status.
 
-**4. Wire analytics, payments and deploys — with approval.** Platform changes go
+**4. Bake it into the codebase** — see [Bake it into your codebase](#bake-it-into-your-codebase)
+below; `swfte_scaffold_client` is the MCP face of `swfte add`.
+`swfte_embed_widget` writes an artifact's embed markup instead.
+
+**5. Wire analytics, payments and deploys — with approval.** Platform changes go
 through approval-gated actions: `swfte_request_approval` proposes one (deploy,
 host, payments, connect, analytics), a human approves it in Studio → Actions,
 and `swfte_execute_approved_action` runs it (`409` = not approved yet, `410` =
@@ -272,8 +279,106 @@ it took.
 
 Resources and prompts carry the same flow for clients that use them:
 `swfte://capabilities`, `swfte://catalog/{kind}/{id}` (the context package),
-and the prompts `reuse-then-build`, `ship-with-analytics-and-payments` and
-`bake-into-codebase`.
+and the prompts `reuse-then-build`, `ship-with-analytics-and-payments`,
+`bake-into-codebase` and `pick-up-tailor-deploy`.
+
+---
+
+## Bake it into your codebase
+
+The same package ships a `swfte` CLI. Generated code is a thin, typed binding to
+the living artifact, pinned in a committed `swfte.json`; the CLI keeps the two
+in step and fails CI when they drift. Leaving is always possible — the generated
+files are plain source with no runtime dependency.
+
+```bash
+export SWFTE_API_KEY=sk-swfte-…            # or a PAT (pat_…); SWFTE_BASE_URL / SWFTE_WORKSPACE_ID optional
+
+npx -p @swfte/mcp-server swfte add workflow:wf_123          # detect the stack, write client + adapter, pin it
+npx -p @swfte/mcp-server swfte sync                          # refetch contracts, regenerate what moved, print a diff
+npx -p @swfte/mcp-server swfte verify                        # CI gate (below)
+npx -p @swfte/mcp-server swfte upgrade invoice-extractor     # take a breaking change on purpose
+```
+
+(Installed globally, it is just `swfte …`; `npx @swfte/mcp-server swfte …` works too.)
+
+**`swfte add <catalogRef> [--framework] [--out] [--alias] [--force]`** detects the
+stack from the repo's manifests — nothing leaves the machine:
+
+| Found | Framework | What is written |
+|---|---|---|
+| `next` in package.json | `nextjs` | client in `lib/swfte/` (`src/lib/swfte/` with a `src/` dir) + App Router handler `app/api/<alias>/route.ts` (respects `src/app`) |
+| `express` | `express` | client + `<alias>.router.ts` exporting an Express `Router` (`.js` import specifiers when `"type": "module"`) |
+| `@nestjs/core`, `hono`, or just `tsconfig.json`/`package.json` | `plain-ts` | the typed client only |
+| `fastapi` in pyproject.toml / requirements*.txt / Pipfile | `fastapi` | client + `<alias>_router.py` with an `APIRouter` (the sync client runs in a threadpool) |
+| `flask`, `django`, or nothing | `plain-python` | the typed client only (stdlib `urllib`) |
+
+Python output goes to `swfte_clients/` (never a bare `swfte/` package, which
+would shadow the Swfte Python SDK). The adapter is **yours**: put your auth
+check where it is marked — anyone who can reach that route spends your credits —
+and `swfte sync` never rewrites it. The client is **generated**: it carries the
+contract hash and a checksum, sends `X-Swfte-Client: <lang>/<version>; ref=<catalogRef>; hash=<contractHash>`
+(adopter usage counts, never payloads), reads agent replies as `content ?? response`,
+and polls workflow runs via `execution.status`. Nothing is overwritten without
+`--force`, paths stay inside the repo, and no credential is ever written.
+
+**`swfte.json`** (repo root, commit it):
+
+```json
+{
+  "version": 1,
+  "baseUrl": "https://api.swfte.com/agents",
+  "workspaceId": null,
+  "artifacts": [
+    {
+      "catalogRef": "workflow:wf_123",
+      "alias": "invoice-extractor",
+      "language": "typescript",
+      "framework": "nextjs",
+      "outDir": "src/lib/swfte",
+      "contractHash": "<sha256 hex of the canonical sorted-key JSON of {invoke, inputSchema, outputSchema}>",
+      "pinnedVersion": "v3",
+      "files": ["src/app/api/invoice-extractor/route.ts", "src/lib/swfte/invoice-extractor.ts"]
+    }
+  ]
+}
+```
+
+It is written deterministically (sorted, no timestamps) so parallel branches
+merge cleanly; a lock with conflict markers is refused, never rewritten blind.
+Locks written by earlier versions of this package are migrated on the next write.
+
+**`swfte sync`** regenerates clients whose contract hash moved and prints what
+changed (`+out dueDate`, `-in legacyId`). Breaking changes (a required input
+added or removed, an output field removed or retyped) and capability changes
+that need re-approval are **held back** — `swfte upgrade <alias>` takes a
+breaking change on purpose; `--accept-capability-changes` is needed as well when
+Studio flags `requiresReapproval`.
+
+**`swfte verify`** is the CI gate. It exits:
+
+- `0` and prints `SWFTE_VERIFY_OK` — every client matches the lock and no upgrade is breaking or awaiting re-approval;
+- `1` — local drift (a client missing, hand-edited, or generated against a different hash than the lock pins), a breaking upgrade pending, or `requiresReapproval`;
+- `2` — it could not check (no `swfte.json`, no credential, backend unreachable). `--offline` checks local drift only.
+
+```yaml
+# .github/workflows/swfte.yml
+name: swfte
+on: [pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npx -y @swfte/mcp-server swfte verify
+        env:
+          SWFTE_API_KEY: ${{ secrets.SWFTE_API_KEY }}
+```
+
+From an MCP client the same code runs as `swfte_scaffold_client`, `swfte_sync`
+and `swfte_check_upgrades`.
 
 ---
 

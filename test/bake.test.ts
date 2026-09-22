@@ -369,25 +369,43 @@ describe('swfte add / swfte_scaffold_client', () => {
   test('FastAPI project: APIRouter module + package marker, never overwriting an existing __init__.py', async () => {
     write('requirements.txt', 'fastapi\n');
     write('app/__init__.py', '# mine\n');
-    write('app/swfte/__init__.py', 'VERSION = 1\n');
+    write('app/swfte_clients/__init__.py', 'VERSION = 1\n');
     catalogRoutes();
     const r = await cli(['add', 'workflow:wf_1']);
     assert.equal(r.code, 0, r.err);
-    const router = read('app/swfte/invoice_extractor_router.py');
+    const router = read('app/swfte_clients/invoice_extractor_router.py');
     assert.match(router, /router = APIRouter\(prefix="\/swfte\/invoice-extractor"/);
     assert.match(router, /from \.invoice_extractor import invoke_invoice_extractor/);
     assert.match(router, /run_in_threadpool/);
-    assert.equal(read('app/swfte/__init__.py'), 'VERSION = 1\n');
+    assert.equal(read('app/swfte_clients/__init__.py'), 'VERSION = 1\n');
     const lock = JSON.parse(read('swfte.json'));
     assert.equal(lock.artifacts[0].framework, 'fastapi');
     assert.equal(lock.artifacts[0].language, 'python');
-    assert.ok(!lock.artifacts[0].files.includes('app/swfte/__init__.py'), 'a pre-existing package marker is not ours to list');
+    assert.ok(!lock.artifacts[0].files.includes('app/swfte_clients/__init__.py'), 'a pre-existing package marker is not ours to list');
     if (hasPython()) {
-      for (const f of ['app/swfte/invoice_extractor_router.py', 'app/swfte/invoice_extractor.py']) {
+      for (const f of ['app/swfte_clients/invoice_extractor_router.py', 'app/swfte_clients/invoice_extractor.py']) {
         execFileSync('python3', ['-c', 'import ast,sys; ast.parse(open(sys.argv[1]).read())', join(tmp, f)]);
       }
-      execFileSync('python3', ['-c', 'import invoice_extractor as m; assert m.SWFTE_CLIENT.startswith("python/")'], { cwd: join(tmp, 'app/swfte') });
+      execFileSync('python3', ['-c', 'import invoice_extractor as m; assert m.SWFTE_CLIENT.startswith("python/")'], { cwd: join(tmp, 'app/swfte_clients') });
     }
+  });
+
+  test('agent adapters take the conversation owner from app auth, never from the request body', async () => {
+    pkg({ express: '4' });
+    catalogRoutes();
+    assert.equal((await cli(['add', 'agent:ag_1'])).code, 0);
+    const router = read('swfte/support-triage.router.ts');
+    assert.match(router, /userId: userIdFor\(req\)/);
+    assert.doesNotMatch(router, /body\.userId/);
+    assert.deepEqual(typecheck([join(tmp, 'swfte/support-triage.router.ts')], EXPRESS_STUB), []);
+  });
+
+  test('Python clients never land in a bare swfte/ package that would shadow the Swfte SDK', async () => {
+    write('requirements.txt', 'fastapi\nswfte-sdk\n');
+    catalogRoutes();
+    assert.equal((await cli(['add', 'workflow:wf_1'])).code, 0);
+    assert.ok(existsSync(join(tmp, 'swfte_clients/invoice_extractor.py')));
+    assert.ok(!existsSync(join(tmp, 'swfte')));
   });
 
   test('--framework and --out override detection; plain clients get no adapter', async () => {
@@ -416,6 +434,27 @@ describe('swfte add / swfte_scaffold_client', () => {
     assert.equal(r.code, 1);
     assert.match(r.err, /outside the working directory/);
     assert.equal(seen.length, 0);
+  });
+
+  test('re-adding after the contract moved regenerates our own client without force, keeping alias and framework', async () => {
+    pkg({ next: '15' });
+    catalogRoutes();
+    assert.equal((await cli(['add', 'workflow:wf_1', '--alias', 'inv'])).code, 0);
+    contracts['workflow:wf_1'].outputSchema.properties.dueDate = { type: 'string' };
+    const r = await cli(['add', 'workflow:wf_1']);
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /as "inv" \(nextjs/);
+    assert.match(r.err, /contract moved/);
+    assert.match(read('lib/swfte/inv.ts'), /dueDate/);
+  });
+
+  test('hosted (inline) mode returns files with a merge note instead of writing', async () => {
+    catalogRoutes();
+    const res = await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', framework: 'nextjs' }, { localFilesystem: false });
+    assert.equal(res.inline, true);
+    assert.match(res.lock.note, /merge them/);
+    assert.ok(res.files.every((f: any) => typeof f.content === 'string'));
+    assert.ok(!existsSync(join(tmp, 'swfte.json')));
   });
 
   test('an alias already naming another artifact is refused', async () => {

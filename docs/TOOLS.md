@@ -24,6 +24,28 @@ alongside it is overridden.
 | `swfte_get_action_status` | GET | `/v2/actions/{id}` · `/v2/actions?status=` |
 | `swfte_wire_analytics` | POST/GET | `/v2/actions` (analytics.enable) → `/v2/actions/{id}/execute` — writes locally |
 | `swfte_wire_payments` | POST/GET | `/v2/actions` (app.payments.enable) → `/v2/actions/{id}/execute` — writes locally |
+| `swfte_fit_check` | POST | `/v2/catalog/{kind}/{id}/fit` — `{problem, stack}`; stack detected from the local project when omitted |
+| `swfte_adopt` | POST | `/v2/catalog/{kind}/{id}/adopt` — `{name?, tailoring?:{problem, stack, notes}, deploy?:{environment}}`; a deploy comes back PROPOSED, never executed |
+| `swfte_get_timeline` | GET | `/v2/catalog/{kind}/{id}/timeline` |
+| `swfte_sync` | GET | `/v2/catalog/{kind}/{id}` + `/contract` per swfte.json entry, `/v2/catalog/upgrades` — rewrites generated clients locally (= `swfte sync` / `swfte upgrade`) |
+| `swfte_check_upgrades` | GET | `/v2/catalog/upgrades?refs=<catalogRef:contractHash>,…` + local drift check (= `swfte verify`) |
+
+`swfte_scaffold_client` detects the framework (Next.js, Express, FastAPI, or a
+plain TypeScript/Python client), writes the typed client plus an adapter, and
+pins it in the repo-root `swfte.json` v1. `swfte_find_existing` and
+`swfte_get_context` carry each entry's provenance (author, why, forkedFrom,
+licence) and evidence split into independent workspaces, success-rate interval
+and freshness, with a fork's `parentEvidence` kept apart. The CLI that shares
+this code is described in the README, "Bake it into your codebase".
+
+### Opt-in `extras` group
+
+Three convenience variants of advertised tools sit outside the default surface
+(`SWFTE_TOOLS=…,extras` brings them back): `swfte_workflows_executions_list`
+(same endpoint as `swfte_workflows_executions`),
+`swfte_workflows_deployment_status_simple` (a subset of
+`swfte_workflows_deployment_status`) and `swfte_deployments_count` (a subset of
+`swfte_deployments_list`).
 
 ## Agents — `swfte_agents_*`
 

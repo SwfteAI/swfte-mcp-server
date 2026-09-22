@@ -63,10 +63,11 @@ const HEADER_PY = (ref: string) =>
 const TS_RESULT_STATUS = `const httpStatus = (r: { ok: boolean; status: string }) =>
   r.ok ? 200 : r.status === 'ACCEPTED' || /WAIT|PAUSE|AWAIT/.test(r.status) ? 202 : 502;`;
 
-function tsCall(info: ClientInfo, pathParamsExpr: string): string {
+function tsCall(info: ClientInfo, pathParamsExpr: string, requestVar = 'request'): string {
   const opts = [
     ...(info.pathParams.length ? [`pathParams: ${pathParamsExpr}`] : []),
-    ...(info.hasUserId ? ['userId: typeof body.userId === \'string\' ? body.userId : undefined'] : []),
+    // Conversation owner: taken from your auth, never from the request body (a caller could name someone else's).
+    ...(info.hasUserId ? [`userId: userIdFor(${requestVar})`] : []),
   ];
   return `await ${info.fn}(input${opts.length ? `, { ${opts.join(', ')} }` : ''})`;
 }
@@ -87,7 +88,12 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 ${TS_RESULT_STATUS}
-
+${info.hasUserId ? `
+/** The conversation owner. Return your authenticated user's id so each user keeps their own conversations. */
+function userIdFor(_request: unknown): string | undefined {
+  return undefined; // undefined → the client's shared default owner
+}
+` : ''}
 export async function POST(request: Request) {
   // Auth check goes here, e.g. verify the session and return 401 when there is none.
   let body: Record<string, unknown>;
@@ -126,7 +132,12 @@ import { Router, json, type Request, type Response } from 'express';
 import { ${info.fn}, type ${info.inputType} } from ${JSON.stringify(spec)};
 
 ${TS_RESULT_STATUS}
-
+${info.hasUserId ? `
+/** The conversation owner. Return your authenticated user's id so each user keeps their own conversations. */
+function userIdFor(_request: unknown): string | undefined {
+  return undefined; // undefined → the client's shared default owner
+}
+` : ''}
 export const ${routerName} = Router();
 ${routerName}.use(json());
 
@@ -135,7 +146,7 @@ ${routerName}.post('/', async (req: Request, res: Response) => {
   const body: Record<string, unknown> = req.body && typeof req.body === 'object' ? req.body : {};
   const input = body as unknown as ${info.inputType};
   try {
-    const result = ${tsCall(info, params)};
+    const result = ${tsCall(info, params, 'req')};
     res
       .status(httpStatus(result))
       .json({ ok: result.ok, status: result.status, executionId: result.executionId ?? null, output: result.output ?? null${info.chat ? ', reply: result.reply ?? null' : ''} });
@@ -160,7 +171,8 @@ function fastapiRouter(a: AdapterInput): AdapterFile[] {
     'body',
     ...(info.pathParams.length ? [`{${info.pathParams.map((p) => `${JSON.stringify(p)}: request.query_params.get(${JSON.stringify(p)}, "")`).join(', ')}}`] : []),
   ];
-  const userArg = info.hasUserId ? ', user_id=str(body.get("userId") or "swfte-client")' : '';
+  // Conversation owner from your auth, never from the request body (a caller could name someone else's).
+  const userArg = info.hasUserId ? ', user_id=_user_id_for(request)' : '';
   const content = `${HEADER_PY(a.catalogRef)}# Mount it: app.include_router(router) from this module; then POST /swfte/${a.alias} with the input as JSON.
 from __future__ import annotations
 
@@ -190,7 +202,12 @@ def _http_status(result: Dict[str, Any]) -> int:
     return 502
 
 
-@router.post("")
+${info.hasUserId ? `def _user_id_for(request: Request) -> str:
+    \"\"\"The conversation owner. Return your authenticated user's id so each user keeps their own conversations.\"\"\"
+    return "swfte-client"
+
+
+` : ''}@router.post("")
 async def ${info.fn}_route(request: Request, body: Dict[str, Any] = Body(...)) -> JSONResponse:
     # Auth check goes here, e.g. a FastAPI dependency that rejects anonymous requests.
     try:
