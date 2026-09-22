@@ -19,6 +19,8 @@ import {
   interpretEvidence,
   ladderRank,
   parseCatalogRef,
+  presentEvidence,
+  provenanceLine,
   searchCatalog,
   type CatalogEntrySummary,
   type CatalogKind,
@@ -95,6 +97,14 @@ async function findExisting(
     evidenceLevel: item.evidence?.level ?? 'unmeasured',
     successRate: item.evidence?.successRate ?? null,
     runs: item.evidence?.runs ?? null,
+    // Rev 5: what the level rests on — independent workspaces, interval, freshness.
+    independentWorkspaces: item.evidence?.independentWorkspaces ?? null,
+    successRateInterval: item.evidence?.successRateInterval ?? null,
+    freshness: item.evidence?.freshness ?? null,
+    adopters: item.evidence?.adopters ?? null,
+    // Rev 3: who made it and why, when the server projects it onto summaries.
+    provenance: provenanceLine(item),
+    license: item.license ?? (item.scope === 'public' ? null : 'proprietary'),
     updatedAt: item.updatedAt,
     reasons: reasonsFor(item, input.query, input.facets ?? {}),
     guidance: `Reuse catalogRef ${item.catalogRef ?? `${item.kind}:${item.id}`} via swfte_get_context before generating anything new.`,
@@ -138,8 +148,9 @@ async function findExisting(
     ...(degradedNotes.length ? { degradedNotes } : {}),
     nextCursor: res.nextCursor,
     note:
-      'Evidence levels are computed from recorded runs, evals and reviews, never asserted. ' +
-      '"unmeasured" means no record exists — not that it fails.',
+      'Evidence levels are computed from recorded runs, evals and reviews, never asserted, and only independent ' +
+      'workspaces raise them. "unmeasured" means no record exists — not that it fails. provenance is null when the ' +
+      'search summary does not carry it; swfte_get_context always shows author, why, lineage and licence.',
   };
 }
 
@@ -326,7 +337,8 @@ export const catalogTools: ToolDefinition[] = [
       'Everything a coding agent needs before reusing an artifact, in one call: detail, invocation contract ' +
       '(method, path, auth, async/status path, input/output JSON Schemas, snippets, embed), evidence with ' +
       'its reasons and recent records, Jev facets (proposed vs confirmed), the stored composition rationale, ' +
-      'reviews and dependencies, plus a contractHash for lock files and concrete next steps ' +
+      'reviews and dependencies, provenance (author, why, forkedFrom, licence) and evidence split into own vs ' +
+      'independent runs (parentEvidence kept apart for forks), plus a contractHash for lock files and concrete next steps ' +
       '(swfte_scaffold_client / swfte_embed_widget). Use after swfte_find_existing.',
     inputSchema: z.object({
       catalogRef: CatalogRefArg,
@@ -350,7 +362,7 @@ export const catalogTools: ToolDefinition[] = [
       return {
         catalogRef: r.ref,
         name: d.name,
-        evidence: d.evidence ?? { level: 'unmeasured' },
+        evidence: presentEvidence(d.evidence, d.parentEvidence),
         interpretation: interpretEvidence(d.evidence?.level),
         evidenceRecords: d.evidenceRecords ?? [],
         reviews: d.reviews ?? [],

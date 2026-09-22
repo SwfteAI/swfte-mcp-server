@@ -41,6 +41,7 @@ import { catalogTools } from './catalog.js';
 import { scaffoldTools } from './scaffold.js';
 import { actionTools } from './actions.js';
 import { wireTools } from './wire.js';
+import { hubTools } from './hub.js';
 
 /**
  * Tag a whole module's tools with a group, so `SWFTE_TOOLS` can trim them
@@ -64,6 +65,7 @@ export const allTools: ToolDefinition[] = [
   ...tag('core', scaffoldTools),
   ...tag('core', actionTools),
   ...tag('core', wireTools),
+  ...tag('core', hubTools),
   ...tag('apps', appWizardTools),
   ...tag('custom-nodes', customNodeWizardTools),
 

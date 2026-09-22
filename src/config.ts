@@ -56,6 +56,10 @@ export const TOOL_GROUPS = [
   // tool-surface budget.
   'journeys',
   'relay',
+  // Convenience variants of tools that are already advertised (same endpoint or
+  // a subset of one). Out of DEFAULT_GROUPS so they do not spend the budget
+  // twice; still reachable by name through SWFTE_TOOLS=…,extras.
+  'extras',
 ] as const;
 
 export type ToolGroup = (typeof TOOL_GROUPS)[number];
@@ -63,7 +67,7 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is 225 tools, which measurably degrades a model's ability
+ * The full surface is 230 tools, which measurably degrades a model's ability
  * to pick the right one (test/tools.test.ts "the budget comment carries the measured counts" keeps
  * these two numbers true). This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
@@ -96,8 +100,19 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   // trimming the surface does not apply to the tools that make the advertised
   // ones work.
   'connect',
+  // Solution Hub + bake-in (leaf-1.2.4) added five `core` tools — fit_check,
+  // adopt, get_timeline, sync, check_upgrades — without raising the ceiling:
+  // three exact duplicates moved to the opt-in `extras` group
+  // (swfte_workflows_executions_list = swfte_workflows_executions, same
+  // endpoint; swfte_workflows_deployment_status_simple ⊂
+  // swfte_workflows_deployment_status; swfte_deployments_count ⊂
+  // swfte_deployments_list). Measured now: 230 registered, 103 advertised
+  // against the ceiling of 103 —
+  //   core 35, workflows 17, agents 12, chatflows 12, deployments 7,
+  //   datasets 6, modules 6, connect 5, untagged 3.
+  // The next addition has no duplicate left to trade; argue the number.
   // `journeys` and `relay` are deliberately absent, and that is a decision to
-  // revisit rather than a default to inherit. The surface sits at 101 against
+  // revisit rather than a default to inherit. The surface sits at 103 against
   // a ceiling of 103 — a ceiling that exists because a large advertised surface
   // measurably degrades a model's ability to pick the right tool. Adding them
   // (17 tools) would push well past it. They stay reachable through

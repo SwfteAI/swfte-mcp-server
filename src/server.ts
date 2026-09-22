@@ -23,8 +23,7 @@ import type { ToolDefinition } from './tools/_types.js';
 import { RESOURCE_TEMPLATES, STATIC_RESOURCES, ResourceNotFoundError, readResource } from './resources.js';
 import { PROMPTS, getPrompt } from './prompts.js';
 
-const PACKAGE_NAME = '@swfte/mcp-server';
-const PACKAGE_VERSION = '0.2.0';
+import { PACKAGE_NAME, PACKAGE_VERSION } from './version.js';
 
 export interface BuildServerOptions {
   config?: ServerConfig;

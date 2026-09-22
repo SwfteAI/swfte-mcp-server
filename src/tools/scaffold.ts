@@ -1,154 +1,127 @@
 /**
- * Code-bridge tools: bake a catalog artifact into the developer's codebase.
+ * Code-bridge tools: bake a catalog artifact into the developer's codebase and
+ * keep it bound to the living artifact (CONTRACT rev 4).
  *
- * `swfte_scaffold_client` turns an artifact's published contract into a typed,
- * dependency-free client file, an `.env.example` naming the variables it reads,
- * and an entry in `swfte.json` — a lock recording which catalog entry and which
- * contract version the code was generated against, so drift is detectable.
+ * `swfte_scaffold_client` detects the project's stack, writes a typed,
+ * dependency-free client plus a framework adapter (Next.js route handler,
+ * Express router, FastAPI APIRouter), names the env vars in .env.example, and
+ * pins the contract in swfte.json. `swfte_sync` and `swfte_check_upgrades`
+ * are the MCP faces of `swfte sync` / `swfte verify` — same code (src/bake.ts).
  * `swfte_embed_widget` does the same for an embeddable surface.
  *
  * All writes go through ConfinedWriter: confined under the working directory,
  * no overwrite without `force`, no secret on disk.
  */
 import { z } from 'zod';
-import { CatalogRefArg, contractHash, getContract, getEntry, parseCatalogRef, type CatalogContract } from '../catalog.js';
-import { kebab, renderPythonClient, renderTypeScriptClient, snake } from '../codegen.js';
+import { CatalogRefArg, contractHash, getContract, parseCatalogRef } from '../catalog.js';
+import { bakeArtifact, syncProject, verifyProject } from '../bake.js';
 import { ConfinedWriter, INLINE_NOTE } from '../fsguard.js';
+import { FRAMEWORKS } from '../stack.js';
 import type { ToolDefinition } from './_types.js';
 
-export const LOCK_FILE = 'swfte.json';
+export { LOCK_FILE } from '../lock.js';
+export { CLIENT_ENV } from '../bake.js';
 
-export const CLIENT_ENV = [
-  { key: 'SWFTE_API_KEY', value: '', comment: 'Swfte PAT (pat_…) or workspace API key (sk-swfte-…). Server-side only; never commit a real value.' },
-  { key: 'SWFTE_BASE_URL', value: '', comment: 'Optional. Defaults to the Swfte cloud API.' },
-  { key: 'SWFTE_WORKSPACE_ID', value: '', comment: 'Optional with a PAT (the token carries its workspace); used with API keys.' },
-];
-
-export interface LockEntry {
-  catalogRef: string;
-  kind: string;
-  id: string;
-  name?: string;
-  updatedAt?: string | null;
-  shapeHash?: string | null;
-  contractHash: string;
-  languages?: string[];
-  files: string[];
-  scaffoldedAt: string;
-  [k: string]: unknown;
-}
-
-/** Keyed upsert of one artifact into the lock document, preserving anything else the developer keeps there. */
-export function upsertLock(
-  current: Record<string, unknown>,
-  entry: Omit<LockEntry, 'files' | 'languages'> & { files: string[]; language?: string }
-): { doc: Record<string, unknown>; previousHash: string | null } {
-  const artifacts = Array.isArray(current.artifacts) ? [...(current.artifacts as LockEntry[])] : [];
-  const i = artifacts.findIndex((a) => a && a.catalogRef === entry.catalogRef);
-  const prev = i >= 0 ? artifacts[i]! : null;
-  const { language, ...rest } = entry;
-  const merged = {
-    ...(prev ?? {}),
-    ...rest,
-    languages: [...new Set([...(prev?.languages ?? []), ...(language ? [language] : [])])].sort(),
-    files: [...new Set([...(prev?.files ?? []), ...entry.files])].sort(),
-  } as LockEntry;
-  if (i >= 0) artifacts[i] = merged;
-  else artifacts.push(merged);
-  artifacts.sort((a, b) => String(a.catalogRef).localeCompare(String(b.catalogRef)));
-  return {
-    doc: { version: 1, source: 'swfte-studio', ...current, artifacts },
-    previousHash: prev?.contractHash ?? null,
-  };
-}
+const LOCAL_ONLY =
+  'This tool reads swfte.json and the generated files in the project, so it needs the server running locally (stdio) ' +
+  'inside the repository. From a hosted server, run the same check in the repo instead: `npx -p @swfte/mcp-server swfte verify` / `swfte sync`.';
 
 export const scaffoldTools: ToolDefinition[] = [
   {
     name: 'swfte_scaffold_client',
     title: 'Bake a catalog artifact into the codebase',
     description:
-      'Write a typed client for a catalog artifact into the local project: TypeScript (fetch, no deps) or ' +
-      'Python (stdlib only), with Input/Output types generated from the contract\'s JSON Schemas and an ' +
-      'invoke/chat function that polls async runs to completion. Also merges SWFTE_API_KEY / SWFTE_BASE_URL / ' +
-      'SWFTE_WORKSPACE_ID into .env.example and records {catalogRef, updatedAt, contractHash} in swfte.json. ' +
-      'targetDir must be inside the working directory; existing files are never overwritten unless force:true ' +
-      '(nothing is written if any would be). No credential is ever written. Use after swfte_get_context.',
+      'Write a typed client for a catalog artifact into the local project — TypeScript (fetch, no deps) or Python ' +
+      '(stdlib only) — plus a framework adapter detected from the project (package.json next → Next.js App Router ' +
+      'route app/api/<alias>/route.ts; express → Express router; pyproject/requirements fastapi → FastAPI APIRouter; ' +
+      'otherwise the plain client). Generated clients send X-Swfte-Client, read agent replies as content ?? response ' +
+      'and poll execution.status. Merges SWFTE_API_KEY / SWFTE_BASE_URL / SWFTE_WORKSPACE_ID into .env.example and ' +
+      'pins {catalogRef, alias, framework, contractHash} in swfte.json v1 at the repo root (older locks migrate). ' +
+      'Paths must stay inside the working directory; existing files are never overwritten unless force:true ' +
+      '(nothing is written if any would be). No credential is ever written. Same as `swfte add`. Use after swfte_get_context.',
     inputSchema: z.object({
       catalogRef: CatalogRefArg,
-      language: z.enum(['typescript', 'python']),
-      targetDir: z.string().min(1).describe('Directory relative to the project root (e.g. "src/swfte"). Created if missing.'),
-      force: z.boolean().optional().describe('Replace an existing client file whose content differs. Default false.'),
+      framework: z.enum(FRAMEWORKS).optional().describe('Override stack detection.'),
+      language: z.enum(['typescript', 'python']).optional().describe('Override the language (implies the plain adapter when it disagrees with the detected framework).'),
+      targetDir: z.string().min(1).optional().describe('Directory for the client, relative to the project root. Default by framework (lib/swfte, src/swfte, app/swfte, swfte).'),
+      alias: z.string().optional().describe('Stable local name (lowercase, dashes). Default: the artifact name in kebab-case. Symbols and the route path derive from it.'),
+      force: z.boolean().optional().describe('Replace existing files whose content differs. Default false.'),
     }),
     execute: async (input, { client, config, localFilesystem }) => {
       const writer = new ConfinedWriter({ forbidden: [config.credential], inline: localFilesystem === false });
-      // Confine before any network call: a bad path should fail fast and free.
-      const dir = writer.resolve(input.targetDir);
       const r = parseCatalogRef(input.catalogRef);
-      const [detail, contract] = await Promise.all([getEntry(client, r), getContract(client, r)]);
-      if (!contract?.invoke?.path) {
-        throw new Error(`${r.ref} has no invocation contract, so there is nothing to generate a client for.`);
-      }
-      const hash = contractHash(contract);
-      const name = detail.name || `${r.kind} ${r.id}`;
-      const spec = {
+      const res = await bakeArtifact({ client, config, writer }, {
         catalogRef: r.ref,
-        kind: r.kind,
-        id: detail.id ?? r.id,
-        name,
-        description: detail.description ?? null,
-        contract: contract as CatalogContract,
-        contractHash: hash,
-        defaultBaseUrl: config.baseUrl,
-      };
-      const clientFile =
-        input.language === 'typescript'
-          ? { name: `${kebab(name, r.kind)}.ts`, content: renderTypeScriptClient(spec) }
-          : { name: `${snake(name, r.kind)}.py`, content: renderPythonClient(spec) };
-
-      const clientAbs = writer.resolve(`${dir}/${clientFile.name}`);
-      writer.create(clientAbs, clientFile.content, input.force);
-      const envResult = writer.mergeEnv(writer.resolve(`${dir}/.env.example`), CLIENT_ENV, {
-        header: 'Swfte — read by generated clients (swfte_scaffold_client)',
-      });
-      let previousHash: string | null = null;
-      writer.mergeJson(writer.resolve(`${dir}/${LOCK_FILE}`), (current) => {
-        const res = upsertLock(current, {
-          catalogRef: r.ref,
-          kind: r.kind,
-          id: spec.id,
-          name,
-          updatedAt: detail.updatedAt ?? null,
-          shapeHash: detail.shapeHash ?? null,
-          contractHash: hash,
-          language: input.language,
-          files: [writer.rel(clientAbs)],
-          scaffoldedAt: new Date().toISOString(),
-        });
-        previousHash = res.previousHash;
-        return res.doc;
-      });
-      const written = writer.commit();
-      const drift = previousHash && previousHash !== hash;
-      return {
-        catalogRef: r.ref,
+        framework: input.framework,
         language: input.language,
-        files: written,
+        outDir: input.targetDir,
+        alias: input.alias,
+        force: input.force,
+      });
+      return {
+        ...res,
         ...(writer.inline ? { inline: true, note: INLINE_NOTE } : {}),
-        env: envResult,
-        contractHash: hash,
-        ...(drift ? { contractChanged: { from: previousHash, to: hash, note: 'The contract moved since the last scaffold; review call sites against the regenerated types.' } } : {}),
-        evidenceLevel: detail.evidence?.level ?? 'unmeasured',
-        usage:
-          input.language === 'typescript'
-            ? `import { ${clientFile.content.match(/export async function (\w+)/)?.[1]} } from './${clientFile.name.replace(/\.ts$/, '')}';`
-            : `from ${clientFile.name.replace(/\.py$/, '')} import ${clientFile.content.match(/^def (\w+)\(/m)?.[1]}`,
         nextSteps: [
           'Set SWFTE_API_KEY in your real (uncommitted) env — .env.example only names it.',
+          ...(res.framework === 'nextjs' || res.framework === 'express' || res.framework === 'fastapi'
+            ? ['Add your auth check to the adapter where marked: anyone who can reach that route spends your credits.']
+            : []),
+          'Commit swfte.json with the generated files; add `npx -p @swfte/mcp-server swfte verify` to CI so contract drift fails the build.',
           'Mint an API key scoped to this artifact in Studio if the code only needs to call it.',
+          ...(res.lock.legacySources.length ? [`Delete the old lock file(s) now folded into swfte.json: ${res.lock.legacySources.join(', ')}.`] : []),
           ...(r.kind === 'application' ? ['Wire analytics / payments: swfte_wire_analytics, swfte_wire_payments.'] : []),
           ...(r.kind === 'workflow' ? ['Published workflows run via /invoke; publish a version first if the call returns PUBLISHED_SNAPSHOT_UNAVAILABLE.'] : []),
         ],
       };
+    },
+  },
+  {
+    name: 'swfte_sync',
+    title: 'Sync baked clients with their contracts',
+    description:
+      'For every artifact in swfte.json (or just `aliases`), refetch its contract and regenerate the typed client ' +
+      'where the contract hash moved or the file is missing, then print a diff summary (+/- input and output fields). ' +
+      'Breaking changes and capability changes that need re-approval are held back, never applied by a routine sync ' +
+      '(use `upgrade:true` for a breaking change the developer accepted). Adapters are never rewritten; hand-edited ' +
+      'clients are held back unless force. dryRun reports without writing. Same code as `swfte sync` / `swfte upgrade`.',
+    inputSchema: z.object({
+      aliases: z.array(z.string()).optional().describe('Only these swfte.json aliases.'),
+      dryRun: z.boolean().optional(),
+      upgrade: z.boolean().optional().describe('Accept breaking contract changes for the selected aliases (like `swfte upgrade`).'),
+      acceptCapabilityChanges: z.boolean().optional().describe('Also accept changes flagged requiresReapproval — only after a human reviewed them.'),
+      force: z.boolean().optional().describe('Replace hand-edited generated clients.'),
+    }),
+    execute: async (input, { client, config, localFilesystem }) => {
+      if (localFilesystem === false) throw new Error(LOCAL_ONLY);
+      const writer = new ConfinedWriter({ forbidden: [config.credential] });
+      return syncProject(
+        { client, config, writer },
+        {
+          aliases: input.aliases,
+          dryRun: input.dryRun,
+          allowBreaking: input.upgrade,
+          acceptCapabilityChanges: input.acceptCapabilityChanges,
+          force: input.force,
+        }
+      );
+    },
+  },
+  {
+    name: 'swfte_check_upgrades',
+    title: 'Verify baked clients (drift, breaking upgrades, re-approval)',
+    readOnly: true,
+    description:
+      'The CI gate as a tool, same code as `swfte verify`: checks swfte.json against the generated files (missing, ' +
+      'hand-edited, generated against a different contract hash) and asks GET /v2/catalog/upgrades whether any pinned ' +
+      'contract has a breaking change or capability changes needing re-approval. Returns ok, exitCode ' +
+      '(0 in sync, 1 drift/breaking/re-approval, 2 could not check), problems with fixes, warnings (e.g. non-breaking ' +
+      'upgrades available) and the upgrade items. offline:true skips the backend.',
+    inputSchema: z.object({ offline: z.boolean().optional() }),
+    execute: async (input, { client, config, localFilesystem }) => {
+      if (localFilesystem === false) throw new Error(LOCAL_ONLY);
+      const writer = new ConfinedWriter({ forbidden: [config.credential] });
+      const report = await verifyProject({ client, config, writer }, { offline: input.offline });
+      return { ...report, verdict: report.ok ? 'SWFTE_VERIFY_OK' : report.exitCode === 2 ? 'SWFTE_VERIFY_UNCHECKED' : 'SWFTE_VERIFY_FAILED' };
     },
   },
   {

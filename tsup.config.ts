@@ -1,7 +1,8 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  // index = MCP server (and `… swfte <cmd>` passthrough); swfte = the bake-in CLI bin.
+  entry: ['src/index.ts', 'src/swfte.ts'],
   format: ['esm'],
   target: 'node18',
   outDir: 'dist',

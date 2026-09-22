@@ -35,7 +35,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "swfte-mcp-server": "dist/index.js"
+    "swfte-mcp-server": "dist/index.js",
+    "mcp-server": "dist/index.js",
+    "swfte": "dist/swfte.js"
   },
   "files": [
     "bin",

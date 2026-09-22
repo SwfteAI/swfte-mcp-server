@@ -81,6 +81,12 @@ async function main(): Promise<void> {
     'swfte_get_action_status',
     'swfte_wire_analytics',
     'swfte_wire_payments',
+    // Solution Hub + bake-in.
+    'swfte_fit_check',
+    'swfte_adopt',
+    'swfte_get_timeline',
+    'swfte_sync',
+    'swfte_check_upgrades',
   ];
   const names = new Set(tools.map((t) => t.name));
   for (const r of required) if (!names.has(r)) problems.push(`missing required tool: ${r}`);
@@ -120,12 +126,17 @@ async function main(): Promise<void> {
   const capBody = JSON.parse(String((capRes.contents[0] as { text?: string }).text ?? '{}'));
   if (!capBody.catalog?.kinds?.includes('workflow') || !capBody.actions?.capabilities?.includes('app.payments.enable')) problems.push('capabilities resource content incomplete');
   const { prompts } = await client.listPrompts();
-  for (const p of ['reuse-then-build', 'ship-with-analytics-and-payments', 'bake-into-codebase']) {
+  for (const p of ['reuse-then-build', 'ship-with-analytics-and-payments', 'bake-into-codebase', 'pick-up-tailor-deploy']) {
     if (!prompts.some((x) => x.name === p)) problems.push(`missing prompt: ${p}`);
   }
   const rendered = await client.getPrompt({ name: 'reuse-then-build', arguments: { goal: 'invoice extraction' } });
   const renderedText = (rendered.messages[0]?.content as { text?: string })?.text ?? '';
   if (!renderedText.includes('swfte_find_existing')) problems.push('reuse-then-build prompt does not start from swfte_find_existing');
+  const hub = await client.getPrompt({ name: 'pick-up-tailor-deploy', arguments: { problem: 'invoice extraction' } });
+  const hubText = (hub.messages[0]?.content as { text?: string })?.text ?? '';
+  for (const step of ['swfte_find_existing', 'swfte_fit_check', 'swfte_adopt', 'swfte_scaffold_client', 'workflow.deploy', 'swfte_get_action_status']) {
+    if (!hubText.includes(step)) problems.push(`pick-up-tailor-deploy prompt does not chain ${step}`);
+  }
   // A traversal targetDir is refused before any request (the credential here is a placeholder).
   const traversal = await client.callTool({ name: 'swfte_scaffold_client', arguments: { catalogRef: 'workflow:x', language: 'typescript', targetDir: '../outside' } });
   if (!traversal.isError || !JSON.stringify(traversal.content).includes('outside the working directory')) problems.push('scaffold traversal was not refused');

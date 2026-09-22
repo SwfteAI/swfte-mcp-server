@@ -328,7 +328,9 @@ describe('swfte_scaffold_client', () => {
     contractRoutes();
     const res = await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'src/swfte' });
     const paths = res.files.map((f: any) => f.path).sort();
-    assert.deepEqual(paths, ['src/swfte/.env.example', 'src/swfte/invoice-extractor.ts', 'src/swfte/swfte.json']);
+    // Rev 4: the lock and .env.example live at the project root; no package.json here → plain-ts, no adapter.
+    assert.deepEqual(paths, ['.env.example', 'src/swfte/invoice-extractor.ts', 'swfte.json']);
+    assert.equal(res.framework, 'plain-ts');
     const client = readFileSync(join(tmp, 'src/swfte/invoice-extractor.ts'), 'utf8');
     assert.match(client, /export async function invokeInvoiceExtractor\(/);
     assert.match(client, /invoiceUrl: string;/);
@@ -342,14 +344,15 @@ describe('swfte_scaffold_client', () => {
     assert.ok(!client.includes(CREDENTIAL));
     assert.deepEqual(typecheck(join(tmp, 'src/swfte/invoice-extractor.ts')), []);
 
-    const env = readFileSync(join(tmp, 'src/swfte/.env.example'), 'utf8');
+    const env = readFileSync(join(tmp, '.env.example'), 'utf8');
     for (const k of ['SWFTE_API_KEY=', 'SWFTE_BASE_URL=', 'SWFTE_WORKSPACE_ID=']) assert.ok(env.includes(`\n${k}\n`) || env.includes(`${k}\n`), k);
     assert.ok(!env.includes(CREDENTIAL));
 
-    const lock = JSON.parse(readFileSync(join(tmp, 'src/swfte/swfte.json'), 'utf8'));
+    const lock = JSON.parse(readFileSync(join(tmp, 'swfte.json'), 'utf8'));
+    assert.equal(lock.version, 1);
     assert.equal(lock.artifacts.length, 1);
     assert.equal(lock.artifacts[0].catalogRef, 'workflow:wf_1');
-    assert.equal(lock.artifacts[0].updatedAt, '2026-09-21T00:00:00Z');
+    assert.equal(lock.artifacts[0].pinnedVersion, '2026-09-21T00:00:00Z');
     assert.equal(lock.artifacts[0].contractHash, contractHash(WF_CONTRACT as never));
     assert.deepEqual(lock.artifacts[0].files, ['src/swfte/invoice-extractor.ts']);
   });
@@ -371,22 +374,24 @@ describe('swfte_scaffold_client', () => {
       /Refusing to overwrite existing file\(s\): out\/invoice-extractor.ts/
     );
     assert.equal(readFileSync(join(tmp, 'out/invoice-extractor.ts'), 'utf8'), '// my hand-written code\n');
-    assert.equal(existsSync(join(tmp, 'out/swfte.json')), false, 'lock was written despite the refusal');
-    assert.equal(existsSync(join(tmp, 'out/.env.example')), false);
+    assert.equal(existsSync(join(tmp, 'swfte.json')), false, 'lock was written despite the refusal');
+    assert.equal(existsSync(join(tmp, '.env.example')), false);
 
     const forced = await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'out', force: true });
     assert.equal(forced.files.find((f: any) => f.path === 'out/invoice-extractor.ts').action, 'overwrite');
   });
 
-  test('refuses an overwrite of a lock file that is not JSON', async () => {
+  test('refuses to touch a lock file that is not JSON, even with force', async () => {
     contractRoutes();
-    mkdirSync(join(tmp, 'out'));
-    writeFileSync(join(tmp, 'out/swfte.json'), 'not json');
-    await assert.rejects(
-      run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'out' }),
-      /swfte.json \(exists but is not a JSON object\)/
-    );
-    assert.equal(readFileSync(join(tmp, 'out/swfte.json'), 'utf8'), 'not json');
+    writeFileSync(join(tmp, 'swfte.json'), 'not json');
+    for (const force of [false, true]) {
+      await assert.rejects(
+        run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'out', force }),
+        /swfte.json is not valid JSON/
+      );
+    }
+    assert.equal(readFileSync(join(tmp, 'swfte.json'), 'utf8'), 'not json');
+    assert.equal(seen.length, 0, 'a broken lock must stop the run before any request');
   });
 
   test('merges .env.example and the lock instead of replacing them', async () => {
@@ -397,17 +402,16 @@ describe('swfte_scaffold_client', () => {
       inputSchema: {},
       outputSchema: {},
     }, detailFor('agent:ag_1', { name: 'Support Triage' }));
-    mkdirSync(join(tmp, 'out'));
-    writeFileSync(join(tmp, 'out/.env.example'), 'DATABASE_URL=\nSWFTE_API_KEY=keep-me-as-is\n');
+    writeFileSync(join(tmp, '.env.example'), 'DATABASE_URL=\nSWFTE_API_KEY=keep-me-as-is\n');
     await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'out' });
     const res = await run('swfte_scaffold_client', { catalogRef: 'agent:ag_1', language: 'typescript', targetDir: 'out' });
-    const env = readFileSync(join(tmp, 'out/.env.example'), 'utf8');
+    const env = readFileSync(join(tmp, '.env.example'), 'utf8');
     assert.match(env, /^DATABASE_URL=$/m);
     assert.match(env, /^SWFTE_API_KEY=keep-me-as-is$/m);
     assert.equal(env.match(/^SWFTE_BASE_URL=/gm)?.length, 1);
     assert.deepEqual(res.env.kept.sort(), ['SWFTE_API_KEY', 'SWFTE_BASE_URL', 'SWFTE_WORKSPACE_ID']);
-    const lock = JSON.parse(readFileSync(join(tmp, 'out/swfte.json'), 'utf8'));
-    assert.deepEqual(lock.artifacts.map((a: any) => a.catalogRef), ['agent:ag_1', 'workflow:wf_1']);
+    const lock = JSON.parse(readFileSync(join(tmp, 'swfte.json'), 'utf8'));
+    assert.deepEqual(lock.artifacts.map((a: any) => a.catalogRef).sort(), ['agent:ag_1', 'workflow:wf_1']);
     // Agent contracts with no schemas fall back to the documented chat shape.
     const agent = readFileSync(join(tmp, 'out/support-triage.ts'), 'utf8');
     assert.match(agent, /export async function chatSupportTriage\(/);
@@ -876,10 +880,10 @@ describe('MCP resources and prompts', () => {
     assert.equal(catalogRefFromUri('swfte://catalog/workflow/a%2Fb'), null);
   });
 
-  test('prompts list and render the three recipes', async () => {
+  test('prompts list and render the four recipes', async () => {
     const server = buildServer({ config: config() });
     const list = await handle(server, 'prompts/list', {});
-    assert.deepEqual(list.prompts.map((p: any) => p.name).sort(), ['bake-into-codebase', 'reuse-then-build', 'ship-with-analytics-and-payments']);
+    assert.deepEqual(list.prompts.map((p: any) => p.name).sort(), ['bake-into-codebase', 'pick-up-tailor-deploy', 'reuse-then-build', 'ship-with-analytics-and-payments']);
     const p = await handle(server, 'prompts/get', { name: 'reuse-then-build', arguments: { goal: 'invoice extraction' } });
     assert.match(p.messages[0].content.text, /swfte_find_existing/);
     const ship = await handle(server, 'prompts/get', { name: 'ship-with-analytics-and-payments', arguments: { catalogRef: 'application:app_1' } });

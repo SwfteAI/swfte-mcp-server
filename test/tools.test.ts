@@ -225,6 +225,12 @@ describe('advertised surface', () => {
     //   datasets 6, modules 6, connect 5, untagged 3.
     // The next addition has no free lever left in the default groups; it has
     // to argue for raising this number.
+    //
+    // Solution Hub + bake-in added five more `core` tools (fit_check, adopt,
+    // get_timeline, sync, check_upgrades) and paid for them rather than raising
+    // this: three exact duplicates of advertised tools moved to the opt-in
+    // `extras` group. Measured at 103 — core 35, workflows 17, agents 12,
+    // chatflows 12, deployments 7, datasets 6, modules 6, connect 5, untagged 3.
     assert.ok(selected.length <= 103, `default surface is ${selected.length} tools`);
     assert.ok(selected.length > 40, `default surface is only ${selected.length} tools`);
   });
@@ -250,6 +256,7 @@ describe('advertised surface', () => {
       'swfte_find_existing', 'swfte_get_context', 'swfte_get_evidence', 'swfte_trace_dependencies',
       'swfte_scaffold_client', 'swfte_embed_widget', 'swfte_request_approval', 'swfte_execute_approved_action',
       'swfte_get_action_status', 'swfte_wire_analytics', 'swfte_wire_payments',
+      'swfte_fit_check', 'swfte_adopt', 'swfte_get_timeline', 'swfte_sync', 'swfte_check_upgrades',
     ];
     const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x', SWFTE_TOOLS: 'voice' } as never));
     for (const n of names) assert.ok(selected.some((t) => t.name === n), `${n} hidden by SWFTE_TOOLS=voice`);

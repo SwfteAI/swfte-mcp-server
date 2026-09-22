@@ -73,21 +73,51 @@ export const PROMPTS: PromptDef[] = [
     description: 'Generate a typed client (or embed) for a catalog artifact and record it in swfte.json.',
     arguments: [
       { name: 'catalogRef', description: '"<kind>:<id>" from swfte_find_existing.', required: true },
-      { name: 'language', description: 'typescript | python (default typescript).' },
-      { name: 'targetDir', description: 'Directory inside the project (default "src/swfte").' },
+      { name: 'framework', description: 'nextjs | express | fastapi | plain-ts | plain-python (default: detected from the project).' },
+      { name: 'targetDir', description: 'Directory inside the project for the client (default by framework).' },
     ],
     render: (a) => {
       const ref = q(a.catalogRef, '<kind>:<id>');
-      const lang = q(a.language, 'typescript');
-      const dir = q(a.targetDir, 'src/swfte');
+      const fw = a.framework?.trim();
+      const dir = a.targetDir?.trim();
+      const args = [`catalogRef:"${ref}"`, ...(fw ? [`framework:"${fw}"`] : []), ...(dir ? [`targetDir:"${dir}"`] : [])].join(', ');
       return [
-        `Bake ${ref} into this codebase (${lang}, ${dir}).`,
+        `Bake ${ref} into this codebase${fw ? ` (${fw})` : ' (framework detected from the project)'}.`,
         '',
-        `1. swfte_get_context {catalogRef:"${ref}"} — read the contract (invoke path, auth, async status path, schemas) and the evidence.`,
-        `2. swfte_scaffold_client {catalogRef:"${ref}", language:"${lang}", targetDir:"${dir}"}. It refuses to overwrite existing files; only pass force:true if the user agrees to replace them.`,
+        `1. swfte_get_context {catalogRef:"${ref}"} — read the contract (invoke path, auth, async status path, schemas), the evidence and who made it and why.`,
+        `2. swfte_scaffold_client {${args}}. It writes the typed client, a framework adapter (Next.js route handler / Express router / FastAPI router) and pins the contract in swfte.json. It refuses to overwrite existing files; only pass force:true if the user agrees to replace them.`,
         '3. If the contract has an embed, swfte_embed_widget writes it into a page instead.',
-        '4. Call the generated function from the code that needs it; keep SWFTE_API_KEY in the real env (never in source). Commit swfte.json so drift against the contract hash is visible later.',
-        '5. Run it once end to end and report the result.',
+        '4. Put the app\'s auth check in the adapter where marked; keep SWFTE_API_KEY in the real env (never in source). Commit swfte.json and the generated files, and add `npx -p @swfte/mcp-server swfte verify` to CI so contract drift or a pending re-approval fails the build.',
+        '5. Run it once end to end and report the result. Later, swfte_sync regenerates clients when contracts move; swfte_check_upgrades is the same check CI runs.',
+      ].join('\n');
+    },
+  },
+  {
+    name: 'pick-up-tailor-deploy',
+    title: 'Pick up a proven solution, tailor it, bake it in, deploy it',
+    description:
+      'Solution Hub flow: find a proven entry, check its fit for this problem and stack, adopt a tailored copy, bake it ' +
+      'into this codebase, and propose an approval-gated deploy.',
+    arguments: [
+      { name: 'problem', description: 'The problem to solve, in the developer\'s words.', required: true },
+      { name: 'kind', description: 'Optional kind to restrict to (workflow, agent, chatflow, widget, application, ...).' },
+      { name: 'environment', description: 'development | staging | production (default development).' },
+    ],
+    render: (a) => {
+      const problem = q(a.problem, '(describe the problem)');
+      const env = q(a.environment, 'development');
+      return [
+        `Problem: ${problem}${a.kind ? ` (kind: ${a.kind})` : ''}. Target environment: ${env}.`,
+        '',
+        'Pick up a proven solution from the Swfte Solution Hub instead of generating one. Steps:',
+        `1. Find: swfte_find_existing {query:"${problem.replace(/"/g, "'")}"${a.kind ? `, kinds:["${a.kind}"]` : ''}}. Prefer entries whose evidence rests on independent workspaces; read each one's provenance (author, why) in swfte_get_context before choosing.`,
+        '2. Fit: swfte_fit_check {catalogRef, problem} — leave stack out so it is detected from this repo. A weak verdict means try the next candidate or build instead (swfte_solution_advise → swfte_build). Read the gaps.',
+        '3. History: swfte_get_timeline {catalogRef} if you need to know who changed it recently and why.',
+        '4. Adopt: swfte_adopt {catalogRef, problem, notes?} — copies it into this workspace, tailored. Connect every missingConnections provider with swfte_connect_start (the user signs in), and answer needsInput before running it. The copy starts with no evidence: run it on representative inputs (swfte_run).',
+        '5. Bake: swfte_scaffold_client {catalogRef:<the new catalogRef>} — the framework is detected (Next.js route, Express router, FastAPI router, or the plain client). Add the auth check in the adapter, keep SWFTE_API_KEY in the real env, commit swfte.json, and add `npx -p @swfte/mcp-server swfte verify` to CI.',
+        `6. Deploy: swfte_request_approval {capability:"workflow.deploy", target:<the new catalogRef>, environment:"${env}"} (or pass deploy:{environment:"${env}"} to swfte_adopt). It is PROPOSED — tell the user to approve it in Studio → Actions. Never execute before approval.`,
+        '7. Status: swfte_get_action_status {actionId}; once APPROVED, swfte_execute_approved_action {actionId}. NOT_APPROVED or EXPIRED is an answer, not something to retry around.',
+        'Report which entry you picked and why (fit verdict, evidence, provenance), what was tailored, what the user must still connect or approve, and the files written.',
       ].join('\n');
     },
   },

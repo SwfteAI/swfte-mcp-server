@@ -96,6 +96,26 @@ export interface EvidenceSummary {
   evals?: number;
   reviews?: { approve: number; reject: number };
   reasons?: string[];
+  /** Rev 5: evidence is computed from independent workspaces only; these say how much of it there is. */
+  independentWorkspaces?: number;
+  successRateInterval?: [number, number] | null;
+  freshness?: 'fresh' | 'stale';
+  /** Rev 4: distinct workspaces with a successful run through a generated client in 30 days. */
+  adopters?: number;
+  /** Rev 5: run split — the author's own workspace vs everybody else. */
+  own?: { total?: number; succeeded?: number; failed?: number } | null;
+  independent?: { total?: number; succeeded?: number; failed?: number } | null;
+}
+
+/** Rev 3: who made an entry and why, and where it came from. */
+export interface Provenance {
+  author?: { id?: string; displayName?: string | null; workspaceName?: string | null } | null;
+  createdAt?: string | null;
+  why?: string | null;
+  forkedFrom?: string | null;
+  forks?: number;
+  adoptedBy?: number;
+  version?: string | null;
 }
 
 export interface CatalogEntrySummary {
@@ -112,9 +132,15 @@ export interface CatalogEntrySummary {
   evidence?: EvidenceSummary;
   updatedAt?: string;
   shapeHash?: string | null;
+  /** Rev 5: SPDX id or "proprietary". */
+  license?: string | null;
+  /** Rev 3 detail field; some servers also project it onto summaries. */
+  provenance?: Provenance | null;
 }
 
 export interface CatalogEntryDetail extends CatalogEntrySummary {
+  /** Rev 5: a fork's inherited evidence, reported beside its own and never merged into it. */
+  parentEvidence?: EvidenceSummary | null;
   rationale?: Record<string, unknown> | null;
   evidenceRecords?: Array<{ type: string; refId: string; status: string; at: string }>;
   dependencies?: Array<{ catalogRef: string; relation: string }>;
@@ -138,6 +164,9 @@ export interface CatalogContract {
   outputSchema: JsonSchema;
   snippets?: Record<string, string>;
   embed?: { html: string } | null;
+  /** Rev 4: the server's own contractHash (preferred over the local computation) and the artifact version. */
+  contractHash?: string | null;
+  version?: string | null;
 }
 
 export interface SearchResponse {
@@ -207,17 +236,57 @@ export function stableStringify(value: unknown): string {
 }
 
 /**
- * Hash of the parts of a contract generated code depends on: how it is called
- * and the shapes that cross the wire. Snippets and embed markup are excluded —
- * they are presentation, and a copy edit to a snippet must not read as drift.
+ * CONTRACT rev 4 canonical contractHash: lowercase hex sha256 of the canonical
+ * (sorted-key, no-whitespace) JSON of {invoke, inputSchema, outputSchema}.
+ * Snippets and embed markup are excluded — they are presentation, and a copy
+ * edit to a snippet must not read as drift.
  */
-export function contractHash(contract: CatalogContract): string {
+export function contractHash(contract: Pick<CatalogContract, 'invoke' | 'inputSchema' | 'outputSchema'>): string {
   const material = stableStringify({
     invoke: contract.invoke,
     inputSchema: contract.inputSchema ?? {},
     outputSchema: contract.outputSchema ?? {},
   });
-  return `sha256:${createHash('sha256').update(material).digest('hex').slice(0, 32)}`;
+  return createHash('sha256').update(material).digest('hex');
+}
+
+/** A hash with any `sha256:` prefix removed, lowercased. */
+export function normalizeHash(h: string | null | undefined): string {
+  return String(h ?? '').trim().replace(/^sha256:/i, '').toLowerCase();
+}
+
+/**
+ * Whether two contract hashes name the same contract. Tolerates the `sha256:`
+ * prefix and the 32-character truncation written by earlier versions of this
+ * package (same material, same digest, shorter), so an old lock is not drift.
+ */
+export function sameHash(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = normalizeHash(a);
+  const y = normalizeHash(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.length >= 32 && long.startsWith(short);
+}
+
+/**
+ * The hash to record for a contract: the server's when it sends one (it is the
+ * party that answers /v2/catalog/upgrades), else the local canonical one. A
+ * disagreement is surfaced, not hidden — it means the two canonicalisations
+ * differ and upgrade checks may misfire.
+ */
+export function effectiveContractHash(contract: CatalogContract): { hash: string; local: string; server: string | null; warning?: string } {
+  const local = contractHash(contract);
+  const server = typeof contract.contractHash === 'string' && contract.contractHash.trim() ? contract.contractHash.trim() : null;
+  if (!server) return { hash: local, local, server: null };
+  return sameHash(server, local)
+    ? { hash: server, local, server }
+    : {
+        hash: server,
+        local,
+        server,
+        warning: `The server's contractHash (${server.slice(0, 19)}…) differs from the locally computed canonical hash (${local.slice(0, 12)}…). Using the server's; report this if upgrade checks misfire.`,
+      };
 }
 
 export function ladderRank(level: string | undefined): number {
@@ -244,6 +313,71 @@ export function interpretEvidence(level: string | undefined): string {
     default:
       return 'No evidence summary returned.';
   }
+}
+
+/**
+ * Who made an entry, why, where it came from and under what licence — the
+ * Solution Hub's authorship line (CONTRACT rev 3/5). Absent fields read as
+ * unknown (null), never as a blank that looks like an answer.
+ */
+export function presentProvenance(entry: Pick<CatalogEntrySummary, 'provenance' | 'license' | 'scope'>) {
+  const p = entry.provenance ?? null;
+  const author = p?.author
+    ? { id: p.author.id ?? null, displayName: p.author.displayName ?? null, workspaceName: p.author.workspaceName ?? null }
+    : null;
+  return {
+    author,
+    why: p?.why ?? null,
+    createdAt: p?.createdAt ?? null,
+    forkedFrom: p?.forkedFrom ?? null,
+    forks: typeof p?.forks === 'number' ? p.forks : null,
+    adoptedBy: typeof p?.adoptedBy === 'number' ? p.adoptedBy : null,
+    version: p?.version ?? null,
+    // Rev 5: workspace entries default to proprietary when the server says nothing.
+    license: entry.license ?? (entry.scope === 'public' ? null : 'proprietary'),
+    ...(p ? {} : { note: 'The server returned no provenance for this entry; authorship and rationale are unknown, not absent.' }),
+  };
+}
+
+/** One line naming the author and the why, for result lists. */
+export function provenanceLine(entry: Pick<CatalogEntrySummary, 'provenance'>): string | null {
+  const p = entry.provenance;
+  if (!p) return null;
+  const who = p.author?.displayName ?? p.author?.id ?? null;
+  const parts = [
+    who ? `by ${who}${p.author?.workspaceName ? ` (${p.author.workspaceName})` : ''}` : null,
+    p.why ? `why: ${String(p.why).slice(0, 160)}` : null,
+    p.forkedFrom ? `forked from ${p.forkedFrom}` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' — ') : null;
+}
+
+/**
+ * Evidence as the server computed it, with the rev 5 fields made explicit: how
+ * many independent workspaces the level rests on, the Wilson interval around
+ * the success rate, freshness, and the author's own runs kept apart from
+ * independent ones. A fork's inherited evidence is reported separately as
+ * parentEvidence and never merged in.
+ */
+export function presentEvidence(ev: EvidenceSummary | null | undefined, parent?: EvidenceSummary | null) {
+  const e = ev ?? ({ level: 'unmeasured' } as EvidenceSummary);
+  const out = {
+    ...e,
+    level: e.level ?? 'unmeasured',
+    independentWorkspaces: typeof e.independentWorkspaces === 'number' ? e.independentWorkspaces : null,
+    successRateInterval: Array.isArray(e.successRateInterval) ? e.successRateInterval : null,
+    freshness: e.freshness ?? null,
+    adopters: typeof e.adopters === 'number' ? e.adopters : null,
+    interpretation: interpretEvidence(e.level),
+    note: 'Descriptive, not a guarantee: levels above "observed" need independent runs from >=2 other workspaces; the author\'s own runs are reported apart and do not raise the level.',
+  };
+  return parent
+    ? {
+        ...out,
+        parentEvidence: { ...parent, interpretation: interpretEvidence(parent.level) },
+        parentNote: 'This entry is a fork. parentEvidence belongs to the source it was copied from and says nothing yet about this copy.',
+      }
+    : out;
 }
 
 /**
@@ -292,10 +426,11 @@ export async function getContextPackage(
   if (!contractResult.ok && !(contractResult.err instanceof SwfteApiError)) throw contractResult.err;
 
   const facets = detail.facets ?? [];
+  const hashInfo = contract?.invoke ? effectiveContractHash(contract) : null;
   const nextSteps: string[] = [];
   if (contract) {
     nextSteps.push(
-      `Bake it into the codebase: swfte_scaffold_client {catalogRef:"${r.ref}", language:"typescript"|"python", targetDir:"<dir under cwd>"}.`
+      `Bake it into the codebase: swfte_scaffold_client {catalogRef:"${r.ref}"} (framework detected from the project; or run \`npx -p @swfte/mcp-server swfte add ${r.ref}\`).`
     );
     if (contract.embed?.html) nextSteps.push(`Embed it in a page: swfte_embed_widget {catalogRef:"${r.ref}", targetFile?}.`);
   } else {
@@ -307,6 +442,7 @@ export async function getContextPackage(
   if (r.kind === 'application') {
     nextSteps.push('Wire analytics / payments: swfte_wire_analytics, swfte_wire_payments (approval-gated).');
   }
+  nextSteps.push(`Check it fits your problem and stack before adopting: swfte_fit_check {catalogRef:"${r.ref}", problem:"…"}; its history: swfte_get_timeline.`);
 
   return {
     catalogRef: r.ref,
@@ -318,10 +454,8 @@ export async function getContextPackage(
     source: detail.source,
     updatedAt: detail.updatedAt,
     shapeHash: detail.shapeHash ?? null,
-    evidence: {
-      ...(detail.evidence ?? { level: 'unmeasured' }),
-      interpretation: interpretEvidence(detail.evidence?.level),
-    },
+    provenance: presentProvenance(detail),
+    evidence: presentEvidence(detail.evidence, detail.parentEvidence),
     facets: {
       confirmed: facets.filter((f) => f.status === 'CONFIRMED'),
       proposed: facets.filter((f) => f.status === 'PROPOSED'),
@@ -342,7 +476,8 @@ export async function getContextPackage(
         }
       : null,
     ...(contractError ? { contractError } : {}),
-    contractHash: contract ? contractHash(contract) : null,
+    contractHash: hashInfo?.hash ?? null,
+    ...(hashInfo?.warning ? { contractHashWarning: hashInfo.warning } : {}),
     nextSteps,
   };
 }
