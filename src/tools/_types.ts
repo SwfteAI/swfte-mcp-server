@@ -9,7 +9,8 @@ export interface ToolContext {
    * Whether this process runs inside the caller's project (stdio, launched by
    * the MCP client) and may read or write files there. False when hosted over
    * HTTP: the server's own disk is not the caller's codebase, so local-file
-   * tools refuse. Absent means local.
+   * tools refuse and file-producing tools return the files inline for the
+   * client to write instead. Absent means local.
    */
   localFilesystem?: boolean;
 }

@@ -189,6 +189,9 @@ async function traceDependencies(
     const edges: Edge[] = [];
     const nodes = new Map<string, { catalogRef: string; name?: string; evidenceLevel?: string; depth: number }>();
     const errors: string[] = [];
+    // Each node costs two reads; a wide graph is cut here and reported as truncated.
+    const MAX_NODES = 60;
+    let capped = false;
     let frontier: CatalogRef[] = [root];
     nodes.set(root.ref, { catalogRef: root.ref, depth: 0 });
     for (let depth = 0; depth < maxDepth && frontier.length; depth++) {
@@ -209,6 +212,10 @@ async function traceDependencies(
         for (const e of [...detailDeps, ...live.filter((e) => !seen.has(e.to))]) {
           edges.push(e);
           if (!nodes.has(e.to)) {
+            if (nodes.size >= MAX_NODES) {
+              capped = true;
+              continue;
+            }
             nodes.set(e.to, { catalogRef: e.to, depth: depth + 1 });
             try {
               next.push(parseCatalogRef(e.to));
@@ -226,7 +233,7 @@ async function traceDependencies(
       depth: maxDepth,
       nodes: [...nodes.values()],
       edges,
-      truncated: frontier.length > 0,
+      truncated: frontier.length > 0 || capped,
       ...(errors.length ? { errors } : {}),
       note:
         '"catalog" edges come from the catalog entry\'s declared dependencies; "live-graph" edges are ids found in the ' +

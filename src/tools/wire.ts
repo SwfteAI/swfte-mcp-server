@@ -15,7 +15,7 @@ import { z } from 'zod';
 import type { SwfteClient } from '../client.js';
 import { CatalogRefArg, ENVIRONMENTS, parseCatalogRef, searchCatalog, type ActionCapability } from '../catalog.js';
 import { executeAction, getAction, presentAction, proposeAction, type ActionRequest } from '../actions.js';
-import { ConfinedWriter, gitignoreCovers } from '../fsguard.js';
+import { ConfinedWriter, INLINE_NOTE, gitignoreCovers } from '../fsguard.js';
 import type { ToolDefinition } from './_types.js';
 
 const FRAMEWORKS = ['next', 'react', 'browser', 'node'] as const;
@@ -84,6 +84,17 @@ function pending(tool: string, action: ActionRequest, blocked?: Record<string, u
         : p.instructions,
     filesWritten: [],
   };
+}
+
+/** An http(s) URL with nothing that could break an env line or a string, else undefined. */
+function safeHttpUrl(v: unknown): string | undefined {
+  if (typeof v !== 'string' || /[\s"'`#\\$]/.test(v)) return undefined;
+  try {
+    const u = new URL(v);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? v : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function detectFramework(root: string): Framework {
@@ -216,8 +227,8 @@ export const wireTools: ToolDefinition[] = [
       framework: z.enum(FRAMEWORKS).optional(),
       ...Common,
     }),
-    execute: async (input, { client, config }) => {
-      const writer = new ConfinedWriter(process.cwd(), [config.credential]);
+    execute: async (input, { client, config, localFilesystem }) => {
+      const writer = new ConfinedWriter({ forbidden: [config.credential], inline: localFilesystem === false });
       const dir = writer.resolve(input.targetDir);
       const app = await resolveApplication(client, input);
       const environment = input.environment ?? 'development';
@@ -234,12 +245,12 @@ export const wireTools: ToolDefinition[] = [
       if (!appKey) {
         return { wired: false, stage: 'EXECUTED_WITHOUT_KEY', action: presentAction(action), nextStep: 'The action executed but returned no appKey. Create one in Studio → Application → Analytics and set SWFTE_ANALYTICS_APP_KEY yourself.', filesWritten: [] };
       }
-      if (!appKey.startsWith('swfte_pk_')) {
+      if (!/^swfte_pk_[A-Za-z0-9_-]+$/.test(appKey)) {
         return { wired: false, stage: 'REFUSED_NON_PUBLISHABLE_KEY', action: presentAction(action), nextStep: 'The returned key is not a publishable swfte_pk_ key, so it was not written anywhere. Check the application\'s analytics keys in Studio.', filesWritten: [] };
       }
       const appId = String(result.appId ?? app.id);
-      const endpoint = String(result.endpoint ?? result.ingestEndpoint ?? `${config.baseUrl}/v1/analytics/web/ingest`);
-      const framework = input.framework ?? detectFramework(writer.root);
+      const endpoint = safeHttpUrl(result.endpoint ?? result.ingestEndpoint) ?? `${config.baseUrl}/v1/analytics/web/ingest`;
+      const framework = input.framework ?? (writer.inline ? 'browser' : detectFramework(writer.root));
       const snippet = analyticsSnippet(framework, appId, endpoint);
       writer.create(writer.resolve(`${dir}/${snippet.file}`), snippet.content, input.force);
 
@@ -269,7 +280,10 @@ export const wireTools: ToolDefinition[] = [
         action: presentAction(action),
         filesWritten: written,
         env: envResult,
-        ...(gitignoreCovers(writer.root, envFile) ? {} : { warning: `${envFile} does not appear in .gitignore. The analytics key is publishable, but keep env files out of git by habit.` }),
+        ...(writer.inline
+          ? { inline: true, note: INLINE_NOTE }
+          : {}),
+        ...(writer.inline || gitignoreCovers(writer.root, envFile) ? {} : { warning: `${envFile} does not appear in .gitignore. The analytics key is publishable, but keep env files out of git by habit.` }),
         nextSteps: [
           framework === 'next' || framework === 'react'
             ? `Wrap your root component with <SwfteAnalytics> from ./${snippet.file.replace(/\.tsx$/, '')}.`
@@ -296,8 +310,8 @@ export const wireTools: ToolDefinition[] = [
       refreshUrl: z.string().url().optional().describe('Where Stripe onboarding sends the user if its link expires.'),
       ...Common,
     }),
-    execute: async (input, { client, config }) => {
-      const writer = new ConfinedWriter(process.cwd(), [config.credential]);
+    execute: async (input, { client, config, localFilesystem }) => {
+      const writer = new ConfinedWriter({ forbidden: [config.credential], inline: localFilesystem === false });
       const dir = writer.resolve(input.targetDir);
       const app = await resolveApplication(client, { catalogRef: input.catalogRef });
       const params: Record<string, unknown> = {};
@@ -329,6 +343,7 @@ export const wireTools: ToolDefinition[] = [
         application: { catalogRef: `application:${app.id}` },
         action: presentAction(action),
         filesWritten: written,
+        ...(writer.inline ? { inline: true, note: INLINE_NOTE } : {}),
         ...(onboardingUrl ? { onboardingUrl } : {}),
         nextSteps: [
           ...(onboardingUrl ? [`Have the account owner finish Stripe onboarding: ${onboardingUrl}`] : []),

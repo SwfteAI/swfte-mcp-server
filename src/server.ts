@@ -42,8 +42,9 @@ export interface BuildServerOptions {
   resolveClient?: (authInfo?: AuthInfo) => SwfteClient | Promise<SwfteClient>;
   /**
    * False when the server is hosted (HTTP) rather than launched inside the
-   * caller's project. Local-file tools then refuse instead of touching the
-   * server's own disk. Default true (stdio).
+   * caller's project. Local-file tools then refuse and file-producing tools
+   * return files inline instead of touching the server's own disk. Default
+   * true (stdio).
    */
   localFilesystem?: boolean;
 }

@@ -13,7 +13,7 @@
 import { z } from 'zod';
 import { CatalogRefArg, contractHash, getContract, getEntry, parseCatalogRef, type CatalogContract } from '../catalog.js';
 import { kebab, renderPythonClient, renderTypeScriptClient, snake } from '../codegen.js';
-import { ConfinedWriter } from '../fsguard.js';
+import { ConfinedWriter, INLINE_NOTE } from '../fsguard.js';
 import type { ToolDefinition } from './_types.js';
 
 export const LOCK_FILE = 'swfte.json';
@@ -79,8 +79,8 @@ export const scaffoldTools: ToolDefinition[] = [
       targetDir: z.string().min(1).describe('Directory relative to the project root (e.g. "src/swfte"). Created if missing.'),
       force: z.boolean().optional().describe('Replace an existing client file whose content differs. Default false.'),
     }),
-    execute: async (input, { client, config }) => {
-      const writer = new ConfinedWriter(process.cwd(), [config.credential]);
+    execute: async (input, { client, config, localFilesystem }) => {
+      const writer = new ConfinedWriter({ forbidden: [config.credential], inline: localFilesystem === false });
       // Confine before any network call: a bad path should fail fast and free.
       const dir = writer.resolve(input.targetDir);
       const r = parseCatalogRef(input.catalogRef);
@@ -133,6 +133,7 @@ export const scaffoldTools: ToolDefinition[] = [
         catalogRef: r.ref,
         language: input.language,
         files: written,
+        ...(writer.inline ? { inline: true, note: INLINE_NOTE } : {}),
         env: envResult,
         contractHash: hash,
         ...(drift ? { contractChanged: { from: previousHash, to: hash, note: 'The contract moved since the last scaffold; review call sites against the regenerated types.' } } : {}),
@@ -163,8 +164,8 @@ export const scaffoldTools: ToolDefinition[] = [
       targetFile: z.string().optional().describe('File to write the snippet to, relative to the project root (e.g. "public/support.html").'),
       force: z.boolean().optional(),
     }),
-    execute: async (input, { client, config }) => {
-      const writer = new ConfinedWriter(process.cwd(), [config.credential]);
+    execute: async (input, { client, config, localFilesystem }) => {
+      const writer = new ConfinedWriter({ forbidden: [config.credential], inline: localFilesystem === false });
       const target = input.targetFile ? writer.resolve(input.targetFile) : null;
       const r = parseCatalogRef(input.catalogRef);
       const contract = await getContract(client, r);

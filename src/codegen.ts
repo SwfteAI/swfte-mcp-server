@@ -73,9 +73,10 @@ const TS_IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const tsKey = (k: string) => (TS_IDENT.test(k) ? k : JSON.stringify(k));
 
 /** Text safe inside a block comment. */
-const tsComment = (s: unknown) => String(s ?? '').replace(/\*\//g, '*\\/').replace(/[\r\n]+/g, ' ').slice(0, 300);
+// U+2028/U+2029 end a `//` comment in JavaScript, so they are line breaks here too.
+const tsComment = (s: unknown) => String(s ?? '').replace(/\*\//g, '*\\/').replace(/[\r\n\u2028\u2029]+/g, ' ').slice(0, 300);
 /** Text safe inside a `#` line comment. */
-const pyComment = (s: unknown) => String(s ?? '').replace(/[\r\n]+/g, ' ').slice(0, 300);
+const pyComment = (s: unknown) => String(s ?? '').replace(/[\r\n\u2028\u2029\f\v]+/g, ' ').slice(0, 300);
 
 /* ── TypeScript ──────────────────────────────────────────────────────────── */
 
@@ -410,7 +411,7 @@ function fill(path: string, values: Record<string, string>): string {
   });
 }
 
-async function call(opts: ClientOptions, method: string, path: string, body?: unknown, deadline = Date.now() + 30_000): Promise<any> {
+async function call(opts: ClientOptions, method: string, path: string, body: unknown, deadline: number): Promise<any> {
   const f = opts.fetch ?? fetch;
   const baseUrl = (opts.baseUrl ?? env('SWFTE_BASE_URL') ?? ${JSON.stringify(spec.defaultBaseUrl)}).replace(/\\/+$/, '');
   const headers: Record<string, string> = { Accept: 'application/json' };
@@ -438,7 +439,7 @@ async function call(opts: ClientOptions, method: string, path: string, body?: un
     }
   }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.max(1, Math.min(30_000, deadline - Date.now())));
+  const timer = setTimeout(() => controller.abort(), Math.max(1, deadline - Date.now()));
   try {
     const res = await f(url, { method, headers, body: payload, signal: controller.signal });
     const text = await res.text();
@@ -608,7 +609,7 @@ def _call(method: str, path: str, body: Any, api_key: Optional[str], base_url: O
             data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=max(1.0, min(30.0, timeout_s))) as res:
+        with urllib.request.urlopen(req, timeout=max(1.0, timeout_s)) as res:
             text = res.read().decode("utf-8")
     except urllib.error.HTTPError as err:
         raise SwfteRequestError(err.code, err.read().decode("utf-8", "replace"), path) from None

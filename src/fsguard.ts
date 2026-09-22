@@ -29,6 +29,10 @@
  *
  * Writes are planned first and committed only when the whole plan is clean, so
  * a refused file does not leave half a scaffold behind.
+ *
+ * Inline mode (a hosted server, whose disk is not the caller's project) plans
+ * against an empty virtual tree and returns the files' contents from commit()
+ * instead of writing them, with the same confinement and secret checks.
  */
 
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
@@ -38,6 +42,10 @@ import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:p
 /** Credential shapes that must never land in a written file. Publishable `swfte_pk_` keys are allowed. */
 export const SECRET_PATTERN =
   /\b(pat_[A-Za-z0-9]{8,}|sk-swfte-[A-Za-z0-9_-]{8,}|swfte_sk_[A-Za-z0-9_-]{8,}|sk_(?:live|test)_[A-Za-z0-9]{8,}|sk-[A-Za-z0-9]{20,}|gh[po]_[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16})\b/;
+
+/** What a hosted (inline) run says instead of having written anything. */
+export const INLINE_NOTE =
+  'Hosted server: nothing was written to disk. Each entry in files carries path + content — write them into the project yourself (existing files were not checked for conflicts).';
 
 export class PathConfinementError extends Error {
   constructor(message: string) {
@@ -179,6 +187,8 @@ export interface PlannedWrite {
   path: string;
   action: 'create' | 'overwrite' | 'merge' | 'unchanged';
   bytes: number;
+  /** Present only in inline mode: the file for the client to write. */
+  content?: string;
 }
 
 type Op = { abs: string; content: string; action: PlannedWrite['action'] };
@@ -189,10 +199,15 @@ export class ConfinedWriter {
   private readonly ops = new Map<string, Op>();
   readonly conflicts: string[] = [];
 
-  constructor(root: string = process.cwd(), private readonly forbidden: string[] = []) {
+  readonly inline: boolean;
+  private readonly forbidden: string[];
+
+  constructor(opts: { root?: string; forbidden?: string[]; inline?: boolean } = {}) {
+    this.inline = Boolean(opts.inline);
+    this.forbidden = opts.forbidden ?? [];
     // Same root rule as the read side: a cwd of / or $HOME confines nothing.
-    this.root = confinementRoot(root);
-    this.realRoot = realpathSync(this.root);
+    this.root = this.inline ? resolve(sep, 'swfte-inline-project') : confinementRoot(opts.root ?? process.cwd());
+    this.realRoot = this.inline ? this.root : realpathSync(this.root);
   }
 
   /**
@@ -203,6 +218,9 @@ export class ConfinedWriter {
   resolve(p: string): string {
     if (typeof p !== 'string' || !p.trim()) throw new PathConfinementError('Path is empty.');
     if (p.includes('\0')) throw new PathConfinementError('Path contains a NUL byte.');
+    if (this.inline && isAbsolute(p) && !isInside(this.root, p)) {
+      throw new PathConfinementError(`Refusing path "${p}": pass a path relative to the project root.`);
+    }
     const abs = resolve(this.root, p);
     if (isSpecial(abs) || !isInside(this.root, abs)) {
       throw new PathConfinementError(
@@ -210,7 +228,7 @@ export class ConfinedWriter {
           'Pass a path inside the project; `..` traversal and absolute paths elsewhere are rejected.'
       );
     }
-    if (!isInside(this.realRoot, nearestExistingReal(abs))) {
+    if (!this.inline && !isInside(this.realRoot, nearestExistingReal(abs))) {
       throw new PathConfinementError(`Refusing path "${p}": a symlink along it leads outside the working directory.`);
     }
     return abs;
@@ -221,7 +239,7 @@ export class ConfinedWriter {
   }
 
   private checkTarget(abs: string): 'missing' | 'file' {
-    if (!existsSync(abs)) return 'missing';
+    if (this.inline || !existsSync(abs)) return 'missing';
     const st = lstatSync(abs);
     if (st.isSymbolicLink()) throw new PathConfinementError(`Refusing to write through symlink ${this.rel(abs)}.`);
     if (st.isDirectory()) throw new PathConfinementError(`${this.rel(abs)} is a directory, not a file.`);
@@ -247,7 +265,7 @@ export class ConfinedWriter {
   /**
    * Append `KEY=value` lines for keys the env file does not define yet. Keys
    * already present are left exactly as the developer set them, unless
-   * `overrideKeys` names them and `force` is set.
+   * `force` is set and a non-empty value differs.
    */
   mergeEnv(
     abs: string,
@@ -265,7 +283,8 @@ export class ConfinedWriter {
     const toAppend: string[] = [];
     for (const e of entries) {
       if (!/^[A-Z_][A-Z0-9_]*$/.test(e.key)) throw new Error(`Invalid env key ${e.key}`);
-      if (/[\r\n]/.test(e.value)) throw new Error(`Env value for ${e.key} contains a newline.`);
+      // Unquoted dotenv values: anything that could end, comment out or quote-shift the line is refused.
+      if (/[\s"'`#\\$]/.test(e.value)) throw new Error(`Refusing env value for ${e.key}: it contains whitespace, a quote, #, $ or a backslash.`);
       const i = indexOf(e.key);
       if (i >= 0) {
         const currentValue = lines[i]!.replace(/^\s*(export\s+)?[A-Z0-9_]+\s*=\s*/, '');
@@ -341,6 +360,10 @@ export class ConfinedWriter {
     for (const op of this.ops.values()) this.assertNoSecrets(this.rel(op.abs), op.content);
     const out: PlannedWrite[] = [];
     for (const op of this.ops.values()) {
+      if (this.inline) {
+        out.push({ path: this.rel(op.abs), action: op.action, bytes: Buffer.byteLength(op.content), content: op.content });
+        continue;
+      }
       if (op.action !== 'unchanged') {
         mkdirSync(dirname(op.abs), { recursive: true });
         writeFileSync(op.abs, op.content, 'utf8');

@@ -498,6 +498,45 @@ describe('swfte_scaffold_client', () => {
   });
 });
 
+describe('hosted (inline) mode and file-safety edge cases', () => {
+  const hostedRun = (name: string, input: unknown) =>
+    tool(name).execute(input as never, { ...ctx(), localFilesystem: false }) as Promise<any>;
+
+  test('a hosted server returns files inline and writes nothing to its own disk', async () => {
+    contractRoutes();
+    const res = await hostedRun('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'src/swfte' });
+    assert.equal(res.inline, true);
+    const client = res.files.find((f: any) => f.path === 'src/swfte/invoice-extractor.ts');
+    assert.match(client.content, /export async function invokeInvoiceExtractor/);
+    assert.ok(res.files.every((f: any) => typeof f.content === 'string'));
+    assert.equal(existsSync(join(tmp, 'src')), false, 'hosted mode wrote to the server disk');
+    // Confinement still applies to the paths it hands back.
+    await assert.rejects(hostedRun('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: '../outside' }), /outside/);
+    await assert.rejects(hostedRun('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: '/etc' }), /relative to the project root/);
+  });
+
+  test('a directory merely starting with two dots is not traversal', async () => {
+    contractRoutes();
+    const res = await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: '..generated' });
+    assert.ok(res.files.some((f: any) => f.path === '..generated/invoice-extractor.ts'));
+  });
+
+  test('line separators cannot break out of a generated comment', async () => {
+    contractRoutes('workflow:wf_1', WF_CONTRACT, detailFor('workflow:wf_1', { description: 'ok\u2028process.exit(1)' }));
+    await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'out' });
+    const client = readFileSync(join(tmp, 'out/invoice-extractor.ts'), 'utf8');
+    assert.ok(!client.includes('\u2028'), 'raw U+2028 reached a // comment');
+    assert.deepEqual(typecheck(join(tmp, 'out/invoice-extractor.ts')), []);
+  });
+
+  test('an analytics endpoint that is not a clean http(s) URL is replaced by the default', async () => {
+    route('GET', /^\/v2\/actions\/act_1$/, { body: action({ status: 'EXECUTED', result: { appKey: 'swfte_pk_ok', endpoint: 'javascript:alert(1) #x' } }) });
+    const res = await run('swfte_wire_analytics', { catalogRef: 'application:app_1', targetDir: 'src', actionId: 'act_1', framework: 'node' });
+    assert.equal(res.endpoint, 'https://api.swfte.com/agents/v1/analytics/web/ingest');
+    assert.match(readFileSync(join(tmp, '.env'), 'utf8'), /^SWFTE_ANALYTICS_ENDPOINT=https:\/\/api\.swfte\.com\/agents\/v1\/analytics\/web\/ingest$/m);
+  });
+});
+
 describe('schema to type edge cases', () => {
   test('empty, untyped and $ref schemas degrade to the loose type', () => {
     assert.equal(isUntyped({}), true);
