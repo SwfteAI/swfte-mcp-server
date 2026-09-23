@@ -61,7 +61,7 @@ export function createHttpHandler(opts: HttpHandlerOptions): (req: Request) => P
       authInfo = result.authInfo;
     }
 
-    const server = buildServer({ config: opts.config, resolveClient: opts.resolveClient });
+    const server = buildServer({ config: opts.config, resolveClient: opts.resolveClient, localFilesystem: false });
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
     await server.connect(transport);

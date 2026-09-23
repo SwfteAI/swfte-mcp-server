@@ -28,6 +28,12 @@ export interface BuildServerOptions {
    * build safe in both places.
    */
   resolveClient?: (authInfo?: AuthInfo) => SwfteClient | Promise<SwfteClient>;
+  /**
+   * False when the server is hosted (HTTP) rather than launched inside the
+   * caller's project. Local-file tools then refuse instead of touching the
+   * server's own disk. Default true (stdio).
+   */
+  localFilesystem?: boolean;
 }
 
 /** Apply the `SWFTE_TOOLS` group filter. An empty set means "advertise everything". */
@@ -91,7 +97,7 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
 
     try {
       const client = await resolveClient(extra?.authInfo);
-      const result = await tool.execute(parsed.data, { client, config });
+      const result = await tool.execute(parsed.data, { client, config, localFilesystem: opts.localFilesystem ?? true });
       return {
         content: [
           {

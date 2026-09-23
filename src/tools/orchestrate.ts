@@ -1,7 +1,7 @@
 import { DesignContext, wizardContext } from '../guidance/index.js';
 import { z } from 'zod';
 import { orchestrateSolution, MAX_ORCHESTRATION_MS, type SolutionPlan } from '../orchestrator.js';
-import { buildKnowledge } from '../knowledge.js';
+import { buildKnowledge, checkKnowledgeDocs } from '../knowledge.js';
 import { checkGroundingIsUsable, moduleForDataset, writeWire, type SolutionKindLike } from '../wiring.js';
 import { RELATIONS } from '../solution.js';
 import type { ToolDefinition } from './_types.js';
@@ -35,9 +35,9 @@ const KnowledgeSchema = z.object({
   documents: z
     .array(
       z.object({
-        name: z.string(),
-        text: z.string().optional().describe('Inline content. Written to a temp file — the API only takes a fileId.'),
-        path: z.string().optional().describe('Absolute path to an existing local file, instead of text.'),
+        name: z.string().describe('Display name. Must not contain path separators or "..".'),
+        text: z.string().optional().describe('Inline content, uploaded as a file — the API only takes a fileId.'),
+        path: z.string().optional().describe('Path to an existing file inside the project directory, instead of text. Local (stdio) server only; refused when hosted.'),
         mimeType: z.string().optional(),
       })
     )
@@ -107,13 +107,17 @@ export const orchestrateTools: ToolDefinition[] = [
       totalWaitMs: z.number().int().min(30_000).max(MAX_ORCHESTRATION_MS).optional().describe('Total operation budget across builds, wiring and verification. Default and maximum 600000.'),
       includeComponentVerify: z.boolean().optional().describe('Also run each component\'s own sweep in the review pass.'),
     }),
-    execute: async (input, { client }) =>
-      orchestrateSolution(client, { ...input.plan, sharedContext: wizardContext(input.plan.sharedContext ?? '', input.plan.designContext) } as SolutionPlan, {
+    execute: async (input, { client, localFilesystem }) => {
+      // Refuse unsafe document names/paths before any component is built.
+      for (const c of input.plan.components) if (c.knowledge) checkKnowledgeDocs(c.knowledge.documents, { localFilesystem });
+      return orchestrateSolution(client, { ...input.plan, sharedContext: wizardContext(input.plan.sharedContext ?? '', input.plan.designContext) } as SolutionPlan, {
         dryRun: input.dryRun,
         waitMs: input.waitMs,
         totalWaitMs: input.totalWaitMs,
         includeComponentVerify: input.includeComponentVerify,
-      }),
+        localFilesystem,
+      });
+    },
   },
 
   // -------------------------------------------------------------------------
@@ -171,7 +175,7 @@ export const orchestrateTools: ToolDefinition[] = [
       'be handed on as done. Note that grounding an agent needs a further hop: knowledgeModuleIds holds ' +
       'KnowledgeModule ids, not dataset ids.',
     inputSchema: KnowledgeSchema.extend({ workspaceId: z.string().optional() }),
-    execute: async (input, { client }) => buildKnowledge(client, input),
+    execute: async (input, { client, localFilesystem }) => buildKnowledge(client, input, undefined, { localFilesystem }),
   },
 
   // -------------------------------------------------------------------------

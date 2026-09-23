@@ -95,6 +95,8 @@ export interface OrchestrateOpts {
   totalWaitMs?: number;
   /** Also run each component's own kind sweep in the review pass. */
   includeComponentVerify?: boolean;
+  /** False on a hosted server: dataset documents given by local path are refused. Default true (stdio). */
+  localFilesystem?: boolean;
 }
 
 /* ------------------------------------------------------------------ *
@@ -224,7 +226,8 @@ async function buildComponent(
   client: SwfteClient,
   plan: SolutionPlan,
   component: PlanComponent,
-  waitMs: number
+  waitMs: number,
+  localFilesystem?: boolean
 ): Promise<ComponentOutcome> {
   let sessionId: string | undefined;
   let id: string | undefined;
@@ -239,7 +242,7 @@ async function buildComponent(
           detail: 'A dataset component needs a `knowledge` block (documents to create and index).',
         };
       }
-      const report = await buildKnowledge(client, { ...component.knowledge, waitMs: Math.min(component.knowledge.waitMs ?? waitMs, waitMs), workspaceId: plan.workspaceId }, (createdId) => { id = createdId; });
+      const report = await buildKnowledge(client, { ...component.knowledge, waitMs: Math.min(component.knowledge.waitMs ?? waitMs, waitMs), workspaceId: plan.workspaceId }, (createdId) => { id = createdId; }, { localFilesystem });
       return {
         key: component.key,
         kind: component.kind,
@@ -427,7 +430,7 @@ export async function orchestrateSolution(
       }
 
       try {
-        const outcome = await client.withDeadline(Date.now() + waitMs, () => buildComponent(client, plan, c, waitMs));
+        const outcome = await client.withDeadline(Date.now() + waitMs, () => buildComponent(client, plan, c, waitMs, opts.localFilesystem));
         components.push(outcome);
         if (outcome.state === 'pending') return partial();
         if (outcome.id && outcome.state === 'built') ids.set(key, outcome.id);

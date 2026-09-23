@@ -8,7 +8,7 @@
  * Anything that cannot be fetched is recorded as an ERROR on the snapshot, not
  * omitted. A rule whose input is missing returns `skip`, and skips are printed.
  */
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { get, tryGet, isError } from './api.mjs';
 
@@ -113,9 +113,10 @@ function walk(dir, fn) {
     if (e === 'node_modules' || e.startsWith('.')) continue;
     const p = join(dir, e);
     let st;
-    try { st = statSync(p); } catch { continue; }
+    // lstat: a symlink is never followed, so a source dir cannot reach outside itself.
+    try { st = lstatSync(p); } catch { continue; }
     if (st.isDirectory()) walk(p, fn);
-    else fn(p);
+    else if (st.isFile()) fn(p);
   }
 }
 

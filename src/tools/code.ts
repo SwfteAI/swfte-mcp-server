@@ -1,5 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
 import { join, dirname, relative, resolve, sep } from 'node:path';
+import { assertLocalFilesystem, confineDirectory, confinementRoot, confinePath, PathConfinementError } from '../fsguard.js';
 import { z } from 'zod';
 import { unzipSync, zipSync } from 'fflate';
 import type { ToolDefinition } from './_types.js';
@@ -23,13 +24,56 @@ function safeJoin(root: string, entry: string): string {
 
 function walk(dir: string, root = dir, acc: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
-    // Never ship build output or VCS metadata back to the server.
-    if (name === 'target' || name === '.git' || name === 'node_modules') continue;
+    // Never ship build output, VCS metadata or env files back to the server.
+    if (name === 'target' || name === '.git' || name === 'node_modules' || name.startsWith('.env') || name === EXPORT_MARKER) continue;
     const full = join(dir, name);
-    if (statSync(full).isDirectory()) walk(full, root, acc);
-    else acc.push(relative(root, full));
+    // lstat, not stat: a symlink is never followed, so it cannot pull in a file
+    // from outside the workspace.
+    const st = lstatSync(full);
+    if (st.isDirectory()) walk(full, root, acc);
+    else if (st.isFile()) acc.push(relative(root, full));
   }
   return acc;
+}
+
+/**
+ * Written into every directory swfte_export_src creates. `overwrite:true`
+ * deletes a directory only when it carries this marker, so the tool can only
+ * ever remove what it wrote itself.
+ */
+export const EXPORT_MARKER = '.swfte-export.json';
+
+function hasExportMarker(dir: string): boolean {
+  const marker = join(dir, EXPORT_MARKER);
+  if (!existsSync(marker) || !lstatSync(marker).isFile()) return false;
+  try {
+    return JSON.parse(readFileSync(marker, 'utf8'))?.writtenBy === 'swfte_export_src';
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve an export destination under the working directory and clear it only if we own it. */
+export function prepareExportDest(destDir: string, overwrite: boolean | undefined): string {
+  const dest = confinePath(destDir);
+  if (dest === resolve(confinementRoot())) {
+    throw new PathConfinementError('Refusing to export into the working directory itself: pass a subdirectory as destDir.');
+  }
+  if (existsSync(dest)) {
+    const st = lstatSync(dest);
+    if (!st.isDirectory()) throw new PathConfinementError(`Refusing destDir "${destDir}": it exists and is not a directory.`);
+    if (overwrite) {
+      if (!hasExportMarker(dest)) {
+        throw new PathConfinementError(
+          `Refusing overwrite of "${destDir}": it was not created by swfte_export_src (no ${EXPORT_MARKER} marker), ` +
+            'so it is not deleted. Choose a new destDir, or remove the directory yourself.'
+        );
+      }
+      rmSync(dest, { recursive: true, force: true });
+    }
+  }
+  mkdirSync(dest, { recursive: true });
+  return dest;
 }
 
 /**
@@ -60,29 +104,31 @@ export const codeTools: ToolDefinition[] = [
       'tree plus the per-step headers so you know what you are looking at without reading every file.',
     inputSchema: z.object({
       workflowId: z.string(),
-      destDir: z.string().describe('Local directory to unzip into. Created if missing.'),
+      destDir: z.string().describe('Subdirectory of the project to unzip into. Created if missing. Local (stdio) server only.'),
       overwrite: z
         .boolean()
         .optional()
-        .describe('Delete destDir first. Off by default so local edits are not silently destroyed.'),
+        .describe('Delete destDir first — only if a previous swfte_export_src created it (marker file). Off by default so local edits are not silently destroyed.'),
     }),
-    execute: async (input, { client }) => {
+    execute: async (input, { client, localFilesystem }) => {
+      assertLocalFilesystem(localFilesystem, 'swfte_export_src');
+      // Validate the destination before downloading anything.
+      confinePath(input.destDir);
       const { bytes, headers } = await client.getBinary(
         `${EXEC}/${encodeURIComponent(input.workflowId)}/download-src`,
         { timeoutMs: 180_000 }
       );
 
-      const dest = resolve(input.destDir);
-      if (input.overwrite) rmSync(dest, { recursive: true, force: true });
-      mkdirSync(dest, { recursive: true });
+      const dest = prepareExportDest(input.destDir, input.overwrite);
 
       const files = unzipSync(bytes);
       const written: string[] = [];
       const steps: Array<{ file: string; stepId?: string; stepType?: string; userRegions: string[] }> = [];
 
       for (const [name, data] of Object.entries(files)) {
-        if (name.endsWith('/')) continue;
-        const target = safeJoin(dest, name);
+        if (name.endsWith('/') || name === EXPORT_MARKER) continue;
+        // Re-confined per entry: a symlink already inside dest must not carry a write out of it.
+        const target = confinePath(safeJoin(dest, name));
         mkdirSync(dirname(target), { recursive: true });
         writeFileSync(target, data);
         written.push(name);
@@ -92,6 +138,11 @@ export const codeTools: ToolDefinition[] = [
           if (parsed.stepId) steps.push({ file: name, ...parsed });
         }
       }
+
+      writeFileSync(
+        join(dest, EXPORT_MARKER),
+        JSON.stringify({ writtenBy: 'swfte_export_src', workflowId: input.workflowId }, null, 2) + '\n'
+      );
 
       return {
         workflowId: input.workflowId,
@@ -122,11 +173,18 @@ export const codeTools: ToolDefinition[] = [
       'which is worth investigating before trusting any diff.',
     inputSchema: z.object({
       workflowId: z.string(),
-      srcDir: z.string().describe('The workspace directory previously produced by swfte_export_src.'),
+      srcDir: z.string().describe('The workspace directory previously produced by swfte_export_src, inside the project directory. Local (stdio) server only.'),
       apply: z.boolean().optional().describe('Actually commit the change. Default false (dry run).'),
     }),
-    execute: async (input, { client }) => {
-      const root = resolve(input.srcDir);
+    execute: async (input, { client, localFilesystem }) => {
+      assertLocalFilesystem(localFilesystem, 'swfte_sync_src');
+      const root = confineDirectory(input.srcDir);
+      const blueprint = join(root, 'swfte-blueprint.json');
+      if (!existsSync(blueprint) || !lstatSync(blueprint).isFile()) {
+        throw new PathConfinementError(
+          `Refusing srcDir "${input.srcDir}": it has no swfte-blueprint.json, so it is not a workspace produced by swfte_export_src.`
+        );
+      }
       const names = walk(root);
       if (names.length === 0) throw new Error(`No files found under ${root}`);
 

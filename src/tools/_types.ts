@@ -5,6 +5,13 @@ import type { ServerConfig, ToolGroup } from '../config.js';
 export interface ToolContext {
   client: SwfteClient;
   config: ServerConfig;
+  /**
+   * Whether this process runs inside the caller's project (stdio, launched by
+   * the MCP client) and may read or write files there. False when hosted over
+   * HTTP: the server's own disk is not the caller's codebase, so local-file
+   * tools refuse. Absent means local.
+   */
+  localFilesystem?: boolean;
 }
 
 export interface ToolDefinition<S extends ZodTypeAny = ZodTypeAny> {

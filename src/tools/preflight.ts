@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { assertLocalFilesystem, confinePath, confineReadableFile } from '../fsguard.js';
 import { z } from 'zod';
 import { gate, preflight, type PreflightManifest } from '../preflight.js';
 import { deriveFromLive, deriveFromSpec, seedsFromRegistry, type Seed } from '../preflight/derive.mjs';
@@ -64,17 +66,31 @@ const ManifestInput = z.object({
 async function resolveManifest(
   client: SwfteClient,
   input: { manifest?: unknown; manifestPath?: string },
-  fallbackSeed?: Seed
+  fallbackSeed?: Seed,
+  localFilesystem?: boolean
 ): Promise<PreflightManifest> {
-  if (input.manifest) return input.manifest as PreflightManifest;
+  if (input.manifest) return confineSourceDirs(input.manifest as PreflightManifest, localFilesystem);
   if (input.manifestPath) {
-    const m = JSON.parse(readFileSync(input.manifestPath, 'utf8')) as PreflightManifest;
+    assertLocalFilesystem(localFilesystem, 'manifestPath', 'Pass the manifest inline as `manifest` instead.');
+    const file = confineReadableFile(input.manifestPath);
+    const m = JSON.parse(readFileSync(file, 'utf8')) as PreflightManifest;
     // `sourceDirs` are relative to the manifest's own directory, the same as the CLI resolves them.
-    if (!m.$dir) m.$dir = m.baseDir ?? input.manifestPath.replace(/\/[^/]+$/, '');
-    return m;
+    if (!m.$dir) m.$dir = m.baseDir ?? dirname(file);
+    return confineSourceDirs(m, localFilesystem);
   }
   if (fallbackSeed) return withTransport(client, () => deriveFromLive([fallbackSeed]));
   throw new Error('Pass manifest, manifestPath, or an id to derive from.');
+}
+
+/**
+ * `sourceDirs` are read from disk by the snapshot (joined onto `$dir`), so each
+ * one is confined exactly as the snapshot will resolve it, and refused hosted.
+ */
+function confineSourceDirs(m: PreflightManifest, localFilesystem?: boolean): PreflightManifest {
+  if (!m.sourceDirs?.length) return m;
+  assertLocalFilesystem(localFilesystem, 'manifest.sourceDirs', 'Omit sourceDirs; the operator-source rules then report SKIP.');
+  for (const d of m.sourceDirs) confinePath(join(m.$dir ?? '.', d));
+  return m;
 }
 
 /** Lend the vendored client this server's credential for the duration of one call. */
@@ -101,11 +117,12 @@ export const preflightTools: ToolDefinition[] = [
       workflowId: z.string().optional().describe('Derive a manifest from this workflow when none is given.'),
       executionsPerWorkflow: z.number().int().min(0).max(10).optional().describe('How many recent runs to read per workflow. Default 3.'),
     }),
-    execute: async (input, { client }) => {
+    execute: async (input, { client, localFilesystem }) => {
       const manifest = await resolveManifest(
         client,
         input,
-        input.workflowId ? (['workflow', input.workflowId] as Seed) : undefined
+        input.workflowId ? (['workflow', input.workflowId] as Seed) : undefined,
+        localFilesystem
       );
       return preflight(client, manifest, { executionsPerWorkflow: input.executionsPerWorkflow });
     },
@@ -135,8 +152,13 @@ export const preflightTools: ToolDefinition[] = [
       baseDir: z.string().optional(),
       sourceDirs: z.array(z.string()).optional(),
     }),
-    execute: async (input, { client }) => {
-      if (input.specPath) return deriveFromSpec(input.specPath);
+    execute: async (input, { client, localFilesystem }) => {
+      for (const [label, p] of [['specPath', input.specPath], ['statePath', input.statePath]] as const) {
+        if (p === undefined) continue;
+        assertLocalFilesystem(localFilesystem, label, 'Pass seeds instead.');
+        confineReadableFile(p);
+      }
+      if (input.specPath) return deriveFromSpec(confineReadableFile(input.specPath));
       return withTransport(client, async () => {
         const seeds: Seed[] = (input.seeds ?? []).map((s: string) => {
           const [kind, ...rest] = s.split(':');
@@ -145,7 +167,7 @@ export const preflightTools: ToolDefinition[] = [
         let unresolved: string[] = [];
         let source = 'live';
         if (input.statePath) {
-          const r = await seedsFromRegistry(input.statePath);
+          const r = await seedsFromRegistry(confineReadableFile(input.statePath));
           seeds.push(...r.seeds);
           unresolved = r.unresolved;
           source = `registry:${input.statePath}`;
@@ -185,7 +207,7 @@ export const preflightTools: ToolDefinition[] = [
       forceReason: z.string().optional().describe('Why the override is justified. Recorded verbatim.'),
       skipPreflight: z.boolean().optional().describe('Do not gate at all. Distinct from force: this produces no evidence, and the result says so.'),
     }),
-    execute: async (input, { client }) => {
+    execute: async (input, { client, localFilesystem }) => {
       const doPublish = async () =>
         client.request({
           method: 'POST',
@@ -208,7 +230,7 @@ export const preflightTools: ToolDefinition[] = [
         };
       }
 
-      const manifest = await resolveManifest(client, input, ['workflow', input.workflowId] as Seed);
+      const manifest = await resolveManifest(client, input, ['workflow', input.workflowId] as Seed, localFilesystem);
       const verdict = await gate(client, manifest, { force: input.force, forceReason: input.forceReason });
 
       if (!verdict.allowed) {

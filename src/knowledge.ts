@@ -21,9 +21,8 @@
  * Only the second is worth showing anyone.
  */
 
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { assertLocalFilesystem, assertSafeName, confineReadableFile } from './fsguard.js';
 import type { SwfteClient } from './client.js';
 import { SwfteApiError } from './client.js';
 import type { VerifyCheck } from './kinds/_adapter.js';
@@ -36,10 +35,11 @@ const RAG_SEARCH = '/v2/rag/search';
 const TERMINAL = new Set(['COMPLETED', 'ERROR', 'FAILED', 'CANCELLED', 'PAUSED']);
 
 export interface KnowledgeDocInput {
+  /** Display name. Never used as a filesystem path; separators and `..` are refused. */
   name: string;
-  /** Inline text. Written to a temp file, because the API only takes a fileId. */
+  /** Inline text. Uploaded as a file's bytes, because the API only takes a fileId. */
   text?: string;
-  /** Or an existing local file. */
+  /** Or a local file under the working directory (stdio only; refused on a hosted server). */
   path?: string;
   mimeType?: string;
 }
@@ -90,52 +90,63 @@ function docArray(body: any): any[] {
 }
 
 /**
+ * Check every document before anything is created, so a refused path never
+ * leaves an empty dataset behind.
+ *
+ * The name is a display name only: it goes into the upload form and nowhere
+ * near the filesystem, and a name with separators or `..` is refused outright.
+ * A `path` is read only when the server runs locally (stdio), and only from
+ * under the working directory. Returns the confined path per document.
+ */
+export function checkKnowledgeDocs(docs: KnowledgeDocInput[], opts: KnowledgeFsOptions = {}): Array<string | undefined> {
+  return docs.map((doc) => {
+    assertSafeName(doc.name, 'Document name');
+    if (doc.path === undefined) {
+      if (typeof doc.text !== 'string' || doc.text.trim().length === 0) {
+        throw new Error(`Document "${doc.name}" has neither a path nor non-empty text.`);
+      }
+      return undefined;
+    }
+    assertLocalFilesystem(
+      opts.localFilesystem,
+      'swfte_knowledge_build documents[].path',
+      `Pass the content inline as documents[].text instead (document "${doc.name}").`
+    );
+    return confineReadableFile(doc.path);
+  });
+}
+
+export interface KnowledgeFsOptions {
+  /** False on a hosted server: document paths are refused. Default true (stdio). */
+  localFilesystem?: boolean;
+}
+
+/**
  * Upload one document's bytes and return the file id.
  *
  * The dataset document endpoint takes a fileId and nothing else — no raw text,
- * no URL — so inline text has to become a real file first. It also does not
- * validate the fileId it is handed, which is how a document ends up pointing at
- * a file that is not in the workspace.
+ * no URL — so inline text is uploaded as a file. Its bytes go straight into the
+ * form; nothing is written to disk. The endpoint also does not validate the
+ * fileId it is handed, which is how a document ends up pointing at a file that
+ * is not in the workspace.
  */
-async function uploadDoc(client: SwfteClient, doc: KnowledgeDocInput, workspaceId?: string): Promise<string> {
-  let filePath = doc.path;
-  let cleanup: string | undefined;
-
-  if (!filePath) {
-    if (typeof doc.text !== 'string' || doc.text.trim().length === 0) {
-      throw new Error(`Document "${doc.name}" has neither a path nor non-empty text.`);
-    }
-    const dir = mkdtempSync(join(tmpdir(), 'swfte-kb-'));
-    filePath = join(dir, doc.name.endsWith('.md') ? doc.name : `${doc.name}.md`);
-    writeFileSync(filePath, doc.text, 'utf8');
-    cleanup = dir;
+async function uploadDoc(client: SwfteClient, doc: KnowledgeDocInput, confinedPath: string | undefined, workspaceId?: string): Promise<string> {
+  const bytes = confinedPath
+    ? new Uint8Array(readFileSync(confinedPath))
+    : new TextEncoder().encode(doc.text ?? '');
+  if (bytes.byteLength === 0) {
+    throw new Error(`Document "${doc.name}" is zero bytes — indexing it would produce a COMPLETED document with no segments.`);
   }
 
-  try {
-    const { readFileSync } = await import('node:fs');
-    const bytes = new Uint8Array(readFileSync(filePath));
-    if (bytes.byteLength === 0) {
-      throw new Error(`Document "${doc.name}" is zero bytes — indexing it would produce a COMPLETED document with no segments.`);
-    }
+  const form = new FormData();
+  form.append('file', new Blob([bytes], { type: doc.mimeType ?? 'text/markdown' }), doc.name);
 
-    const form = new FormData();
-    form.append('file', new Blob([bytes], { type: doc.mimeType ?? 'text/markdown' }), doc.name);
-
-    const uploaded = await client.postMultipart<any>(`${FILES}/upload`, form, { workspaceId });
-    const fileId = uploaded?.id ?? uploaded?.fileId ?? uploaded?.data?.id;
-    if (!fileId) {
-      throw new Error(`Upload returned no file id: ${JSON.stringify(uploaded).slice(0, 300)}`);
-    }
-    return String(fileId);
-  } finally {
-    if (cleanup) {
-      try {
-        rmSync(cleanup, { recursive: true, force: true });
-      } catch {
-        /* temp dir cleanup is best-effort */
-      }
-    }
+  const uploaded = await client.postMultipart<any>(`${FILES}/upload`, form, { workspaceId });
+  const fileId = uploaded?.id ?? uploaded?.fileId ?? uploaded?.data?.id;
+  if (!fileId) {
+    throw new Error(`Upload returned no file id: ${JSON.stringify(uploaded).slice(0, 300)}`);
   }
+  return String(fileId);
 }
 
 /**
@@ -168,7 +179,13 @@ async function probe(
   };
 }
 
-export async function buildKnowledge(client: SwfteClient, input: BuildKnowledgeInput, onCreated?: (datasetId: string) => void): Promise<BuildKnowledgeReport> {
+export async function buildKnowledge(
+  client: SwfteClient,
+  input: BuildKnowledgeInput,
+  onCreated?: (datasetId: string) => void,
+  fsOpts: KnowledgeFsOptions = {}
+): Promise<BuildKnowledgeReport> {
+  const confinedPaths = checkKnowledgeDocs(input.documents, fsOpts);
   const checks: VerifyCheck[] = [];
   const nextActions: string[] = [];
   const waitMs = input.waitMs ?? 180_000;
@@ -198,8 +215,8 @@ export async function buildKnowledge(client: SwfteClient, input: BuildKnowledgeI
 
   // 2 — upload and attach, one document per call.
   const attached: Array<{ name: string; fileId: string }> = [];
-  for (const doc of input.documents) {
-    const fileId = await uploadDoc(client, doc, input.workspaceId);
+  for (const [i, doc] of input.documents.entries()) {
+    const fileId = await uploadDoc(client, doc, confinedPaths[i], input.workspaceId);
 
     // Confirm the uploaded file is actually in the workspace before attaching.
     // A document that points at a missing file still indexes to COMPLETED, and
