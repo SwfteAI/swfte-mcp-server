@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import { CatalogRefArg, contractHash, getContract, parseCatalogRef } from '../catalog.js';
 import { bakeArtifact, syncProject, verifyProject } from '../bake.js';
-import { ConfinedWriter, INLINE_NOTE } from '../fsguard.js';
+import { assertLocalFilesystem, ConfinedWriter, INLINE_NOTE } from '../fsguard.js';
 import { FRAMEWORKS } from '../stack.js';
 import type { ToolDefinition } from './_types.js';
 
@@ -23,7 +23,7 @@ export { LOCK_FILE } from '../lock.js';
 export { CLIENT_ENV } from '../bake.js';
 
 const LOCAL_ONLY =
-  'This tool reads swfte.json and the generated files in the project, so it needs the server running locally (stdio) ' +
+  'It reads swfte.json and the generated files in the project, so it needs the server running locally (stdio) ' +
   'inside the repository. From a hosted server, run the same check in the repo instead: `npx -p @swfte/mcp-server swfte verify` / `swfte sync`.';
 
 export const scaffoldTools: ToolDefinition[] = [
@@ -92,7 +92,7 @@ export const scaffoldTools: ToolDefinition[] = [
       force: z.boolean().optional().describe('Replace hand-edited generated clients.'),
     }),
     execute: async (input, { client, config, localFilesystem }) => {
-      if (localFilesystem === false) throw new Error(LOCAL_ONLY);
+      assertLocalFilesystem(localFilesystem, 'swfte_sync', LOCAL_ONLY);
       const writer = new ConfinedWriter({ forbidden: [config.credential] });
       return syncProject(
         { client, config, writer },
@@ -118,7 +118,7 @@ export const scaffoldTools: ToolDefinition[] = [
       'upgrades available) and the upgrade items. offline:true skips the backend.',
     inputSchema: z.object({ offline: z.boolean().optional() }),
     execute: async (input, { client, config, localFilesystem }) => {
-      if (localFilesystem === false) throw new Error(LOCAL_ONLY);
+      assertLocalFilesystem(localFilesystem, 'swfte_check_upgrades', LOCAL_ONLY);
       const writer = new ConfinedWriter({ forbidden: [config.credential] });
       const report = await verifyProject({ client, config, writer }, { offline: input.offline });
       return { ...report, verdict: report.ok ? 'SWFTE_VERIFY_OK' : report.exitCode === 2 ? 'SWFTE_VERIFY_UNCHECKED' : 'SWFTE_VERIFY_FAILED' };
