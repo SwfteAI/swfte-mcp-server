@@ -17,7 +17,7 @@ If you don't know what Swfte is, [start here](https://www.swfte.com). It's the u
 
 ## What this gives you
 
-- **230 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
+- **235 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
 - **Stdio transport** — works out of the box with Claude Desktop and Claude Code.
 - **Workspace-scoped** — set `SWFTE_WORKSPACE_ID` once, or pass `workspaceId` per call.
 - **Zero-config security** — your API key stays on the machine running the MCP server, never in the LLM context.
@@ -51,7 +51,7 @@ widget, application, or MCP server**.
   server-side page cap, read-merge-write updates where the raw PATCH would wipe
   omitted fields, retry with load-shedding detection, and typed error envelopes
   carrying the backend's own code plus a suggested action.
-- **230 tools available, 103 advertised by default**, adjustable via `SWFTE_TOOLS`.
+- **235 tools available, 103 advertised by default**, adjustable via `SWFTE_TOOLS`.
 - **Stdio transport**, multi-arch Docker image, and Zod-typed inputs published
   as JSON Schema over `tools/list`.
 
@@ -145,6 +145,7 @@ guide, [`docs/RECIPES.md`](./docs/RECIPES.md) for worked examples, and
 | `SWFTE_PAT` | one of | — | Personal access token (`pat_…`). Acts as you. |
 | `SWFTE_API_KEY` | one of | — | Workspace API key (`sk-swfte-…` / `sk_…`). |
 | `SWFTE_BASE_URL` | ⛔ | `https://api.swfte.com/agents` | Point at a local or staging backend. |
+| `SWFTE_ALLOWED_HOSTS` | ⛔ | `api.swfte.com,localhost,127.0.0.1` | CLI: hosts a `swfte.json` `baseUrl` may name before it receives the credential (`*.example.com` for subdomains). `SWFTE_BASE_URL` is always trusted. |
 | `SWFTE_WORKSPACE_ID` | ⛔ | — | API keys only; a PAT carries its own binding. |
 | `SWFTE_TOOLS` | ⛔ | curated subset | `all`, or a comma-separated group list. |
 | `SWFTE_ALLOW_DEPLOY` | ⛔ | `0` | Required, with `confirm:true`, to provision real infrastructure. |
@@ -181,7 +182,7 @@ Full endpoint→tool mapping is in [`docs/TOOLS.md`](docs/TOOLS.md). Underlying 
 
 `swfte_whoami` · `swfte_build` · `swfte_build_status` · `swfte_build_steer` ·
 `swfte_validate` · `swfte_create` · `swfte_refine` · `swfte_run` ·
-`swfte_deploy` · `swfte_verify` · `swfte_verify_batch`
+`swfte_deploy` · `swfte_verify` (`swfte_verify_batch` is in the opt-in `extras` group)
 
 Each takes a `kind`: `workflow`, `agent`, `chatflow`, `widget`, `application`,
 or `mcp-server`.
@@ -209,7 +210,7 @@ or `mcp-server`.
 | Cost control | `swfte_cost_*` | `cost` | |
 | Agent mail | `swfte_agent_mail_*` | `agent-mail` | |
 
-Advertising all 230 tools measurably degrades a model's ability to pick the
+Advertising all 235 tools measurably degrades a model's ability to pick the
 right one, so 103 are advertised by default. `SWFTE_TOOLS=all` widens it, and
 `swfte_whoami` reports which groups are live and what is hidden — nothing
 disappears silently.
@@ -379,6 +380,30 @@ jobs:
 
 From an MCP client the same code runs as `swfte_scaffold_client`, `swfte_sync`
 and `swfte_check_upgrades`.
+
+### Compliance checks on generated code
+
+`swfte verify --compliance` also sends the files swfte generated (every path in
+`swfte.json` `files`) plus any `--paths a,b` to `POST /v2/compliance/scan`, and
+exits `1` on a critical or high finding, `2` when some code could not be checked
+(an incomplete scan is never a pass). `swfte add` scans what it just wrote and
+prints the findings; they are advisory unless you pass `--strict`. Credential
+files (`.env`, keys), binaries, symlinks and files over 200 KB are never
+uploaded, and nothing outside the project directory is read. The MCP face is
+`swfte_compliance_scan_code`; `swfte_compliance_assess`,
+`swfte_get_evidence_record`, `swfte_compliance_export` and
+`swfte_compliance_history` cover artifacts. A Control Evidence Record supports
+your audit; it is not an audit opinion.
+
+### Where your credential goes
+
+The CLI sends `SWFTE_API_KEY` / `SWFTE_PAT` only to `SWFTE_BASE_URL` from the
+environment, or to the `baseUrl` in `swfte.json` when that host is allowed:
+`SWFTE_ALLOWED_HOSTS` (comma-separated, `*.example.com` for subdomains) or, by
+default, `api.swfte.com`, `localhost` and `127.0.0.1`, over https except on
+loopback. `swfte.json` is committed, so a pull request could otherwise point CI
+at another host. Any other host is refused (`swfte verify` exits `2`), and it is
+never baked into a generated client as its default.
 
 ---
 

@@ -1,6 +1,6 @@
 # Tool reference
 
-`@swfte/mcp-server` exposes **230 tools**, of which a curated **103** are
+`@swfte/mcp-server` exposes **235 tools**, of which a curated **103** are
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
 
 Tools that take a `workspaceId` only honour it for **API-key** credentials. A
@@ -40,12 +40,32 @@ this code is described in the README, "Bake it into your codebase".
 
 ### Opt-in `extras` group
 
-Three convenience variants of advertised tools sit outside the default surface
-(`SWFTE_TOOLS=…,extras` brings them back): `swfte_workflows_executions_list`
+Eight tools that an advertised tool already covers sit outside the default
+surface (`SWFTE_TOOLS=…,extras` brings them back): `swfte_workflows_executions_list`
 (same endpoint as `swfte_workflows_executions`),
 `swfte_workflows_deployment_status_simple` (a subset of
-`swfte_workflows_deployment_status`) and `swfte_deployments_count` (a subset of
-`swfte_deployments_list`).
+`swfte_workflows_deployment_status`), `swfte_deployments_count` (a subset of
+`swfte_deployments_list`), `swfte_agents_chat` (same endpoint as `swfte_run`
+with `kind:"agent"`), `swfte_connect_status` (same endpoint as
+`swfte_connect_wait`, whose first poll is immediate), `swfte_verify_batch` (a
+loop over `swfte_verify`), `swfte_workflows_validate` (covered by
+`swfte_validate` with `kind:"workflow"`) and `swfte_agents_wizard_quick`
+(covered by `swfte_build` + `swfte_create`, with a review step).
+
+## Compliance control plane (core)
+
+CONTRACT rev 7. UNAVAILABLE is reported as "not checked", never as passing. A
+Control Evidence Record supports your audit; it is not an audit opinion.
+Attesting and issuing a record need an interactive Studio session, so no tool
+does either; `swfte_compliance_assess` returns the Studio link.
+
+| Tool | Method | Path |
+|---|---|---|
+| `swfte_compliance_assess` | POST | `/v2/compliance/assess` — `{target:{kind,id}, frameworks?}`; returns summary, blocking controls, failing controls with evidence and remediation, and not-checked controls |
+| `swfte_compliance_scan_code` | POST | `/v2/compliance/scan`, batched ≤ 50 files / 600 KB; local paths and globs confined to the working directory (refused on a hosted server, where `files`/`snippet` inline work) |
+| `swfte_get_evidence_record` | GET | `/v2/compliance/evidence-records/{id}` + `/verify` + `/signing-key` (offline Ed25519 check) |
+| `swfte_compliance_export` | GET | `/v2/compliance/export?format=json\|csv` — manifest `bodySha256` / CSV hash recomputed locally |
+| `swfte_compliance_history` | GET | `/v2/compliance/controls/{controlId}/history?target=<kind>:<id>` |
 
 ## Agents — `swfte_agents_*`
 
@@ -113,7 +133,7 @@ same eleven tools cover every artifact type.
 | `swfte_run` | Execute to terminal, with per-node traces. |
 | `swfte_deploy` | Preview / deploy / teardown. **Previews by default**, and gated on preflight for workflows. |
 | `swfte_verify` | Kind-appropriate assertion sweep — "does this actually work?" |
-| `swfte_verify_batch` | The same, over up to 25 artifacts. |
+| `swfte_verify_batch` | The same, over up to 25 artifacts (opt-in `extras`). |
 | `swfte_preflight` | 28 rules over a whole solution, each a way the platform reports success while doing nothing. Read-only. |
 | `swfte_preflight_manifest` | Derive preflight's input from an id registry, a spec, or seed ids. |
 | `swfte_publish` | `POST /v2/workflows/{id}/publish`, refused unless preflight passes. |

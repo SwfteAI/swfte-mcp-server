@@ -56,9 +56,10 @@ export const TOOL_GROUPS = [
   // tool-surface budget.
   'journeys',
   'relay',
-  // Convenience variants of tools that are already advertised (same endpoint or
-  // a subset of one). Out of DEFAULT_GROUPS so they do not spend the budget
-  // twice; still reachable by name through SWFTE_TOOLS=…,extras.
+  // Convenience variants of tools that are already advertised (same endpoint, a
+  // subset of one, or superseded by an advertised tool that does strictly
+  // more). Out of DEFAULT_GROUPS so they do not spend the budget twice; still
+  // reachable by name through SWFTE_TOOLS=…,extras.
   'extras',
 ] as const;
 
@@ -67,7 +68,7 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is 230 tools, which measurably degrades a model's ability
+ * The full surface is 235 tools, which measurably degrades a model's ability
  * to pick the right one (test/tools.test.ts "the budget comment carries the measured counts" keeps
  * these two numbers true). This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
@@ -106,11 +107,23 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   // (swfte_workflows_executions_list = swfte_workflows_executions, same
   // endpoint; swfte_workflows_deployment_status_simple ⊂
   // swfte_workflows_deployment_status; swfte_deployments_count ⊂
-  // swfte_deployments_list). Measured now: 230 registered, 103 advertised
-  // against the ceiling of 103 —
-  //   core 35, workflows 17, agents 12, chatflows 12, deployments 7,
-  //   datasets 6, modules 6, connect 5, untagged 3.
-  // The next addition has no duplicate left to trade; argue the number.
+  // swfte_deployments_list). Measured at that point: 230 registered, 103
+  // advertised against the ceiling of 103.
+  //
+  // Compliance control plane (leaf-2.9, CONTRACT rev 7) added five `core`
+  // tools — compliance_assess, compliance_scan_code, get_evidence_record,
+  // compliance_export, compliance_history — and paid for them rather than
+  // raising the ceiling: five advertised tools that another advertised tool
+  // covers moved to `extras`:
+  //   swfte_agents_chat          = swfte_run {kind:"agent"} (same endpoint, plus retry)
+  //   swfte_connect_status       = swfte_connect_wait (same endpoint; its first poll is immediate)
+  //   swfte_verify_batch         = a loop over swfte_verify
+  //   swfte_workflows_validate   ⊂ swfte_validate {kind:"workflow"} (review + static graph analysis)
+  //   swfte_agents_wizard_quick  ⊂ swfte_build {kind:"agent"} + swfte_create (with a review step)
+  // Measured now: 235 registered, 103 advertised against the ceiling of 103 —
+  //   core 39, workflows 16, agents 10, chatflows 12, deployments 7,
+  //   datasets 6, modules 6, connect 4, untagged 3.
+  // The next addition has no covered tool left to trade; argue the number.
   // `journeys` and `relay` are deliberately absent, and that is a decision to
   // revisit rather than a default to inherit. The surface sits at 103 against
   // a ceiling of 103 — a ceiling that exists because a large advertised surface

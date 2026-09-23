@@ -139,7 +139,9 @@ export const verifyTools: ToolDefinition[] = [
   {
     name: 'swfte_verify_batch',
     title: 'Cross-check several artifacts',
-    group: 'core',
+    // A loop over swfte_verify, which stays advertised.
+    // Redundant with a default tool (see 'extras' in src/config.ts); opt in with SWFTE_TOOLS=…,extras.
+    group: 'extras',
     description:
       'Run swfte_verify over a list of artifacts and return one consolidated report. Use after a ' +
       'multi-artifact build session, or as a regression sweep over things you shipped earlier.',

@@ -166,6 +166,9 @@ export const connectTools: ToolDefinition[] = [
 
   {
     name: 'swfte_connect_status',
+    // Same endpoint as swfte_connect_wait, whose first poll is immediate.
+    // Redundant with a default tool (see 'extras' in src/config.ts); opt in with SWFTE_TOOLS=…,extras.
+    group: 'extras',
     title: 'Check an OAuth handshake',
     readOnly: true,
     description: 'One-shot check of a pending OAuth handshake, without waiting.',

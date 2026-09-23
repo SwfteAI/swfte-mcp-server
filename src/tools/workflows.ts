@@ -47,6 +47,9 @@ export const workflowTools: ToolDefinition[] = [
   },
   {
     name: 'swfte_workflows_validate',
+    // swfte_validate {kind:"workflow"} does strictly more (wizard review + static graph analysis).
+    // Redundant with a default tool (see 'extras' in src/config.ts); opt in with SWFTE_TOOLS=…,extras.
+    group: 'extras',
     title: 'Validate workflow JSON',
     description: 'Validate a workflow definition without persisting it.',
     inputSchema: Workspace.extend({ workflow: z.record(z.unknown()) }),

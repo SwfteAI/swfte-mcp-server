@@ -129,7 +129,7 @@ whether or not anyone uses it.
 
 > "Re-check all the workflows I built this week."
 
-`swfte_verify_batch` takes up to 25 targets and returns one consolidated report.
+`swfte_verify_batch` (opt-in: `SWFTE_TOOLS=…,extras`) takes up to 25 targets and returns one consolidated report.
 It runs **sequentially on purpose**: a parallel sweep with `run:true` would fire
 N concurrent executions at a backend that already sheds load under pressure,
 which would make the verification pass the thing that breaks.

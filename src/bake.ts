@@ -38,6 +38,7 @@ import {
 } from './codegen.js';
 import { planAdapter } from './adapters.js';
 import type { ServerConfig } from './config.js';
+import { assertLockBaseUrl } from './hosts.js';
 import type { ConfinedWriter, PlannedWrite } from './fsguard.js';
 import {
   assertAlias,
@@ -62,6 +63,8 @@ export interface BakeContext {
   client: SwfteClient;
   config: ServerConfig;
   writer: ConfinedWriter;
+  /** Environment for the credential-host allow-list (SWFTE_ALLOWED_HOSTS). Default process.env. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /* ── layout ──────────────────────────────────────────────────────────────── */
@@ -93,9 +96,13 @@ function buildSpec(
   detail: CatalogEntryDetail,
   contract: CatalogContract,
   hash: string,
-  baseUrl: string
+  baseUrl: string,
+  env: NodeJS.ProcessEnv = process.env
 ): ClientSpec {
   const r = parseCatalogRef(ref);
+  // The lock's baseUrl becomes the generated client's DEFAULT_BASE_URL, which
+  // receives the application's key at runtime: vet it like the CLI does (H1).
+  if (baseUrl) assertLockBaseUrl(baseUrl, env, config.baseUrl);
   return {
     catalogRef: r.ref,
     kind: r.kind,
@@ -180,6 +187,7 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
   // Read the lock before the network too: a conflicted lock should stop us early.
   const legacyDirs = [...new Set([pre.outDir, 'src/swfte', 'swfte'])];
   const loaded = loadLock(writer, { baseUrl: config.baseUrl, workspaceId: config.workspaceId ?? null }, { legacyDirs });
+  if (loaded.exists && loaded.lock.baseUrl) assertLockBaseUrl(loaded.lock.baseUrl, ctx.env, config.baseUrl);
 
   const { detail, contract } = await fetchBoth(client, r.ref);
   // Re-adding an artifact without options keeps its existing alias, framework and directory.
@@ -198,7 +206,7 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
   }
 
   const hashInfo = effectiveContractHash(contract);
-  const spec = buildSpec(config, r.ref, alias, detail, contract, hashInfo.hash, loaded.lock.baseUrl);
+  const spec = buildSpec(config, r.ref, alias, detail, contract, hashInfo.hash, loaded.lock.baseUrl, ctx.env);
   const clientRel = normalizeRel(`${outDir}/${clientFileName(alias, language)}`);
   const clientAbs = writer.resolve(clientRel);
   // A client this tool generated for this artifact, unedited, is ours to regenerate; anything else needs force.
@@ -562,6 +570,7 @@ export async function syncProject(ctx: BakeContext, opts: SyncOptions = {}): Pro
   const { client, config, writer } = ctx;
   const loaded = loadLock(writer, { baseUrl: config.baseUrl, workspaceId: config.workspaceId ?? null });
   if (!loaded.exists) throw new LockError(`No ${LOCK_FILE} at the project root. Run \`swfte add <catalogRef>\` first.`);
+  if (loaded.lock.baseUrl) assertLockBaseUrl(loaded.lock.baseUrl, ctx.env, config.baseUrl);
   let lock = loaded.lock;
   const wanted = opts.aliases?.length ? new Set(opts.aliases) : null;
   const targets = lock.artifacts.filter((a) => !wanted || wanted.has(a.alias));
@@ -587,7 +596,7 @@ export async function syncProject(ctx: BakeContext, opts: SyncOptions = {}): Pro
       if (!cache.has(a.catalogRef)) cache.set(a.catalogRef, fetchBoth(client, a.catalogRef));
       const { detail, contract } = await cache.get(a.catalogRef)!;
       const hashInfo = effectiveContractHash(contract);
-      const spec = buildSpec(config, a.catalogRef, a.alias, detail, contract, hashInfo.hash, lock.baseUrl);
+      const spec = buildSpec(config, a.catalogRef, a.alias, detail, contract, hashInfo.hash, lock.baseUrl, ctx.env);
       const content = render(spec, a.language);
       const current = clientFileOf(writer, a);
       if (current.error) throw new LockError(current.error);

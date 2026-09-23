@@ -231,6 +231,12 @@ describe('advertised surface', () => {
     // this: three exact duplicates of advertised tools moved to the opt-in
     // `extras` group. Measured at 103 — core 35, workflows 17, agents 12,
     // chatflows 12, deployments 7, datasets 6, modules 6, connect 5, untagged 3.
+    //
+    // The five compliance tools (CONTRACT rev 7) paid the same way: five tools
+    // another advertised tool covers (agents_chat, connect_status,
+    // verify_batch, workflows_validate, agents_wizard_quick) moved to `extras`.
+    // Measured at 103 — core 39, workflows 16, agents 10, chatflows 12,
+    // deployments 7, datasets 6, modules 6, connect 4, untagged 3.
     assert.ok(selected.length <= 103, `default surface is ${selected.length} tools`);
     assert.ok(selected.length > 40, `default surface is only ${selected.length} tools`);
   });

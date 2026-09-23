@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { CatalogRefArg, contractHash, getContract, parseCatalogRef } from '../catalog.js';
 import { bakeArtifact, syncProject, verifyProject } from '../bake.js';
 import { assertLocalFilesystem, ConfinedWriter, INLINE_NOTE } from '../fsguard.js';
+import { scanInline, scanProject, unavailableScan } from '../compliance.js';
 import { FRAMEWORKS } from '../stack.js';
 import type { ToolDefinition } from './_types.js';
 
@@ -46,6 +47,7 @@ export const scaffoldTools: ToolDefinition[] = [
       targetDir: z.string().min(1).optional().describe('Directory for the client, relative to the project root. Default by framework (lib/swfte, src/swfte, app/swfte, swfte).'),
       alias: z.string().optional().describe('Stable local name (lowercase, dashes). Default: the artifact name in kebab-case. Symbols and the route path derive from it.'),
       force: z.boolean().optional().describe('Replace existing files whose content differs. Default false.'),
+      complianceScan: z.boolean().optional().describe('Scan the written code with POST /v2/compliance/scan (advisory). Default true.'),
     }),
     execute: async (input, { client, config, localFilesystem }) => {
       const writer = new ConfinedWriter({ forbidden: [config.credential], inline: localFilesystem === false });
@@ -58,9 +60,23 @@ export const scaffoldTools: ToolDefinition[] = [
         alias: input.alias,
         force: input.force,
       });
+      // Scan what was just written (code only), like `swfte add`. Advisory: a
+      // finding or a scan that could not run never undoes the write.
+      const code = res.files.filter((f) => f.action !== 'unchanged' && f.path !== 'swfte.json' && !/(^|\/)\.env[^/]*$/.test(f.path));
+      let complianceScan = null;
+      if (input.complianceScan !== false && code.length) {
+        try {
+          complianceScan = writer.inline
+            ? await scanInline(client, code.map((f) => ({ path: f.path, content: f.content ?? '' })))
+            : await scanProject(client, writer.root, code.map((f) => f.path));
+        } catch (err) {
+          complianceScan = unavailableScan(err instanceof Error ? err.message : String(err));
+        }
+      }
       return {
         ...res,
         ...(writer.inline ? { inline: true, note: INLINE_NOTE } : {}),
+        complianceScan,
         nextSteps: [
           'Set SWFTE_API_KEY in your real (uncommitted) env — .env.example only names it.',
           ...(res.framework === 'nextjs' || res.framework === 'express' || res.framework === 'fastapi'
