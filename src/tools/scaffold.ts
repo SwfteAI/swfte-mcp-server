@@ -19,6 +19,7 @@ import { bakeArtifact, syncProject, verifyProject } from '../bake.js';
 import { assertLocalFilesystem, ConfinedWriter, INLINE_NOTE } from '../fsguard.js';
 import { scanInline, scanProject, unavailableScan } from '../compliance.js';
 import { FRAMEWORKS } from '../stack.js';
+import { emitTelemetry } from '../telemetry.js';
 import type { ToolDefinition } from './_types.js';
 
 export { LOCK_FILE } from '../lock.js';
@@ -63,6 +64,8 @@ export const scaffoldTools: ToolDefinition[] = [
         force: input.force,
         pin: input.pin,
       });
+      // Counts only: this codebase is now bound to the hosted artifact. No path, framework or code.
+      emitTelemetry({ client, config }, { event: 'scaffold', catalogRef: r.ref });
       // Scan what was just written (code only), like `swfte add`. Advisory: a
       // finding or a scan that could not run never undoes the write.
       const code = res.files.filter((f) => f.action !== 'unchanged' && f.path !== 'swfte.json' && !/(^|\/)\.env[^/]*$/.test(f.path));

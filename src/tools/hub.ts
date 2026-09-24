@@ -15,6 +15,7 @@ import { SwfteApiError } from '../client.js';
 import { CatalogRefArg, ENVIRONMENTS, catalogPath, parseCatalogRef } from '../catalog.js';
 import { presentAction, type ActionRequest } from '../actions.js';
 import { detectStack, type StackDetection } from '../stack.js';
+import { emitTelemetry } from '../telemetry.js';
 import type { ToolDefinition } from './_types.js';
 
 const StackArg = z
@@ -148,7 +149,7 @@ export const hubTools: ToolDefinition[] = [
       intendedPurpose: z.string().min(3).max(1000).optional().describe('The user\'s own words for what they will use it for (human-declared, recorded with the acknowledgement).'),
       annexIII: z.string().max(200).optional().describe('User-declared Annex III category, "none" or "unsure". Optional.'),
     }),
-    execute: async (input, { client, localFilesystem }) => {
+    execute: async (input, { client, config, localFilesystem }) => {
       const r = parseCatalogRef(input.catalogRef);
       const wantsTailoring = Boolean(input.problem || input.notes || input.stack?.length);
       const { stack, source, detection } = input.problem || input.stack?.length ? resolveStack(input.stack, localFilesystem !== false) : { stack: [], source: 'none' as const, detection: null };
@@ -190,6 +191,8 @@ export const hubTools: ToolDefinition[] = [
       }
 
       const newRef = res.catalogRef ?? (res.kind && res.id ? `${res.kind}:${res.id}` : null);
+      // Counts only. The server records the adopt itself; this names the channel (MCP).
+      emitTelemetry({ client, config }, { event: 'adopt', catalogRef: newRef });
       const needsInput = Array.isArray(res.needsInput) ? res.needsInput : [];
       const providers = [...new Set([...(Array.isArray(res.missingConnections) ? res.missingConnections : []), ...providersIn(needsInput)])];
       const deployAction = res.deployAction ? presentAction(res.deployAction) : null;

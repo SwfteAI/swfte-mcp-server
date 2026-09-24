@@ -25,7 +25,8 @@ import { isUntyped, PyTypes, tsType } from '../src/codegen.js';
 import { catalogRefFromUri } from '../src/resources.js';
 
 const CREDENTIAL = 'pat_supersecretcredential123';
-const config = () => loadConfig({ SWFTE_PAT: CREDENTIAL } as never);
+// Telemetry off: these suites pin each tool's own requests; test/telemetry.test.ts covers the events.
+const config = () => loadConfig({ SWFTE_PAT: CREDENTIAL, SWFTE_TELEMETRY: '0' } as never);
 
 /* ── mocked fetch ────────────────────────────────────────────────────────── */
 
@@ -196,8 +197,8 @@ describe('swfte_find_existing', () => {
     // The observed draft ranks first by relevance; the recommendation follows evidence.
     assert.equal(res.recommendation.action, 'REUSE');
     assert.equal(res.recommendation.catalogRef, 'workflow:wf_1');
-    assert.ok(res.recommendation.generationAvoided.tokens > 0);
-    assert.match(res.recommendation.generationAvoided.basis, /estimate/);
+    assert.ok(res.recommendation.generationAvoidedEstimate.tokens > 0);
+    assert.match(res.recommendation.generationAvoidedEstimate.basis, /estimate/);
     assert.equal(res.nextCursor, 'c2');
   });
 

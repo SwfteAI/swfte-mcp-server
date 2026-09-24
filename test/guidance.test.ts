@@ -6,7 +6,8 @@ import { ADAPTERS } from '../src/kinds/index.js';
 import { loadConfig } from '../src/config.js';
 import { SwfteClient, SwfteApiError } from '../src/client.js';
 
-const config = () => loadConfig({ SWFTE_PAT: 'pat_guidance_test', SWFTE_TOOLS: 'core' });
+// Telemetry off: this suite pins the build request; test/telemetry.test.ts covers the events.
+const config = () => loadConfig({ SWFTE_PAT: 'pat_guidance_test', SWFTE_TOOLS: 'core', SWFTE_TELEMETRY: '0' });
 const facts = { sharedState: false, sharedReviewUI: false, adaptiveInvestigation: false, boundedSteps: true, existingSystemOfRecord: true };
 
 test('explicit design facts distinguish products, bounded workflows and adaptive investigation', () => {

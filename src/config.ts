@@ -18,6 +18,8 @@
  *   workspace id.
  */
 
+import { telemetryEnabled } from './telemetry.js';
+
 /** Which credential family the configured secret belongs to. */
 export type CredentialKind = 'pat' | 'api-key';
 
@@ -155,6 +157,11 @@ export interface ServerConfig {
   allowDeploy: boolean;
   /** Default ceiling (ms) for tools that poll a long-running job to terminal. */
   defaultWaitMs: number;
+  /**
+   * Counts-only usage events (see `telemetry.ts`). On unless `SWFTE_TELEMETRY` is
+   * 0 / false / off / no; best effort either way — it never blocks or fails a tool.
+   */
+  telemetry: boolean;
 }
 
 const PAT_PREFIX = 'pat_';
@@ -282,5 +289,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     enabledGroups: parseGroups(env.SWFTE_TOOLS),
     allowDeploy: isTrue(env.SWFTE_ALLOW_DEPLOY),
     defaultWaitMs: parseWaitMs(env.SWFTE_DEFAULT_WAIT_MS),
+    telemetry: telemetryEnabled(env),
   };
 }

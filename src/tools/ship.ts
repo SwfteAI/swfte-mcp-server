@@ -14,6 +14,7 @@ import { requiredConnections } from '../connections.js';
 import { gate, withClientTransport } from '../preflight.js';
 import { deriveFromLive } from '../preflight/derive.mjs';
 import type { ToolDefinition } from './_types.js';
+import { emitTelemetry } from '../telemetry.js';
 import {
   DeployOptionEnum,
   DeployProviderEnum,
@@ -157,6 +158,9 @@ export const shipTools: ToolDefinition[] = [
         options: input.options,
       });
       const result = await pollToTerminal(client, adapter, sessionId, input.waitMs ?? config.defaultWaitMs);
+      // Counts only: a build happened, and which artifact it produced when it persisted one.
+      const builtId = (result as { id?: unknown }).id;
+      emitTelemetry({ client, config }, { event: 'build', catalogRef: typeof builtId === 'string' ? `${input.kind}:${builtId}` : null });
       return { ...result, reuseFirst: REUSE_FIRST_NOTE };
     },
   },

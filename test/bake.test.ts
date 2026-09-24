@@ -30,7 +30,8 @@ import { PACKAGE_VERSION } from '../src/version.js';
 import { getPrompt } from '../src/prompts.js';
 
 const CREDENTIAL = 'pat_supersecretcredential123';
-const config = () => loadConfig({ SWFTE_PAT: CREDENTIAL } as never);
+// Telemetry off: these suites pin each tool's own requests; test/telemetry.test.ts covers the events.
+const config = () => loadConfig({ SWFTE_PAT: CREDENTIAL, SWFTE_TELEMETRY: '0' } as never);
 
 /* ── mocked fetch ────────────────────────────────────────────────────────── */
 

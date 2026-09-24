@@ -151,6 +151,30 @@ guide, [`docs/RECIPES.md`](./docs/RECIPES.md) for worked examples, and
 | `SWFTE_ALLOW_DEPLOY` | ⛔ | `0` | Required, with `confirm:true`, to provision real infrastructure. |
 | `SWFTE_DEFAULT_WAIT_MS` | ⛔ | `240000` | How long build/run tools wait before returning a resumable handle. |
 | `SWFTE_DEBUG` | ⛔ | `0` | Log request lines to stderr. |
+| `SWFTE_TELEMETRY` | ⛔ | on | `0` (or `false`, `off`, `no`) sends no usage events at all. See [Telemetry](#telemetry). |
+
+### Telemetry
+
+Four tools report, to your own workspace, that they ran — so Studio's **Solution
+Hub → Insights** can show whether reuse actually happens instead of claiming it
+saves anything:
+
+| Tool | Event | Also sends |
+|---|---|---|
+| `swfte_find_existing` | `search`, then `reuse_decision` | the recommended `catalogRef` and `decision` (`reuse`, `inspect` or `build`) |
+| `swfte_build` | `build` | the built artifact's `catalogRef`, when the build persisted one |
+| `swfte_adopt` | `adopt` | the new copy's `catalogRef` |
+| `swfte_scaffold_client` | `scaffold` | the bound artifact's `catalogRef` |
+
+Each is one `POST /v2/catalog/telemetry` with exactly
+`{ event, catalogRef?, decision?, client }` (`client` is `mcp/<version>`). No
+query text, prompt, code, inputs, outputs, file paths or user ids are sent; the
+server refuses any other field. It goes to `SWFTE_BASE_URL` with the credential
+you configured and is stored against that credential's workspace.
+
+It is best effort: fire-and-forget (a tool never waits for it), one attempt with a
+short timeout and never retried, and a failure is swallowed — telemetry cannot
+fail or slow a tool. `SWFTE_TELEMETRY=0` turns it off; nothing is sent at all.
 
 ---
 
@@ -231,10 +255,14 @@ coding agent consults, and the path by which proven artifacts land in your code.
 
 **1. Reuse before you generate.** `swfte_find_existing {query}` searches the
 catalog and returns ranked matches with their evidence level, the reasons they
-matched, and a recommendation — `REUSE`, `INSPECT_BEFORE_REUSE` or `BUILD` —
-with an estimate of the generation a reuse avoids. `swfte_build` says so in its
-description and repeats it in every response. If Jev re-ranking is unavailable
-the search still answers and lists it under `degraded`.
+matched, and a recommendation — `REUSE`, `INSPECT_BEFORE_REUSE` or `BUILD`.
+A reuse recommendation carries `generationAvoidedEstimate`: a planning estimate
+for one wizard build of that kind, flagged `estimate: true` — not a measurement,
+not a saving, and never summed anywhere. What reuse actually does is measured in
+Studio → Solution Hub → Insights, from the [telemetry](#telemetry) counts.
+`swfte_build` says so in its description and repeats it in every response. If
+Jev re-ranking is unavailable the search still answers and lists it under
+`degraded`.
 
 **2. Read the context package.** `swfte_get_context {catalogRef}` returns the
 invocation contract (method, path, auth, async status path, input/output JSON
