@@ -384,7 +384,10 @@ const WF_CONTRACT = {
 function catalogRoutes() {
   route('GET', /^\/v2\/catalog\/workflow\/wf_1$/, { body: { catalogRef: 'workflow:wf_1', kind: 'workflow', id: 'wf_1', workspaceId: 'ws1', scope: 'workspace', name: 'Invoice Extractor', description: 'x', facets: [], evidence: { level: 'observed' }, updatedAt: '2026-09-21T00:00:00Z' } });
   route('GET', /^\/v2\/catalog\/workflow\/wf_1\/contract$/, { body: WF_CONTRACT });
-  route('GET', /^\/v2\/catalog\/upgrades$/, { body: { items: [] } });
+  // One item per pinned ref, as the backend answers; an empty list now means the artifact vanished (BT-N3).
+  route('GET', /^\/v2\/catalog\/upgrades$/, (req: any) => ({
+    body: { items: String(req.query.refs ?? '').split(',').filter(Boolean).map((pin: string) => ({ catalogRef: pin.slice(0, pin.lastIndexOf(':')), currentHash: pin.slice(pin.lastIndexOf(':') + 1), latestHash: pin.slice(pin.lastIndexOf(':') + 1), breaking: false, capabilityChanges: [], requiresReapproval: false })) },
+  }));
 }
 
 async function cli(args: string[], env: Record<string, string | undefined> = { SWFTE_API_KEY: CREDENTIAL }) {

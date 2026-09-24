@@ -51,6 +51,7 @@ import {
   type Lock,
   type LockArtifact,
 } from './lock.js';
+import { fixturePath } from './devserver.js';
 import { detectStack, FRAMEWORKS, languageOf, type Framework, type Language, type StackDetection } from './stack.js';
 
 export const CLIENT_ENV = [
@@ -113,6 +114,7 @@ function buildSpec(
     contract,
     contractHash: hash,
     defaultBaseUrl: baseUrl || config.baseUrl,
+    pinnedVersion: String(contract.invoke?.path ?? '').includes('/versions/') ? contract.version ?? null : null,
   };
 }
 
@@ -129,6 +131,75 @@ async function fetchBoth(client: SwfteClient, ref: string) {
   return { detail, contract };
 }
 
+/* ── version pins (CONTRACT rev 8b) ───────────────────────────────────────── */
+
+/**
+ * A pin is a *published* workflow version: `POST /v2/workflows/{id}/versions/{version}/invoke`
+ * runs that snapshot even after newer publishes, so an upstream publish never
+ * changes what adopters' code calls until `swfte upgrade` moves the pin.
+ * Only workflows have versioned invoke; other kinds stay unpinned (null).
+ */
+export function isPinnable(ref: string, pinnedVersion: string | null | undefined): pinnedVersion is string {
+  if (!pinnedVersion || parseCatalogRef(ref).kind !== 'workflow') return false;
+  // Older locks recorded the artifact's updatedAt here for information; a timestamp is not a published version.
+  return !/^\d{4}-\d{2}-\d{2}T/.test(pinnedVersion);
+}
+
+export function versionedInvokePath(id: string, version: string): string {
+  return `/v2/workflows/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/invoke`;
+}
+
+/** The contract a pinned client is generated from: same schemas, invoke path naming the version. */
+function pinContract(contract: CatalogContract, id: string, version: string): CatalogContract {
+  return { ...contract, invoke: { ...contract.invoke, path: versionedInvokePath(id, version) }, version };
+}
+
+export type PinLookup =
+  | { state: 'published'; contract: CatalogContract }
+  | { state: 'not-published'; detail: string }
+  | { state: 'gone'; detail: string }
+  | { state: 'unsupported'; detail: string };
+
+/**
+ * GET /v2/workflows/{id}/versions/{version}/schema: the contract of one pinned
+ * published version. 404 VERSION_NOT_PUBLISHED means that version is not (or no
+ * longer) published; a 404 naming the workflow means it is gone; any other 404
+ * (an older backend without the route) is "unsupported".
+ */
+export async function lookupPinnedVersion(client: SwfteClient, ref: string, version: string, fallback: CatalogContract): Promise<PinLookup> {
+  const r = parseCatalogRef(ref);
+  let body: Record<string, unknown> | undefined;
+  try {
+    body = await client.request<Record<string, unknown>>({
+      method: 'GET',
+      path: `/v2/workflows/${encodeURIComponent(r.id)}/versions/${encodeURIComponent(version)}/schema`,
+    });
+  } catch (err) {
+    if (err instanceof SwfteApiError && err.status === 404) {
+      if (err.code === 'VERSION_NOT_PUBLISHED') return { state: 'not-published', detail: `version ${version} of ${ref} is not published` };
+      if (/WORKFLOW_NOT_FOUND|^NOT_FOUND$/.test(err.code)) return { state: 'gone', detail: `${ref} was not found` };
+      return { state: 'unsupported', detail: `this Swfte backend cannot serve pinned versions (${err.code})` };
+    }
+    throw err;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error(`Swfte's pinned-version schema for ${ref}@${version} was not a JSON object.`);
+  // Never substitute the latest contract's schemas for a pinned version's: that would type the client for the wrong version.
+  if (!('inputSchema' in body) || !('outputSchema' in body)) return { state: 'unsupported', detail: `Swfte returned no schemas for ${ref}@${version}` };
+  const inv = body.invoke && typeof body.invoke === 'object' ? (body.invoke as CatalogContract['invoke']) : null;
+  const pinned = pinContract(
+    {
+      ...fallback,
+      inputSchema: (body.inputSchema as CatalogContract['inputSchema']) ?? fallback.inputSchema,
+      outputSchema: (body.outputSchema as CatalogContract['outputSchema']) ?? fallback.outputSchema,
+      contractHash: null,
+    },
+    r.id,
+    version
+  );
+  if (inv && typeof inv.path === 'string' && inv.path.includes('/versions/')) pinned.invoke = { ...pinned.invoke, ...inv };
+  return { state: 'published', contract: pinned };
+}
+
 /* ── add ─────────────────────────────────────────────────────────────────── */
 
 export interface BakeInput {
@@ -139,6 +210,8 @@ export interface BakeInput {
   outDir?: string;
   alias?: string;
   force?: boolean;
+  /** Pin the current published version (default true; workflows only). false: the client calls /invoke (latest published). */
+  pin?: boolean;
 }
 
 export interface BakeResult {
@@ -154,6 +227,8 @@ export interface BakeResult {
   contractHashWarning?: string;
   contractChanged?: { from: string; to: string; note: string };
   pinnedVersion: string | null;
+  /** Why the artifact was left unpinned, when it could have been pinned. */
+  pinNote?: string;
   lock: { path: string; migrated: boolean; legacySources: string[]; note?: string };
   usage: string;
   evidenceLevel: string;
@@ -173,6 +248,31 @@ function planTarget(writer: ConfinedWriter, input: BakeInput, fallbackName: stri
   writer.resolve(outDir); // confinement check, before any request
   const alias = input.alias ? assertAlias(input.alias) : fallbackName ? assertAlias(kebab(fallbackName, 'artifact').slice(0, 63).replace(/-+$/, '')) : null;
   return { detection, framework, language, outDir, alias };
+}
+
+/** What `swfte add` pins: the current published version when there is one (workflows only). */
+async function resolvePin(
+  client: SwfteClient,
+  ref: string,
+  contract: CatalogContract,
+  wanted: boolean
+): Promise<{ pinnedVersion: string | null; contract: CatalogContract; note?: string }> {
+  if (parseCatalogRef(ref).kind !== 'workflow') return { pinnedVersion: null, contract };
+  if (!wanted) return { pinnedVersion: null, contract, note: 'Unpinned (--no-pin): the client calls /invoke, so every new publish reaches this code immediately.' };
+  const v = contract.version ?? null;
+  const unpublished = `${ref} has no published version to pin yet, so the client calls /invoke (the latest published version). Publish it, then \`swfte upgrade\` pins it.`;
+  if (!isPinnable(ref, v)) return { pinnedVersion: null, contract, note: unpublished };
+  const found = await lookupPinnedVersion(client, ref, v, contract);
+  switch (found.state) {
+    case 'published':
+      return { pinnedVersion: v, contract: found.contract };
+    case 'not-published':
+      return { pinnedVersion: null, contract, note: unpublished };
+    case 'unsupported':
+      return { pinnedVersion: null, contract, note: `Left unpinned: ${found.detail}. The client calls /invoke.` };
+    case 'gone':
+      throw new Error(`${found.detail}; nothing to pin.`);
+  }
 }
 
 export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<BakeResult> {
@@ -206,7 +306,10 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
   }
 
   const hashInfo = effectiveContractHash(contract);
-  const spec = buildSpec(config, r.ref, alias, detail, contract, hashInfo.hash, loaded.lock.baseUrl, ctx.env);
+  // The lock keeps the catalog contract's hash (what /v2/catalog/upgrades compares); the client is generated
+  // from the pinned version's contract, whose invoke path names that version.
+  const pin = await resolvePin(client, r.ref, contract, input.pin !== false);
+  const spec = buildSpec(config, r.ref, alias, detail, pin.contract, hashInfo.hash, loaded.lock.baseUrl, ctx.env);
   const clientRel = normalizeRel(`${outDir}/${clientFileName(alias, language)}`);
   const clientAbs = writer.resolve(clientRel);
   // A client this tool generated for this artifact, unedited, is ours to regenerate; anything else needs force.
@@ -238,7 +341,7 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
   const env = writer.mergeEnv(writer.resolve('.env.example'), CLIENT_ENV, { header: 'Swfte — read by generated clients (swfte add)' });
 
   const previousFiles = loaded.lock.artifacts.find((a) => a.alias === alias && a.language === language)?.files ?? [];
-  const pinnedVersion = contract.version ?? detail.updatedAt ?? null;
+  const pinnedVersion = pin.pinnedVersion;
   const { lock, previous } = upsertArtifact(loaded.lock, {
     catalogRef: r.ref,
     alias,
@@ -269,6 +372,7 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
       ? { contractChanged: { from: previous!.contractHash, to: hashInfo.hash, note: 'The contract moved since the last add; review call sites against the regenerated types.' } }
       : {}),
     pinnedVersion,
+    ...(pin.note ? { pinNote: pin.note } : {}),
     lock: {
       path: LOCK_FILE,
       migrated: loaded.migrated,
@@ -302,34 +406,78 @@ export interface UpgradeItem {
   summary: string | null;
   capabilityChanges: string[];
   requiresReapproval: boolean;
+  /** The pinned ref no longer resolves (deleted, moved out of the workspace). */
+  vanished: boolean;
 }
 
-/** GET /v2/catalog/upgrades?refs=<catalogRef:contractHash>,… — batched so a big lock never builds an oversized URL. */
+/** The upgrades answer could not be trusted: truncated, not JSON, or not the documented shape. */
+export class UpgradesUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UpgradesUnavailableError';
+  }
+}
+
+/**
+ * A boolean flag from the upgrades answer, read fail-closed (BT-N10): only an
+ * explicit false (false, "false", 0, "0", "no", null/absent) is false. `"true"`,
+ * `1` and anything unrecognised are true — for "breaking" and
+ * "requiresReapproval" a guess must hold the change, not wave it through.
+ */
+export function flagOf(v: unknown): boolean {
+  if (v === undefined || v === null || v === false || v === 0) return false;
+  if (typeof v === 'string' && /^\s*(false|0|no|off|)\s*$/i.test(v)) return false;
+  return true;
+}
+
+/** Backend verdict that the pinned ref no longer resolves for this workspace (deleted, moved, never visible). */
+function isVanished(it: Record<string, unknown>): boolean {
+  if (flagOf(it.notFound) || flagOf(it.vanished)) return true;
+  const status = String(it.status ?? '').toLowerCase();
+  if (status === 'not_found' || status === 'gone' || status === '404') return true;
+  return it.latestHash == null && /^\s*(not found|not a catalogref|gone|deleted)\b/i.test(String(it.summary ?? ''));
+}
+
+/**
+ * GET /v2/catalog/upgrades?refs=<catalogRef:contractHash>,… — batched so a big lock never builds an oversized URL.
+ *
+ * The answer is validated, not trusted (BT-N2): a 200 whose body is truncated,
+ * not JSON, or not `{ items: [{ catalogRef, … }] }` throws
+ * UpgradesUnavailableError, so a proxy that cuts the response short turns the
+ * gate "could not check", never green.
+ */
 export async function fetchUpgrades(client: SwfteClient, pins: Array<{ catalogRef: string; contractHash: string }>): Promise<Map<string, UpgradeItem>> {
   const out = new Map<string, UpgradeItem>();
   const unique = [...new Map(pins.map((p) => [`${p.catalogRef}:${p.contractHash}`, p])).values()];
   for (let i = 0; i < unique.length; i += 25) {
     const chunk = unique.slice(i, i + 25);
-    const res = await client.request<{ items?: unknown[] }>({
+    const res: unknown = await client.request<unknown>({
       method: 'GET',
       path: '/v2/catalog/upgrades',
       query: { refs: chunk.map((p) => `${p.catalogRef}:${p.contractHash}`).join(',') },
     });
-    for (const raw of Array.isArray(res?.items) ? res!.items : []) {
-      if (!raw || typeof raw !== 'object') continue;
+    if (!res || typeof res !== 'object' || Array.isArray(res)) {
+      const shown = typeof res === 'string' ? `unparseable text "${res.slice(0, 60)}${res.length > 60 ? '…' : ''}"` : JSON.stringify(res ?? null);
+      throw new UpgradesUnavailableError(`Swfte's upgrades answer was not a JSON object (got ${shown}); it may have been truncated.`);
+    }
+    const items = (res as { items?: unknown }).items;
+    if (!Array.isArray(items)) throw new UpgradesUnavailableError("Swfte's upgrades answer has no items array; it may have been truncated.");
+    for (const raw of items) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new UpgradesUnavailableError("Swfte's upgrades answer holds an item that is not an object.");
       const it = raw as Record<string, unknown>;
-      const ref = String(it.catalogRef ?? '');
-      if (!ref) continue;
+      const ref = typeof it.catalogRef === 'string' ? it.catalogRef.trim() : '';
+      if (!ref) throw new UpgradesUnavailableError("Swfte's upgrades answer holds an item without a catalogRef.");
       out.set(ref, {
         catalogRef: ref,
         currentHash: it.currentHash == null ? null : String(it.currentHash),
         latestHash: it.latestHash == null ? null : String(it.latestHash),
-        breaking: it.breaking === true,
+        breaking: flagOf(it.breaking),
         latestVersion: it.latestVersion == null ? null : String(it.latestVersion),
         evidenceLevel: it.evidenceLevel == null ? null : String(it.evidenceLevel),
         summary: it.summary == null ? null : String(it.summary),
         capabilityChanges: Array.isArray(it.capabilityChanges) ? it.capabilityChanges.map(String) : [],
-        requiresReapproval: it.requiresReapproval === true,
+        requiresReapproval: flagOf(it.requiresReapproval),
+        vanished: isVanished(it),
       });
     }
   }
@@ -338,7 +486,7 @@ export async function fetchUpgrades(client: SwfteClient, pins: Array<{ catalogRe
 
 /* ── verify ──────────────────────────────────────────────────────────────── */
 
-export type ProblemKind = 'drift' | 'edited' | 'missing' | 'breaking' | 'reapproval' | 'lock' | 'unreachable';
+export type ProblemKind = 'drift' | 'edited' | 'missing' | 'breaking' | 'reapproval' | 'vanished' | 'lock' | 'unreachable';
 
 export interface VerifyProblem {
   kind: ProblemKind;
@@ -483,8 +631,15 @@ export async function verifyProject(
           const u = map.get(a.catalogRef);
           const aliases = pinned.filter((x) => x.catalogRef === a.catalogRef).map((x) => x.alias);
           const alias = [...new Set(aliases)].join(',');
-          if (!u) {
-            warnings.push(`Swfte returned no upgrade information for ${a.catalogRef}; it may have been deleted or moved out of this workspace.`);
+          if (!u || u.vanished) {
+            // BT-N3: a pin whose artifact is gone is broken code in waiting, not a warning.
+            problems.push({
+              kind: 'vanished',
+              alias,
+              catalogRef: a.catalogRef,
+              detail: `${a.catalogRef} is no longer available to this workspace (${u ? u.summary ?? 'not found' : 'Swfte returned nothing for it'}): it was deleted, unpublished or moved out of the workspace, so the code calling it will fail.`,
+              fix: `Check the artifact in Studio and restore or re-share it; or re-point the code (\`swfte add <kind>:<id> --alias ${aliases[0]} --force\`); or remove it from swfte.json.`,
+            });
             continue;
           }
           const moved = u.latestHash && !sameHash(u.latestHash, a.contractHash);
@@ -515,6 +670,36 @@ export async function verifyProject(
           err instanceof SwfteApiError ? `${err.status} ${err.code}: ${err.message}` : err instanceof Error ? err.message : String(err);
         problems.push({ kind: 'unreachable', alias: null, catalogRef: null, detail: `Could not check upgrades: ${detail}`, fix: 'Retry, or pass --offline to check local drift only.' });
       }
+      // Pinned versions: the version the code calls must still be published (BT-N3). One lookup per ref@version.
+      const vanished = new Set(problems.filter((p) => p.kind === 'vanished').map((p) => p.catalogRef));
+      const pins = new Map<string, LockArtifact[]>();
+      for (const a of pinned) {
+        if (!isPinnable(a.catalogRef, a.pinnedVersion) || vanished.has(a.catalogRef)) continue;
+        const k = `${a.catalogRef}@${a.pinnedVersion}`;
+        pins.set(k, [...(pins.get(k) ?? []), a]);
+      }
+      for (const group of pins.values()) {
+        const a = group[0]!;
+        const alias = [...new Set(group.map((x) => x.alias))].join(',');
+        try {
+          const found = await lookupPinnedVersion(ctx.client, a.catalogRef, a.pinnedVersion!, { catalogRef: a.catalogRef, invoke: { method: 'POST', path: '', auth: 'api_key', async: true, statusPath: null }, inputSchema: {}, outputSchema: {} });
+          if (found.state === 'not-published' || found.state === 'gone') {
+            problems.push({
+              kind: 'vanished',
+              alias,
+              catalogRef: a.catalogRef,
+              detail: `The pinned version the code calls is gone: ${found.detail}. Calls to it now fail (404).`,
+              fix: `Re-publish that version, or move the pin: \`swfte upgrade ${group[0]!.alias}\`.`,
+            });
+          } else if (found.state === 'unsupported') {
+            warnings.push(`${a.catalogRef}: could not confirm pinned version ${a.pinnedVersion} (${found.detail}).`);
+          }
+        } catch (err) {
+          unreachable = true;
+          const detail = err instanceof SwfteApiError ? `${err.status} ${err.code}: ${err.message}` : err instanceof Error ? err.message : String(err);
+          problems.push({ kind: 'unreachable', alias, catalogRef: a.catalogRef, detail: `Could not check pinned version ${a.pinnedVersion}: ${detail}`, fix: 'Retry, or pass --offline to check local drift only.' });
+        }
+      }
     }
   }
 
@@ -525,7 +710,18 @@ export async function verifyProject(
 
 /* ── sync / upgrade ──────────────────────────────────────────────────────── */
 
-export type SyncStatus = 'unchanged' | 'regenerated' | 'restored' | 'blocked-breaking' | 'blocked-reapproval' | 'blocked-edited' | 'error';
+export type SyncStatus =
+  | 'unchanged'
+  | 'regenerated'
+  | 'restored'
+  | 'blocked-breaking'
+  | 'blocked-reapproval'
+  | 'blocked-edited'
+  /** The contract moved but /v2/catalog/upgrades could not vet it (down, truncated, silent): held, pin unchanged (BT-N4). */
+  | 'blocked-unvetted'
+  /** `swfte upgrade` found no published version to move the pin to. */
+  | 'blocked-unpublished'
+  | 'error';
 
 export interface SyncEntryResult {
   alias: string;
@@ -558,6 +754,10 @@ export interface SyncOptions {
   allowBreaking?: boolean;
   /** Take capability changes that need re-approval (upgrade --accept-capability-changes). */
   acceptCapabilityChanges?: boolean;
+  /** Move a version pin to the current published version (upgrade). Plain sync never moves a pin. */
+  movePin?: boolean;
+  /** With movePin: false leaves an unpinned workflow unpinned (upgrade --no-pin). */
+  pin?: boolean;
 }
 
 /**
@@ -596,20 +796,92 @@ export async function syncProject(ctx: BakeContext, opts: SyncOptions = {}): Pro
       if (!cache.has(a.catalogRef)) cache.set(a.catalogRef, fetchBoth(client, a.catalogRef));
       const { detail, contract } = await cache.get(a.catalogRef)!;
       const hashInfo = effectiveContractHash(contract);
-      const spec = buildSpec(config, a.catalogRef, a.alias, detail, contract, hashInfo.hash, lock.baseUrl, ctx.env);
-      const content = render(spec, a.language);
+      const moved = !sameHash(a.contractHash, hashInfo.hash);
+      const pinVersion = isPinnable(a.catalogRef, a.pinnedVersion) ? a.pinnedVersion : null;
+      const pinned = pinVersion !== null;
       const current = clientFileOf(writer, a);
       if (current.error) throw new LockError(current.error);
       const info = current.content ? inspectGenerated(current.content) : null;
-      const moved = !sameHash(a.contractHash, hashInfo.hash);
+      const edited = info?.intact === false;
+      const target = () => writer.resolve(current.exists ? current.rel : normalizeRel(`${a.outDir}/${clientFileName(a.alias, a.language)}`));
+
+      // A pinned artifact keeps calling its version however far upstream moves; only `swfte upgrade` moves
+      // the pin. Sync still restores or regenerates the client for the pinned version itself.
+      if (pinned && (!moved || !opts.movePin)) {
+        let pinnedContract: CatalogContract;
+        if (!moved) {
+          pinnedContract = pinContract(contract, parseCatalogRef(a.catalogRef).id, pinVersion!);
+        } else {
+          const found = await lookupPinnedVersion(client, a.catalogRef, pinVersion!, contract);
+          if (found.state === 'unsupported' && current.exists && !edited) {
+            // Cannot re-derive the pinned client here; the one on disk is still the pinned version's.
+            entries.push({ ...base, status: 'unchanged', to: a.contractHash, diff: null, breakingReasons: [], capabilityChanges: [], message: `Pinned to ${pinVersion}; kept as is (${found.detail}). A newer version is published; \`swfte upgrade ${a.alias}\` moves the pin.` });
+            continue;
+          }
+          if (found.state !== 'published') throw new Error(`Pinned version ${a.pinnedVersion} of ${a.catalogRef} is unavailable (${found.detail}). Run \`swfte upgrade ${a.alias}\` to move the pin.`);
+          pinnedContract = found.contract;
+        }
+        const spec = buildSpec(config, a.catalogRef, a.alias, detail, pinnedContract, a.contractHash, lock.baseUrl, ctx.env);
+        const content = render(spec, a.language);
+        const newer = moved ? ` A newer version${contract.version ? ` (${contract.version})` : ''} is published; \`swfte upgrade ${a.alias}\` moves the pin.` : '';
+        if (current.content === content) {
+          entries.push({ ...base, status: 'unchanged', to: a.contractHash, diff: null, breakingReasons: [], capabilityChanges: [], message: `Pinned to ${a.pinnedVersion}; up to date.${newer}` });
+          continue;
+        }
+        if (edited && !opts.force) {
+          entries.push({ ...base, status: 'blocked-edited', to: a.contractHash, diff: null, breakingReasons: [], capabilityChanges: [], message: `${current.rel} was edited by hand; pass force to replace it with the generated file.${newer}` });
+          continue;
+        }
+        const abs = target();
+        writer.create(abs, content, true);
+        const rel = writer.rel(abs);
+        lock = upsertArtifact(lock, { ...a, files: [...new Set([rel, ...a.files])] }).lock;
+        entries.push({
+          ...base,
+          status: current.exists ? 'regenerated' : 'restored',
+          to: a.contractHash,
+          diff: null,
+          breakingReasons: [],
+          capabilityChanges: [],
+          message: `${current.exists ? 'Regenerated' : 'Restored'} ${rel} for pinned version ${a.pinnedVersion}.${newer}`,
+        });
+        continue;
+      }
+
+      // Unpinned, or `swfte upgrade` moving the pin: the client follows the latest published contract.
+      let nextPin: string | null = null;
+      let clientContract = contract;
+      // upgrade pins the current published version (also for an artifact first added before it was published).
+      if (pinned || (opts.movePin && opts.pin !== false && parseCatalogRef(a.catalogRef).kind === 'workflow')) {
+        const v = contract.version ?? null;
+        const found = isPinnable(a.catalogRef, v) ? await lookupPinnedVersion(client, a.catalogRef, v, contract) : null;
+        if (found?.state === 'published') {
+          nextPin = v;
+          clientContract = found.contract;
+        } else if (pinned) {
+          entries.push({ ...base, status: 'blocked-unpublished', to: hashInfo.hash, diff: null, breakingReasons: [], capabilityChanges: [], message: `The latest contract of ${a.catalogRef} is not a published version${found ? ` (${found.detail})` : ''}; the pin stays at ${a.pinnedVersion}. Publish it, then rerun \`swfte upgrade ${a.alias}\`.` });
+          continue;
+        }
+      }
+      const spec = buildSpec(config, a.catalogRef, a.alias, detail, clientContract, hashInfo.hash, lock.baseUrl, ctx.env);
+      const content = render(spec, a.language);
       const oldShape = current.content ? readShape(current.content) : null;
       const diff: ShapeDiff | null = oldShape ? diffShapes(oldShape, specShape(spec)) : null;
       const u = upgrades.get(a.catalogRef);
-      const breaking = moved && (u ? u.breaking : Boolean(diff?.breaking));
+      const diffText = moved ? (diff ? describeDiff(diff) : (u?.summary ?? 'contract changed (no previous shape recorded to diff against)')) : null;
+
+      // BT-N4: a moved contract is taken only after the server vetted it. With the upgrades check down,
+      // truncated or silent about this ref, re-approval is unknown — hold it rather than re-pin past the gate.
+      if (moved && (upgradesError !== null || !u || u.vanished)) {
+        const why = upgradesError !== null ? `upgrade check unavailable: ${upgradesError}` : u?.vanished ? `Swfte reports ${a.catalogRef} ${u.summary ?? 'not found'}` : `Swfte returned no upgrade verdict for ${a.catalogRef}`;
+        entries.push({ ...base, status: 'blocked-unvetted', to: hashInfo.hash, diff: diffText, breakingReasons: [], capabilityChanges: [], message: `Contract moved but could not be vetted for breaking or capability changes (${why}). Nothing changed; rerun \`swfte sync\` when the check answers.` });
+        continue;
+      }
+      // Fail closed: breaking when either the server or the local shape diff says so.
+      const breaking = moved && (Boolean(u?.breaking) || Boolean(diff?.breaking));
       const reapproval = moved && Boolean(u?.requiresReapproval);
       const capabilityChanges = u?.capabilityChanges ?? [];
-      const breakingReasons = diff?.reasons ?? (u?.breaking ? [u.summary ?? 'server reports a breaking change'] : []);
-      const diffText = moved ? (diff ? describeDiff(diff) : (u?.summary ?? 'contract changed (no previous shape recorded to diff against)')) : null;
+      const breakingReasons = [...new Set([...(diff?.reasons ?? []), ...(u?.breaking ? [u.summary ?? 'server reports a breaking change'] : [])])];
 
       if (moved && reapproval && !opts.acceptCapabilityChanges) {
         entries.push({ ...base, status: 'blocked-reapproval', to: hashInfo.hash, diff: diffText, breakingReasons, capabilityChanges, message: `Capability changes need re-approval (${capabilityChanges.join('; ') || 'see Studio'}). Review, then \`swfte upgrade ${a.alias} --accept-capability-changes\`.` });
@@ -619,22 +891,23 @@ export async function syncProject(ctx: BakeContext, opts: SyncOptions = {}): Pro
         entries.push({ ...base, status: 'blocked-breaking', to: hashInfo.hash, diff: diffText, breakingReasons, capabilityChanges, message: `Breaking change held back (${breakingReasons.join('; ') || 'see summary'}). Run \`swfte upgrade ${a.alias}\` and fix call sites.` });
         continue;
       }
-      const edited = info?.intact === false;
       if (edited && !opts.force && (moved || current.content !== content)) {
         entries.push({ ...base, status: 'blocked-edited', to: hashInfo.hash, diff: diffText, breakingReasons, capabilityChanges, message: `${current.rel} was edited by hand; pass force to replace it with the generated file.` });
         continue;
       }
-      const abs = writer.resolve(current.exists ? current.rel : normalizeRel(`${a.outDir}/${clientFileName(a.alias, a.language)}`));
+      const abs = target();
       // The file is ours (generated marker, intact or forced), so replacing it is not an overwrite of user work.
       writer.create(abs, content, true);
       const rel = writer.rel(abs);
-      const status: SyncStatus = !current.exists ? 'restored' : moved || current.content !== content ? 'regenerated' : 'unchanged';
+      const pinMoved = nextPin !== null && nextPin !== a.pinnedVersion;
+      const status: SyncStatus = !current.exists ? 'restored' : moved || pinMoved || current.content !== content ? 'regenerated' : 'unchanged';
       lock = upsertArtifact(lock, {
         ...a,
         contractHash: hashInfo.hash,
-        pinnedVersion: contract.version ?? detail.updatedAt ?? a.pinnedVersion,
+        pinnedVersion: nextPin ?? (parseCatalogRef(a.catalogRef).kind === 'workflow' ? null : a.pinnedVersion),
         files: [...new Set([rel, ...a.files])],
       }).lock;
+      const pinText = pinMoved ? ` Pin moved ${a.pinnedVersion} → ${nextPin}.` : '';
       entries.push({
         ...base,
         status,
@@ -646,10 +919,10 @@ export async function syncProject(ctx: BakeContext, opts: SyncOptions = {}): Pro
           status === 'unchanged'
             ? 'Up to date.'
             : status === 'restored'
-              ? `Restored missing ${rel}.`
+              ? `Restored missing ${rel}.${pinText}`
               : moved
-                ? `Regenerated ${rel}: ${diffText}.${hashInfo.warning ? ` ${hashInfo.warning}` : ''}`
-                : `Regenerated ${rel} (generator output changed; contract unchanged).`,
+                ? `Regenerated ${rel}: ${diffText}.${pinText}${hashInfo.warning ? ` ${hashInfo.warning}` : ''}`
+                : `Regenerated ${rel}${pinText || ' (generator output changed; contract unchanged)'}.`,
       });
     } catch (err) {
       entries.push({ ...base, status: 'error', to: null, diff: null, breakingReasons: [], capabilityChanges: [], message: err instanceof Error ? err.message : String(err) });
@@ -666,6 +939,8 @@ export async function syncProject(ctx: BakeContext, opts: SyncOptions = {}): Pro
     `${count('blocked-breaking') ? `, ${count('blocked-breaking')} held back (breaking)` : ''}` +
     `${count('blocked-reapproval') ? `, ${count('blocked-reapproval')} held back (re-approval)` : ''}` +
     `${count('blocked-edited') ? `, ${count('blocked-edited')} held back (hand-edited)` : ''}` +
+    `${count('blocked-unvetted') ? `, ${count('blocked-unvetted')} held back (could not be vetted)` : ''}` +
+    `${count('blocked-unpublished') ? `, ${count('blocked-unpublished')} held back (not published)` : ''}` +
     `${count('error') ? `, ${count('error')} failed` : ''}` +
     `${upgradesError ? ` (upgrade check unavailable: ${upgradesError}; breaking judged from local shape diff)` : ''}` +
     `${opts.dryRun ? ' — dry run, nothing written' : ''}.`;
@@ -673,8 +948,50 @@ export async function syncProject(ctx: BakeContext, opts: SyncOptions = {}): Pro
 }
 
 /** `swfte upgrade <alias>`: sync one alias, accepting a breaking change; capability changes still need explicit acceptance. */
-export function upgradeAlias(ctx: BakeContext, alias: string, opts: { acceptCapabilityChanges?: boolean; force?: boolean; dryRun?: boolean } = {}) {
-  return syncProject(ctx, { aliases: [alias], allowBreaking: true, acceptCapabilityChanges: opts.acceptCapabilityChanges, force: opts.force, dryRun: opts.dryRun });
+export function upgradeAlias(ctx: BakeContext, alias: string, opts: { acceptCapabilityChanges?: boolean; force?: boolean; dryRun?: boolean; pin?: boolean } = {}) {
+  return syncProject(ctx, { aliases: [alias], allowBreaking: true, movePin: true, pin: opts.pin, acceptCapabilityChanges: opts.acceptCapabilityChanges, force: opts.force, dryRun: opts.dryRun });
+}
+
+/* ── dev fixtures ────────────────────────────────────────────────────────── */
+
+/**
+ * `swfte dev --record`: fetch each artifact's contract (the pinned version's,
+ * when pinned) and keep it as `.swfte/fixtures/<alias>.<ts|py>.json` — schemas
+ * and invoke block only, secret-checked like every other write — so `swfte dev`
+ * serves full examples offline afterwards.
+ */
+export async function recordFixtures(ctx: BakeContext): Promise<PlannedWrite[]> {
+  const { client, config, writer } = ctx;
+  const loaded = loadLock(writer, { baseUrl: config.baseUrl, workspaceId: config.workspaceId ?? null });
+  if (!loaded.exists) throw new LockError(`No ${LOCK_FILE} in the project root. Run \`swfte add <catalogRef>\` first.`);
+  const cache = new Map<string, Promise<CatalogContract>>();
+  for (const a of loaded.lock.artifacts) {
+    const key = `${a.catalogRef}@${a.pinnedVersion ?? ''}`;
+    if (!cache.has(key)) {
+      cache.set(
+        key,
+        (async () => {
+          const { contract } = await fetchBoth(client, a.catalogRef);
+          if (!isPinnable(a.catalogRef, a.pinnedVersion)) return contract;
+          const found = await lookupPinnedVersion(client, a.catalogRef, a.pinnedVersion, contract);
+          if (found.state !== 'published') throw new Error(`Pinned version ${a.pinnedVersion} of ${a.catalogRef}: ${found.detail}.`);
+          return found.contract;
+        })()
+      );
+    }
+    const c = await cache.get(key)!;
+    const fixture = {
+      catalogRef: a.catalogRef,
+      alias: a.alias,
+      pinnedVersion: isPinnable(a.catalogRef, a.pinnedVersion) ? a.pinnedVersion : null,
+      invoke: c.invoke,
+      inputSchema: c.inputSchema ?? null,
+      outputSchema: c.outputSchema ?? null,
+    };
+    // Fixture files are ours: regenerated on every --record.
+    writer.create(writer.resolve(fixturePath(a)), `${JSON.stringify(fixture, null, 2)}\n`, true);
+  }
+  return writer.commit();
 }
 
 export { LockError };

@@ -35,7 +35,7 @@
  * instead of writing them, with the same confinement and secret checks.
  */
 
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, constants as FS, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
@@ -231,7 +231,37 @@ export class ConfinedWriter {
     if (!this.inline && !isInside(this.realRoot, nearestExistingReal(abs))) {
       throw new PathConfinementError(`Refusing path "${p}": a symlink along it leads outside the working directory.`);
     }
+    if (!this.inline) this.assertNoSymlink(abs, p);
     return abs;
+  }
+
+  /**
+   * lstat every component below the root, the final one included, and refuse
+   * any symlink — dangling or not, pointing in or out (BT-N1). `existsSync`
+   * follows links and reports a dangling one as absent, which is how a link
+   * to a file outside the tree used to be written through. The root itself
+   * may be a symlink (macOS /tmp); only what lies under it is checked.
+   */
+  private assertNoSymlink(abs: string, shown: string = abs): void {
+    const rel = relative(this.root, abs);
+    if (!rel) return;
+    let cur = this.realRoot;
+    for (const part of rel.split(sep)) {
+      cur = join(cur, part);
+      let st;
+      try {
+        st = lstatSync(cur);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return; // the rest does not exist yet
+        throw err;
+      }
+      if (st.isSymbolicLink()) {
+        throw new PathConfinementError(
+          `Refusing path "${shown}": ${relative(this.realRoot, cur).split(sep).join('/')} is a symlink. ` +
+            'Swfte never reads or writes through a symlink in the project (it could lead outside the tree); replace it with a real file or directory.'
+        );
+      }
+    }
   }
 
   rel(abs: string): string {
@@ -239,8 +269,15 @@ export class ConfinedWriter {
   }
 
   private checkTarget(abs: string): 'missing' | 'file' {
-    if (this.inline || !existsSync(abs)) return 'missing';
-    const st = lstatSync(abs);
+    if (this.inline) return 'missing';
+    this.assertNoSymlink(abs);
+    let st;
+    try {
+      st = lstatSync(abs); // never existsSync: it follows links (BT-N1)
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
+      throw err;
+    }
     if (st.isSymbolicLink()) throw new PathConfinementError(`Refusing to write through symlink ${this.rel(abs)}.`);
     if (st.isDirectory()) throw new PathConfinementError(`${this.rel(abs)} is a directory, not a file.`);
     return 'file';
@@ -365,8 +402,17 @@ export class ConfinedWriter {
         continue;
       }
       if (op.action !== 'unchanged') {
+        // Re-check at commit: a link planted after planning must not be followed either.
+        this.assertNoSymlink(op.abs);
         mkdirSync(dirname(op.abs), { recursive: true });
-        writeFileSync(op.abs, op.content, 'utf8');
+        this.assertNoSymlink(op.abs);
+        // O_NOFOLLOW: the final component is opened only if it is not a symlink.
+        const fd = openSync(op.abs, FS.O_WRONLY | FS.O_CREAT | FS.O_TRUNC | (FS.O_NOFOLLOW ?? 0), 0o644);
+        try {
+          writeSync(fd, op.content, null, 'utf8');
+        } finally {
+          closeSync(fd);
+        }
       }
       out.push({ path: this.rel(op.abs), action: op.action, bytes: Buffer.byteLength(op.content) });
     }
@@ -395,4 +441,17 @@ export function gitignoreCovers(root: string, file: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Error text with every credential scrubbed (BT-N8): the given secrets, any
+ * secret-shaped token, and URL userinfo (`https://user:secret@host`). Messages
+ * from fetch/undici can quote the URL or a header verbatim, and CLI stderr
+ * lands in CI logs.
+ */
+export function redactSecrets(message: string, secrets: Array<string | undefined> = []): string {
+  let out = String(message);
+  for (const s of secrets) if (s && s.length >= 6) out = out.split(s).join('[redacted]');
+  out = out.replace(new RegExp(SECRET_PATTERN.source, 'g'), '[redacted]');
+  return out.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, '$1[redacted]@');
 }

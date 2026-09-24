@@ -129,6 +129,16 @@ function catalogRoutes() {
   route('GET', /^\/v2\/catalog\/workflow\/wf_1\/contract$/, () => ({ body: contracts['workflow:wf_1'] }));
   route('GET', /^\/v2\/catalog\/agent\/ag_1$/, () => ({ body: detail('agent:ag_1', 'Support Triage') }));
   route('GET', /^\/v2\/catalog\/agent\/ag_1\/contract$/, () => ({ body: contracts['agent:ag_1'] }));
+  // Published workflow versions (CONTRACT rev 8b): schemas frozen the first time a version is seen.
+  const published = new Map<string, any>();
+  route('GET', /^\/v2\/workflows\/wf_1\/versions\/[^/]+\/schema$/, (req) => {
+    const version = decodeURIComponent(req.path.split('/')[5]!);
+    const c = contracts['workflow:wf_1'];
+    if (version !== c.version && !published.has(version)) return { status: 404, body: { error: 'VERSION_NOT_PUBLISHED' } };
+    if (!published.has(version)) published.set(version, structuredClone(c));
+    const snap = published.get(version);
+    return { body: { workflowId: 'wf_1', version, published: true, inputSchema: snap.inputSchema, outputSchema: snap.outputSchema } };
+  });
   route('GET', /^\/v2\/catalog\/upgrades$/, (req) => {
     if (upgradeItems) return { body: { items: upgradeItems } };
     // Default: whatever is pinned is current.
@@ -441,6 +451,7 @@ describe('swfte add / swfte_scaffold_client', () => {
     catalogRoutes();
     assert.equal((await cli(['add', 'workflow:wf_1', '--alias', 'inv'])).code, 0);
     contracts['workflow:wf_1'].outputSchema.properties.dueDate = { type: 'string' };
+    contracts['workflow:wf_1'].version = 'v4'; // a moved contract is a new published version
     const r = await cli(['add', 'workflow:wf_1']);
     assert.equal(r.code, 0, r.err);
     assert.match(r.out, /as "inv" \(nextjs/);
@@ -673,10 +684,12 @@ describe('swfte verify', () => {
 /* ── sync / upgrade ──────────────────────────────────────────────────────── */
 
 describe('swfte sync / upgrade', () => {
+  // Unpinned: the client follows the latest published contract, so sync is what brings a moved contract in.
+  // (Pinned clients never move on sync: test/pins.test.ts.)
   async function baked() {
     pkg({ next: '15' });
     catalogRoutes();
-    assert.equal((await cli(['add', 'workflow:wf_1'])).code, 0);
+    assert.equal((await cli(['add', 'workflow:wf_1', '--no-pin'])).code, 0);
   }
 
   test('regenerates a moved non-breaking contract, prints a diff summary, keeps the adapter', async () => {
@@ -699,7 +712,8 @@ describe('swfte sync / upgrade', () => {
     await baked();
     delete contracts['workflow:wf_1'].outputSchema.properties.vendor;
     contracts['workflow:wf_1'].inputSchema.required = ['invoiceUrl', 'currency'];
-    upgradeItems = [];
+    // The server vetted the change (no re-approval) but did not flag it breaking: the local diff still holds it.
+    upgradeItems = [{ catalogRef: 'workflow:wf_1', latestHash: contractHash(contracts['workflow:wf_1']), breaking: false, capabilityChanges: [], requiresReapproval: false }];
     const r = await cli(['sync']);
     assert.match(r.out, /held back \(breaking\)/);
     assert.match(r.out, /output "vendor" removed/);

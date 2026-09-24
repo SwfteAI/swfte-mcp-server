@@ -352,7 +352,9 @@ describe('swfte_scaffold_client', () => {
     assert.equal(lock.version, 1);
     assert.equal(lock.artifacts.length, 1);
     assert.equal(lock.artifacts[0].catalogRef, 'workflow:wf_1');
-    assert.equal(lock.artifacts[0].pinnedVersion, '2026-09-21T00:00:00Z');
+    // No published version in the contract: nothing to pin (an updatedAt timestamp is not a published version).
+    assert.equal(lock.artifacts[0].pinnedVersion, null);
+    assert.match(res.pinNote, /no published version to pin/);
     assert.equal(lock.artifacts[0].contractHash, contractHash(WF_CONTRACT as never));
     assert.deepEqual(lock.artifacts[0].files, ['src/swfte/invoice-extractor.ts']);
   });

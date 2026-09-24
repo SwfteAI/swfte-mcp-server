@@ -286,6 +286,18 @@ export interface ClientSpec {
   defaultBaseUrl: string;
   /** Version sent in the X-Swfte-Client header. Defaults to this package's version. */
   clientVersion?: string;
+  /**
+   * Published version the client is pinned to (swfte.json `pinnedVersion`); its
+   * invoke path is then `/v2/workflows/{id}/versions/{version}/invoke`. Null: unpinned.
+   */
+  pinnedVersion?: string | null;
+}
+
+/** One comment line naming the pin, or nothing. */
+function pinComment(spec: ClientSpec, c: '//' | '#'): string {
+  if (!spec.pinnedVersion) return '';
+  const v = String(spec.pinnedVersion).replace(/[^A-Za-z0-9:_.\-+@]/g, '_').slice(0, 80);
+  return `\n${c} Pinned to published version ${v}: a newer publish upstream does not change what this client runs.\n${c} \`swfte upgrade ${String(spec.alias ?? '').replace(/[^a-z0-9-]/g, '')}\` moves the pin (after the breaking/re-approval checks).`;
 }
 
 /** Marker every generated client carries; `swfte sync` only rewrites files that have it. */
@@ -541,13 +553,15 @@ export function renderTypeScriptClient(spec: ClientSpec): string {
   return withChecksum(`// ${GENERATED_MARKER} (swfte add / swfte_scaffold_client). Do not edit by hand — run \`swfte sync\`.
 // Source of truth: Swfte Studio catalog entry ${tsComment(spec.catalogRef)}
 // Artifact: ${tsComment(spec.name)}${spec.description ? `\n// ${tsComment(spec.description)}` : ''}
-// Contract hash: ${spec.contractHash} (recorded in swfte.json; a different hash means the contract moved).
+// Contract hash: ${spec.contractHash} (recorded in swfte.json; a different hash means the contract moved).${pinComment(spec, '//')}
 //
 // ${isPublic ? 'Public endpoint: no credential is sent.' : 'Server-side only: reads SWFTE_API_KEY from the environment. Never bundle this file into browser code.'}
 // Configure via .env: SWFTE_API_KEY, SWFTE_BASE_URL, SWFTE_WORKSPACE_ID.
 
 export const CATALOG_REF = ${JSON.stringify(spec.catalogRef)};
 export const CONTRACT_HASH = ${JSON.stringify(spec.contractHash)};
+/** Published version this client runs (null: unpinned, runs the latest published version). */
+export const PINNED_VERSION: string | null = ${JSON.stringify(spec.pinnedVersion ?? null)};
 /** Identifies this generated client to Swfte (counts adopter runs; never carries payloads). */
 export const SWFTE_CLIENT = ${JSON.stringify(clientHeaderValue('typescript', spec))};
 ${shapeComment(spec, '//')}
@@ -729,7 +743,7 @@ export function renderPythonClient(spec: ClientSpec): string {
   return withChecksum(`# ${GENERATED_MARKER} (swfte add / swfte_scaffold_client). Do not edit by hand - run \`swfte sync\`.
 # Source of truth: Swfte Studio catalog entry ${pyComment(spec.catalogRef)}
 # Artifact: ${pyComment(spec.name)}${spec.description ? `\n# ${pyComment(spec.description)}` : ''}
-# Contract hash: ${spec.contractHash} (recorded in swfte.json; a different hash means the contract moved).
+# Contract hash: ${spec.contractHash} (recorded in swfte.json; a different hash means the contract moved).${pinComment(spec, '#')}
 #
 # ${isPublic ? 'Public endpoint: no credential is sent.' : 'Server-side only: reads SWFTE_API_KEY from the environment.'}
 # Configure via .env: SWFTE_API_KEY, SWFTE_BASE_URL, SWFTE_WORKSPACE_ID. Standard library only (Python 3.8+).
@@ -746,6 +760,8 @@ from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
 
 CATALOG_REF = ${pyStr(spec.catalogRef)}
 CONTRACT_HASH = ${pyStr(spec.contractHash)}
+# Published version this client runs (None: unpinned, runs the latest published version).
+PINNED_VERSION: Optional[str] = ${spec.pinnedVersion ? pyStr(String(spec.pinnedVersion)) : 'None'}
 # Identifies this generated client to Swfte (counts adopter runs; never carries payloads).
 SWFTE_CLIENT = ${pyStr(clientHeaderValue('python', spec))}
 ${shapeComment(spec, '#')}

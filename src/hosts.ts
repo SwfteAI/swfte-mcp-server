@@ -53,8 +53,9 @@ export function hostRefusalReason(url: string, env: NodeJS.ProcessEnv = process.
   try {
     u = new URL(url);
   } catch {
-    return `"${url}" is not a valid URL`;
+    return 'it is not a valid URL';
   }
+  if (u.username || u.password) return 'it contains credentials (user:password@host)';
   const host = u.hostname.toLowerCase();
   const list = allowedHosts(env);
   if (!list.some((e) => hostMatches(host, e))) {
@@ -81,7 +82,7 @@ export function assertLockBaseUrl(lockBaseUrl: string, env: NodeJS.ProcessEnv = 
   const reason = hostRefusalReason(lockBaseUrl, env);
   if (reason) {
     throw new UntrustedHostError(
-      `Refusing to use swfte.json baseUrl "${lockBaseUrl}": ${reason}. swfte.json is a committed file, so its ` +
+      `Refusing to use swfte.json baseUrl "${lockBaseUrl.replace(/\/\/[^/@\s]*@/, '//[redacted]@')}": ${reason}. swfte.json is a committed file, so its ` +
         'baseUrl is not trusted with your credential. If this host is really yours, set SWFTE_BASE_URL in the ' +
         'environment, or add the host to SWFTE_ALLOWED_HOSTS (comma-separated). Otherwise restore baseUrl in swfte.json.'
     );

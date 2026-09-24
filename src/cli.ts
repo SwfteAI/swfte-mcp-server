@@ -5,7 +5,9 @@
  *   swfte sync [--alias <name>]... [--dry-run] [--force]
  *   swfte verify [--offline] [--json] [--compliance [--paths <p,…>]]
  *                                            exit 0 in sync · 1 drift / breaking / re-approval / high finding · 2 could not check
- *   swfte upgrade <alias> [--accept-capability-changes] [--force] [--dry-run]
+ *   swfte upgrade <alias> [--accept-capability-changes] [--force] [--dry-run] [--no-pin]
+  swfte init [--base-url <url>] [--workspace <id>]
+  swfte dev [--port 4010] [--record]
  *
  * Auth from the environment: SWFTE_API_KEY (or SWFTE_PAT), SWFTE_BASE_URL, SWFTE_ALLOWED_HOSTS,
  * SWFTE_WORKSPACE_ID. Runs in the current directory (the repo root, where
@@ -13,11 +15,14 @@
  * tools run (src/bake.ts); this file only parses arguments and prints.
  */
 import { realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { bakeArtifact, syncProject, upgradeAlias, verifyProject, type SyncResult, type VerifyReport } from './bake.js';
-import { SwfteApiError, SwfteClient } from './client.js';
+import { OperationDeadlineError, SwfteApiError, SwfteClient } from './client.js';
+import { recordFixtures } from './bake.js';
+import { startDevServer } from './devserver.js';
+import { initProject } from './init.js';
 import { ConfigError, loadConfig, type ServerConfig } from './config.js';
-import { ConfinedWriter, OverwriteRefusedError, PathConfinementError } from './fsguard.js';
+import { ConfinedWriter, OverwriteRefusedError, PathConfinementError, redactSecrets } from './fsguard.js';
 import { formatScan, scanProject, unavailableScan, type ScanReport } from './compliance.js';
 import { credentialBaseUrl, UntrustedHostError } from './hosts.js';
 import { loadLock, LockError } from './lock.js';
@@ -29,6 +34,29 @@ export interface CliIO {
   err: (line: string) => void;
   env: NodeJS.ProcessEnv;
   cwd: string;
+  /** `swfte dev` runs until this resolves (default: SIGINT/SIGTERM). Tests pass their own. */
+  waitForExit?: () => Promise<void>;
+}
+
+function waitForSignal(): Promise<void> {
+  return new Promise((resolve) => {
+    process.once('SIGINT', () => resolve());
+    process.once('SIGTERM', () => resolve());
+  });
+}
+
+/**
+ * Overall time budget for one command (BT-N9): SWFTE_TIMEOUT_MS, else 60 s for
+ * verify (a CI gate must answer promptly) and 180 s for the commands that write.
+ */
+export function timeoutBudget(env: NodeJS.ProcessEnv, command: string | null): number {
+  const raw = env.SWFTE_TIMEOUT_MS?.trim();
+  if (raw) {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) throw new UsageError('SWFTE_TIMEOUT_MS must be a positive number of milliseconds.');
+    return n;
+  }
+  return command === 'verify' ? 60_000 : 180_000;
 }
 
 const USAGE = `swfte ${PACKAGE_VERSION} — bake Swfte Studio artifacts into your codebase (${PACKAGE_NAME})
@@ -42,6 +70,10 @@ Usage:
   <catalogRef>   "<kind>:<id>", e.g. workflow:wf_123 (from swfte_find_existing or Studio)
   --framework    ${FRAMEWORKS.join(' | ')} (default: detected from package.json / pyproject.toml / requirements*.txt)
   --cwd <dir>    project root holding swfte.json (default: current directory)
+  --no-pin       add/upgrade: do not pin the published version (the client calls /invoke and follows every publish).
+                 By default a workflow is pinned: its client calls /v2/workflows/{id}/versions/{version}/invoke,
+                 sync never moves the pin, and upgrade moves it after the breaking / re-approval checks.
+  --record       dev: fetch each artifact's contract into .swfte/fixtures/ first (needs a credential)
   --json         machine-readable output
   --compliance   verify: also scan the generated files (swfte.json "files") and --paths with POST /v2/compliance/scan
   --paths        extra files or directories to scan, comma-separated or repeated
@@ -63,8 +95,10 @@ interface Parsed {
   flags: Map<string, string[]>;
 }
 
-const BOOLEAN = new Set(['force', 'dry-run', 'offline', 'json', 'accept-capability-changes', 'help', 'version', 'compliance', 'strict']);
-const VALUED = new Set(['framework', 'out', 'alias', 'language', 'cwd', 'paths']);
+const BOOLEAN = new Set(['force', 'dry-run', 'offline', 'json', 'accept-capability-changes', 'help', 'version', 'compliance', 'strict', 'no-pin', 'record']);
+const VALUED = new Set(['framework', 'out', 'alias', 'language', 'cwd', 'paths', 'port', 'base-url', 'workspace']);
+/** Credentials come from the environment only: a flag would land in shell history and CI logs. */
+const CREDENTIAL_FLAGS = new Set(['token', 'api-key', 'apikey', 'pat', 'key', 'secret', 'password']);
 const SHORT: Record<string, string> = { f: 'force', h: 'help', v: 'version', C: 'cwd' };
 
 export function parseArgs(argv: string[]): Parsed {
@@ -85,6 +119,10 @@ export function parseArgs(argv: string[]): Parsed {
       continue;
     }
     if (!name) throw new UsageError(`Unknown option ${a}.`);
+    if (CREDENTIAL_FLAGS.has(name)) {
+      // The value is never echoed.
+      throw new UsageError(`--${name}: swfte never takes a credential on the command line. Set SWFTE_API_KEY (preferably a key scoped to the artifacts) in the environment or your secret store.`);
+    }
     if (BOOLEAN.has(name)) {
       if (long?.[2] !== undefined) throw new UsageError(`--${name} takes no value.`);
       push(name, 'true');
@@ -160,7 +198,7 @@ function scanExit(r: ScanReport): number {
 
 function printSync(io: CliIO, res: SyncResult): void {
   for (const e of res.entries) {
-    const mark = { unchanged: '=', regenerated: '~', restored: '+', 'blocked-breaking': '!', 'blocked-reapproval': '!', 'blocked-edited': '!', error: 'x' }[e.status];
+    const mark = { unchanged: '=', regenerated: '~', restored: '+', 'blocked-breaking': '!', 'blocked-reapproval': '!', 'blocked-edited': '!', 'blocked-unvetted': '!', 'blocked-unpublished': '!', error: 'x' }[e.status];
     io.out(`${mark} ${e.alias} (${e.language}, ${e.catalogRef}): ${e.message}`);
     if (e.diff && e.status !== 'regenerated') io.out(`    diff: ${e.diff}`);
     if (e.capabilityChanges.length) io.out(`    capability changes: ${e.capabilityChanges.join('; ')}`);
@@ -195,10 +233,13 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
   }
   const json = flag(p, 'json');
   const emit = (obj: unknown) => io.out(JSON.stringify(obj, null, 2));
+  // Everything credential-valued this run knows about; error text is scrubbed of all of it (BT-N8).
+  const secrets = [io.env.SWFTE_API_KEY, io.env.SWFTE_PAT].map((v) => v?.trim()).filter((v): v is string => Boolean(v));
 
   try {
     const root = projectRoot(io, p);
-    const needsNetwork = !(p.command === 'verify' && flag(p, 'offline'));
+    const needsNetwork =
+      p.command === 'add' || p.command === 'sync' || p.command === 'upgrade' || (p.command === 'verify' && !flag(p, 'offline')) || (p.command === 'dev' && flag(p, 'record'));
     let config: ServerConfig | null = null;
     if (needsNetwork) {
       try {
@@ -209,10 +250,15 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         // verify without a credential still checks local drift, and says it could not check the rest.
       }
     }
+    if (config) secrets.push(config.credential);
     const writer = new ConfinedWriter({ root, forbidden: config ? [config.credential] : [] });
     const client = config ? new SwfteClient(config) : null;
     const env = io.env;
 
+    // BT-N9: one overall budget per command, so a backend that accepts connections and never answers
+    // ends the run ("could not check", exit 2) instead of holding CI for minutes of retries.
+    const budget = timeoutBudget(io.env, p.command);
+    const exec = async (): Promise<number> => {
     switch (p.command) {
       case 'add': {
         const ref = p.positionals[0];
@@ -223,7 +269,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         if (language && language !== 'typescript' && language !== 'python') throw new UsageError('--language must be typescript or python.');
         const res = await bakeArtifact(
           { client: client!, config: config!, writer, env },
-          { catalogRef: ref, framework: framework as Framework | undefined, language: language as 'typescript' | 'python' | undefined, outDir: value(p, 'out'), alias: value(p, 'alias'), force: flag(p, 'force') }
+          { catalogRef: ref, framework: framework as Framework | undefined, language: language as 'typescript' | 'python' | undefined, outDir: value(p, 'out'), alias: value(p, 'alias'), force: flag(p, 'force'), pin: !flag(p, 'no-pin') }
         );
         // Scan what was just written (code only: the lock and env examples are not code).
         const written = res.files.filter((f) => f.action !== 'unchanged' && f.path !== 'swfte.json' && !/(^|\/)\.env[^/]*$/.test(f.path)).map((f) => f.path);
@@ -233,7 +279,8 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         else {
           io.out(`Added ${res.catalogRef} as "${res.alias}" (${res.framework}${res.detection ? `, detected: ${res.detection.signals[0] ?? res.detection.detected}` : ''}).`);
           for (const f of res.files) io.out(`  ${f.action.padEnd(9)} ${f.path}`);
-          if (res.contractHashWarning) io.err(`! ${res.contractHashWarning}`);
+          if (!json) io.out(res.pinnedVersion ? `Pinned to published version ${res.pinnedVersion}: the client calls it until \`swfte upgrade ${res.alias}\` moves the pin.` : `Unpinned.${res.pinNote ? ` ${res.pinNote}` : ''}`);
+        if (res.contractHashWarning) io.err(`! ${res.contractHashWarning}`);
           if (res.contractChanged) io.err(`! ${res.contractChanged.note}`);
           if (res.lock.legacySources.length) io.out(`Migrated ${res.lock.legacySources.join(', ')} into swfte.json — delete the old file(s).`);
           io.out(`Use: ${res.usage}`);
@@ -251,7 +298,8 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         const res = await syncProject({ client: client!, config: config!, writer, env }, { aliases: p.flags.get('alias'), dryRun: flag(p, 'dry-run'), force: flag(p, 'force') });
         if (json) emit(res);
         else printSync(io, res);
-        return res.entries.some((e) => e.status === 'error') ? 1 : 0;
+        // Held because the change could not be vetted (BT-N4) is "could not check": non-zero, distinct from an error.
+        return res.entries.some((e) => e.status === 'error') ? 1 : res.entries.some((e) => e.status === 'blocked-unvetted') ? 2 : 0;
       }
       case 'upgrade': {
         const alias = p.positionals[0];
@@ -259,6 +307,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         const res = await upgradeAlias({ client: client!, config: config!, writer, env }, alias, {
           acceptCapabilityChanges: flag(p, 'accept-capability-changes'),
           force: flag(p, 'force'),
+          pin: !flag(p, 'no-pin'),
           dryRun: flag(p, 'dry-run'),
         });
         if (json) emit(res);
@@ -299,31 +348,76 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         }
         return exitCode;
       }
+      case 'init': {
+        if (p.positionals.length) throw new UsageError('swfte init takes no positional arguments.');
+        const res = initProject({ root, env: io.env, baseUrl: value(p, 'base-url'), workspaceId: value(p, 'workspace'), projectName: basename(root) });
+        if (json) emit(res);
+        else {
+          io.out(`${res.lock.created ? 'Created' : 'Kept existing'} ${res.lock.path} (baseUrl ${res.lock.baseUrl}${res.lock.workspaceId ? `, workspace ${res.lock.workspaceId}` : ''}, ${res.lock.artifacts} artifact(s)).`);
+          for (const f of res.files.filter((x) => x.action !== 'unchanged')) io.out(`  ${f.action.padEnd(9)} ${f.path}`);
+          io.out(`Stack: ${res.detection.framework} (${res.detection.signals.join('; ')}).`);
+          io.out('Credential:');
+          for (const l of res.credential.advice) io.out(`  ${l}`);
+          io.out('Next:');
+          for (const l of res.nextSteps) io.out(`  - ${l}`);
+        }
+        return 0;
+      }
+      case 'dev': {
+        if (p.positionals.length) throw new UsageError('swfte dev takes no positional arguments.');
+        const portRaw = value(p, 'port') ?? '4010';
+        const port = Number(portRaw);
+        if (!Number.isInteger(port) || port < 0 || port > 65535) throw new UsageError('--port must be a port number.');
+        if (flag(p, 'record')) {
+          const rec = await recordFixtures({ client: client!, config: config!, writer });
+          for (const r of rec) io.out(`  ${r.action.padEnd(9)} ${r.path}`);
+        }
+        const server = await startDevServer({ root, port, log: (l) => io.out(l) });
+        io.out(`swfte dev: serving ${server.routes.length} route(s) for swfte.json at ${server.url} (mock data; nothing leaves this machine).`);
+        for (const r of server.routes) io.out(`  ${r.method.padEnd(4)} ${r.path}  (${r.alias}, ${r.kind}, ${r.source === 'recorded' ? 'recorded fixture' : 'from generated client'})`);
+        for (const a of server.skipped) io.err(`! ${a}: no generated client or fixture found; run \`swfte sync\`.`);
+        io.out(`Point the app at it: SWFTE_BASE_URL=${server.url} SWFTE_API_KEY=dev (any non-empty key works locally). Ctrl+C stops.`);
+        await (io.waitForExit ?? waitForSignal)();
+        await server.close();
+        return 0;
+      }
       default:
         throw new UsageError(`Unknown command "${p.command}".`);
     }
+    };
+    if (!client) return await exec();
+    try {
+      return await client.withDeadline(Date.now() + budget, exec);
+    } catch (err) {
+      if (err instanceof OperationDeadlineError) {
+        io.err(`Gave up after ${Math.round(budget / 1000)} s without an answer from Swfte (SWFTE_TIMEOUT_MS). Nothing further was written.`);
+        return 2;
+      }
+      throw err;
+    }
   } catch (err) {
+    const redact = (m: string) => redactSecrets(m, secrets);
     if (err instanceof UsageError) {
-      io.err(`${err.message}\n\n${USAGE}`);
+      io.err(`${redact(err.message)}\n\n${USAGE}`);
       return 2;
     }
     if (err instanceof UntrustedHostError) {
-      io.err(err.message);
+      io.err(redact(err.message));
       return 2;
     }
     if (err instanceof ConfigError) {
-      io.err(`Configuration: ${err.message}`);
+      io.err(`Configuration: ${redact(err.message)}`);
       return 2;
     }
     if (err instanceof SwfteApiError) {
-      io.err(`Swfte API ${err.status} ${err.code}: ${err.message}${err.suggestedAction ? `\n  ${err.suggestedAction}` : ''}`);
+      io.err(redact(`Swfte API ${err.status} ${err.code}: ${err.message}${err.suggestedAction ? `\n  ${err.suggestedAction}` : ''}`));
       return 1;
     }
     if (err instanceof OverwriteRefusedError || err instanceof PathConfinementError || err instanceof LockError) {
-      io.err(err.message);
+      io.err(redact(err.message));
       return 1;
     }
-    io.err(err instanceof Error ? err.message : String(err));
+    io.err(redact(err instanceof Error ? err.message : String(err)));
     return 1;
   }
 }

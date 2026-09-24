@@ -108,7 +108,8 @@ const NOTABLE_PY: Record<string, string> = {
 
 function readText(path: string): string | null {
   try {
-    return statSync(path).isFile() ? readFileSync(path, 'utf8') : null;
+    // Strip a UTF-8 BOM: editors on Windows write one, and JSON.parse rejects it (BT-N11).
+    return statSync(path).isFile() ? readFileSync(path, 'utf8').replace(/^\uFEFF/, '') : null;
   } catch {
     return null;
   }
@@ -131,6 +132,54 @@ const pyName = (s: string) => s.trim().toLowerCase().replace(/[-_.]+/g, '-');
  * `[tool.poetry.dependencies]` keys, Pipfile `[packages]` keys — because the
  * question is only "is fastapi in here", not a resolver.
  */
+/**
+ * The text of every array that holds requirement strings: `dependencies = [...]`
+ * anywhere, and every array under an `optional-dependencies` / `dependency-groups`
+ * table. Arrays may span lines; brackets inside quoted strings (extras like
+ * `"uvicorn[standard]"`) do not end them.
+ */
+export function pyDependencyArrays(toml: string): string[] {
+  const out: string[] = [];
+  let table = '';
+  const lines = toml.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const header = /^\s*\[\[?([^\]]+)\]\]?\s*(#.*)?$/.exec(line);
+    if (header) {
+      table = header[1]!.trim();
+      continue;
+    }
+    const m = /^\s*("?)([A-Za-z0-9_.-]+)\1\s*=\s*\[/.exec(line);
+    if (!m) continue;
+    const key = m[2]!.toLowerCase();
+    const inGroupTable = /(^|\.)(optional-dependencies|dependency-groups)$/i.test(table);
+    if (key !== 'dependencies' && key !== 'dev-dependencies' && !inGroupTable) continue;
+    // Collect up to the matching close bracket, ignoring brackets in quotes.
+    let text = line.slice(line.indexOf('[', m[0].length - 1) + 1);
+    let depth = 1;
+    let quote: string | null = null;
+    let collected = '';
+    for (let j = i; ; ) {
+      for (const ch of text) {
+        if (quote) {
+          if (ch === quote) quote = null;
+        } else if (ch === '"' || ch === "'") quote = ch;
+        else if (ch === '[') depth++;
+        else if (ch === ']' && --depth === 0) break;
+        collected += ch;
+      }
+      if (depth === 0 || ++j >= lines.length) {
+        i = j;
+        break;
+      }
+      collected += '\n';
+      text = lines[j]!;
+    }
+    out.push(collected);
+  }
+  return out;
+}
+
 export function pythonDependencies(root: string): { deps: Set<string>; files: string[] } {
   const deps = new Set<string>();
   const files: string[] = [];
@@ -156,8 +205,12 @@ export function pythonDependencies(root: string): { deps: Set<string>; files: st
   const pyproject = readText(join(root, 'pyproject.toml'));
   if (pyproject !== null) {
     files.push('pyproject.toml');
-    // Quoted requirement strings anywhere (PEP 621 dependencies / optional-dependencies arrays).
-    for (const m of pyproject.matchAll(/["']([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(?:[<>=!~;@ ]|["'])/g)) deps.add(pyName(m[1]!));
+    // Quoted requirement strings inside dependency arrays only (PEP 621 `dependencies = [...]`,
+    // `[project.optional-dependencies]` groups, PEP 735 dependency-groups) — never `keywords`,
+    // `classifiers` or any other string array that happens to name a framework (BT-N11).
+    for (const block of pyDependencyArrays(pyproject)) {
+      for (const m of block.matchAll(/["']([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(?:[<>=!~;@ ]|["'])/g)) deps.add(pyName(m[1]!));
+    }
     // Poetry / PDM tables: `name = "^1.0"` keys under a dependencies table.
     let inDeps = false;
     for (const line of pyproject.split(/\r?\n/)) {
@@ -188,9 +241,9 @@ export function pythonDependencies(root: string): { deps: Set<string>; files: st
   return { deps, files };
 }
 
-function nodeDependencies(root: string): { deps: Set<string> | null; unreadable: boolean; esm: boolean } {
+function nodeDependencies(root: string): { deps: Set<string> | null; unreadable: boolean; esm: boolean; workspaces: string[] } {
   const text = readText(join(root, 'package.json'));
-  if (text === null) return { deps: null, unreadable: false, esm: false };
+  if (text === null) return { deps: null, unreadable: false, esm: false, workspaces: [] };
   try {
     const pkg = JSON.parse(text) as Record<string, unknown>;
     const esm = pkg.type === 'module';
@@ -199,9 +252,11 @@ function nodeDependencies(root: string): { deps: Set<string> | null; unreadable:
       const block = pkg[field];
       if (block && typeof block === 'object') for (const k of Object.keys(block as object)) deps.add(k);
     }
-    return { deps, unreadable: false, esm };
+    // npm/yarn `workspaces: [...]` or yarn's `{ packages: [...] }`.
+    const ws = Array.isArray(pkg.workspaces) ? pkg.workspaces : Array.isArray((pkg.workspaces as { packages?: unknown })?.packages) ? (pkg.workspaces as { packages: unknown[] }).packages : [];
+    return { deps, unreadable: false, esm, workspaces: ws.map(String) };
   } catch {
-    return { deps: new Set(), unreadable: true, esm: false };
+    return { deps: new Set(), unreadable: true, esm: false, workspaces: [] };
   }
 }
 
@@ -216,6 +271,14 @@ export function detectStack(root: string = process.cwd()): StackDetection {
   const pythonPackage = ['app', 'src', 'api', 'backend'].find((d) => existsSync(join(root, d, '__init__.py')) || existsSync(join(root, d, 'main.py'))) ?? null;
 
   if (node.unreadable) signals.push('package.json exists but does not parse; ignoring its dependencies');
+  // A monorepo root is rarely where the app lives: say so, and how to point at the app (BT-N11).
+  const pnpmWs = readText(join(root, 'pnpm-workspace.yaml'));
+  const wsGlobs = [...node.workspaces, ...(pnpmWs ? [...pnpmWs.matchAll(/^\s*-\s*["']?([^"'\s#]+)/gm)].map((m) => m[1]!) : [])];
+  if (wsGlobs.length || pnpmWs !== null || existsSync(join(root, 'turbo.json')) || existsSync(join(root, 'nx.json'))) {
+    signals.push(
+      `monorepo root (workspaces: ${[...new Set(wsGlobs)].join(', ') || 'see pnpm-workspace.yaml / turbo.json / nx.json'}); run swfte in the app's package instead, e.g. \`swfte add <ref> --cwd apps/web\`, or pass --framework`
+    );
+  }
 
   let framework: Framework | null = null;
   let detected = '';
