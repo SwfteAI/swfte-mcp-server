@@ -54,20 +54,40 @@ function importPath(fromFile: string, toFile: string, ext: '' | '.js'): string {
 
 const HEADER_TS = (ref: string) =>
   `// Created by @swfte/mcp-server (swfte add) for ${ref}. This file is yours: \`swfte sync\` never rewrites it.\n` +
-  '// Anyone who can reach this endpoint spends your Swfte credits through it — put your own auth check where marked.\n';
+  '// Deny by default: every request gets 401 until authorize() below recognises the caller. Anyone who can reach\n' +
+  '// this endpoint spends your Swfte credits through it, so wire authorize() to your own auth before exposing it.\n';
 const HEADER_PY = (ref: string) =>
   `# Created by @swfte/mcp-server (swfte add) for ${ref}. This file is yours: \`swfte sync\` never rewrites it.\n` +
-  '# Anyone who can reach this endpoint spends your Swfte credits through it - put your own auth check where marked.\n';
+  '# Deny by default: every request gets 401 until authorize() below recognises the caller. Anyone who can reach\n' +
+  '# this endpoint spends your Swfte credits through it, so wire authorize() to your own auth before exposing it.\n';
+
+/** The authorize() hook every TypeScript adapter starts with: it refuses everyone until the app wires it. */
+const TS_AUTHORIZE = (requestType: string, example: string) => `
+/** The caller authorize() recognised. \`userId\` also owns the conversation when the artifact is an agent. */
+export interface Caller {
+  userId: string;
+}
+
+/**
+ * Who may call this route. Return the caller for an authenticated request, or null to refuse it (401).
+ * It refuses everyone until you connect it to your auth, e.g. ${example}
+ */
+export async function authorize(_request: ${requestType}): Promise<Caller | null> {
+  return null;
+}
+`;
+
+const UNAUTHORIZED = 'Unauthorized: this route refuses every request until authorize() is connected to your auth.';
 
 /** Uniform response body and HTTP status for every adapter: 200 done, 202 accepted/waiting, 502 failed. */
 const TS_RESULT_STATUS = `const httpStatus = (r: { ok: boolean; status: string }) =>
   r.ok ? 200 : r.status === 'ACCEPTED' || /WAIT|PAUSE|AWAIT/.test(r.status) ? 202 : 502;`;
 
-function tsCall(info: ClientInfo, pathParamsExpr: string, requestVar = 'request'): string {
+function tsCall(info: ClientInfo, pathParamsExpr: string): string {
   const opts = [
     ...(info.pathParams.length ? [`pathParams: ${pathParamsExpr}`] : []),
-    // Conversation owner: taken from your auth, never from the request body (a caller could name someone else's).
-    ...(info.hasUserId ? [`userId: userIdFor(${requestVar})`] : []),
+    // Conversation owner: the caller authorize() recognised, never the request body (a caller could name someone else's).
+    ...(info.hasUserId ? ['userId: caller.userId'] : []),
   ];
   return `await ${info.fn}(input${opts.length ? `, { ${opts.join(', ')} }` : ''})`;
 }
@@ -88,14 +108,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 ${TS_RESULT_STATUS}
-${info.hasUserId ? `
-/** The conversation owner. Return your authenticated user's id so each user keeps their own conversations. */
-function userIdFor(_request: unknown): string | undefined {
-  return undefined; // undefined → the client's shared default owner
-}
-` : ''}
+${TS_AUTHORIZE('Request', 'read the session cookie or verify a bearer token.')}
 export async function POST(request: Request) {
-  // Auth check goes here, e.g. verify the session and return 401 when there is none.
+  const caller = await authorize(request);
+  if (!caller) return NextResponse.json({ error: ${JSON.stringify(UNAUTHORIZED)} }, { status: 401 });
   let body: Record<string, unknown>;
   try {
     body = (await request.json()) as Record<string, unknown>;
@@ -132,21 +148,20 @@ import { Router, json, type Request, type Response } from 'express';
 import { ${info.fn}, type ${info.inputType} } from ${JSON.stringify(spec)};
 
 ${TS_RESULT_STATUS}
-${info.hasUserId ? `
-/** The conversation owner. Return your authenticated user's id so each user keeps their own conversations. */
-function userIdFor(_request: unknown): string | undefined {
-  return undefined; // undefined → the client's shared default owner
-}
-` : ''}
+${TS_AUTHORIZE('Request', 'return { userId: req.user.id } after your session or JWT middleware ran.')}
 export const ${routerName} = Router();
 ${routerName}.use(json());
 
 ${routerName}.post('/', async (req: Request, res: Response) => {
-  // Auth check goes here, e.g. reject the request when req has no authenticated user.
+  const caller = await authorize(req);
+  if (!caller) {
+    res.status(401).json({ error: ${JSON.stringify(UNAUTHORIZED)} });
+    return;
+  }
   const body: Record<string, unknown> = req.body && typeof req.body === 'object' ? req.body : {};
   const input = body as unknown as ${info.inputType};
   try {
-    const result = ${tsCall(info, params, 'req')};
+    const result = ${tsCall(info, params)};
     res
       .status(httpStatus(result))
       .json({ ok: result.ok, status: result.status, executionId: result.executionId ?? null, output: result.output ?? null${info.chat ? ', reply: result.reply ?? null' : ''} });
@@ -171,14 +186,14 @@ function fastapiRouter(a: AdapterInput): AdapterFile[] {
     'body',
     ...(info.pathParams.length ? [`{${info.pathParams.map((p) => `${JSON.stringify(p)}: request.query_params.get(${JSON.stringify(p)}, "")`).join(', ')}}`] : []),
   ];
-  // Conversation owner from your auth, never from the request body (a caller could name someone else's).
-  const userArg = info.hasUserId ? ', user_id=_user_id_for(request)' : '';
+  // Conversation owner: the caller authorize() recognised, never the request body (a caller could name someone else's).
+  const userArg = info.hasUserId ? ', user_id=caller["user_id"]' : '';
   const content = `${HEADER_PY(a.catalogRef)}# Mount it: app.include_router(router) from this module; then POST /swfte/${a.alias} with the input as JSON.
 from __future__ import annotations
 
 import functools
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional, TypedDict
 
 from fastapi import APIRouter, Body, Request
 from fastapi.concurrency import run_in_threadpool
@@ -202,14 +217,25 @@ def _http_status(result: Dict[str, Any]) -> int:
     return 502
 
 
-${info.hasUserId ? `def _user_id_for(request: Request) -> str:
-    \"\"\"The conversation owner. Return your authenticated user's id so each user keeps their own conversations.\"\"\"
-    return "swfte-client"
+class Caller(TypedDict):
+    \"\"\"The caller authorize() recognised. user_id also owns the conversation when the artifact is an agent.\"\"\"
+
+    user_id: str
 
 
-` : ''}@router.post("")
+async def authorize(request: Request) -> Optional[Caller]:
+    \"\"\"Who may call this route: the caller for an authenticated request, or None to refuse it (401).
+
+    It refuses everyone until you connect it to your auth, e.g. verify the session or bearer token on request.
+    \"\"\"
+    return None
+
+
+@router.post("")
 async def ${info.fn}_route(request: Request, body: Dict[str, Any] = Body(...)) -> JSONResponse:
-    # Auth check goes here, e.g. a FastAPI dependency that rejects anonymous requests.
+    caller = await authorize(request)
+    if caller is None:
+        return JSONResponse({"error": ${JSON.stringify(UNAUTHORIZED)}}, status_code=401)
     try:
         # The generated client is synchronous (stdlib urllib); keep it off the event loop.
         result = await run_in_threadpool(functools.partial(${call.join(', ')}${userArg}))

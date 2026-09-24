@@ -340,7 +340,9 @@ describe('swfte add / swfte_scaffold_client', () => {
     const route = read('src/app/api/invoice-extractor/route.ts');
     assert.match(route, /import \{ invokeInvoiceExtractor, type InvoiceExtractorInput \} from "\.\.\/\.\.\/\.\.\/lib\/swfte\/invoice-extractor";/);
     assert.match(route, /export async function POST\(request: Request\)/);
-    assert.match(route, /Auth check goes here/);
+    // Deny by default: the route refuses everyone until authorize() is wired (test/devpath.test.ts runs it).
+    assert.match(route, /export async function authorize\(_request: Request\): Promise<Caller \| null> \{\n  return null;/);
+    assert.match(route, /if \(!caller\) return NextResponse\.json\(\{ error: .*\}, \{ status: 401 \}\);/);
     assert.deepEqual(typecheck([join(tmp, 'src/app/api/invoice-extractor/route.ts')], NEXT_STUB), []);
     const lock = JSON.parse(read('swfte.json'));
     assert.deepEqual(Object.keys(lock), ['version', 'baseUrl', 'workspaceId', 'artifacts']);
@@ -405,7 +407,7 @@ describe('swfte add / swfte_scaffold_client', () => {
     catalogRoutes();
     assert.equal((await cli(['add', 'agent:ag_1'])).code, 0);
     const router = read('swfte/support-triage.router.ts');
-    assert.match(router, /userId: userIdFor\(req\)/);
+    assert.match(router, /userId: caller\.userId/);
     assert.doesNotMatch(router, /body\.userId/);
     assert.deepEqual(typecheck([join(tmp, 'swfte/support-triage.router.ts')], EXPRESS_STUB), []);
   });
