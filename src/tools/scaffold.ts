@@ -13,7 +13,8 @@
  * no overwrite without `force`, no secret on disk.
  */
 import { z } from 'zod';
-import { CatalogRefArg, contractHash, getContract, parseCatalogRef } from '../catalog.js';
+import { CatalogRefArg, contractHash, getContract, getEntry, parseCatalogRef } from '../catalog.js';
+import { agentEmbedHtml, EMBED_KEY_PATTERN, issueEmbedKey, publicAgentChatPath } from '../embed.js';
 import { bakeArtifact, syncProject, verifyProject } from '../bake.js';
 import { assertLocalFilesystem, ConfinedWriter, INLINE_NOTE } from '../fsguard.js';
 import { scanInline, scanProject, unavailableScan } from '../compliance.js';
@@ -47,6 +48,7 @@ export const scaffoldTools: ToolDefinition[] = [
       targetDir: z.string().min(1).optional().describe('Directory for the client, relative to the project root. Default by framework (lib/swfte, src/swfte, app/swfte, swfte).'),
       alias: z.string().optional().describe('Stable local name (lowercase, dashes). Default: the artifact name in kebab-case. Symbols and the route path derive from it.'),
       force: z.boolean().optional().describe('Replace existing files whose content differs. Default false.'),
+      pin: z.boolean().optional().describe('Workflows: pin the current published version (default true) so the client calls /v2/workflows/{id}/versions/{version}/invoke and upstream publishes never change it until `swfte upgrade`. false: follow every publish.'),
       complianceScan: z.boolean().optional().describe('Scan the written code with POST /v2/compliance/scan (advisory). Default true.'),
     }),
     execute: async (input, { client, config, localFilesystem }) => {
@@ -59,6 +61,7 @@ export const scaffoldTools: ToolDefinition[] = [
         outDir: input.targetDir,
         alias: input.alias,
         force: input.force,
+        pin: input.pin,
       });
       // Scan what was just written (code only), like `swfte add`. Advisory: a
       // finding or a scan that could not run never undoes the write.
@@ -80,7 +83,7 @@ export const scaffoldTools: ToolDefinition[] = [
         nextSteps: [
           'Set SWFTE_API_KEY in your real (uncommitted) env — .env.example only names it.',
           ...(res.framework === 'nextjs' || res.framework === 'express' || res.framework === 'fastapi'
-            ? ['Add your auth check to the adapter where marked: anyone who can reach that route spends your credits.']
+            ? ['Wire authorize() in the adapter to your auth: it answers 401 to everyone until you do (anyone who can reach the route would spend your credits).']
             : []),
           'Commit swfte.json with the generated files; add `npx -p @swfte/mcp-server swfte verify` to CI so contract drift fails the build.',
           'Mint an API key scoped to this artifact in Studio if the code only needs to call it.',
@@ -144,19 +147,65 @@ export const scaffoldTools: ToolDefinition[] = [
     name: 'swfte_embed_widget',
     title: 'Embed a catalog artifact in a page',
     description:
-      'Return the embed HTML published in an artifact\'s contract (widgets and other embeddable surfaces), and ' +
-      'optionally write it to targetFile inside the working directory (never overwriting an existing file ' +
-      'unless force:true). Refuses markup containing a secret-shaped credential. Artifacts without contract.embed ' +
-      'are reported as not embeddable — call them through swfte_scaffold_client instead.',
+      'Return embed HTML for an artifact and optionally write it to targetFile inside the working directory (never ' +
+      'overwriting an existing file unless force:true). Widgets: the markup published in the contract. Agents: a ' +
+      'self-contained chat box calling the PUBLIC agent chat POST /v1/public/agents/{id}/chat with a publishable ' +
+      'embed key (swfte_pk_, this agent only, origin allow-listed) — pass embedKey, or allowedOrigins to have one ' +
+      'issued (POST /v2/agents/{id}/embed-keys, agent owner only). A workspace API key or PAT never goes into a page; ' +
+      'secret-shaped markup is refused. Other kinds are not embeddable — use swfte_scaffold_client.',
     inputSchema: z.object({
       catalogRef: CatalogRefArg,
       targetFile: z.string().optional().describe('File to write the snippet to, relative to the project root (e.g. "public/support.html").'),
       force: z.boolean().optional(),
+      embedKey: z.string().optional().describe('Agents: an existing publishable embed key (swfte_pk_…) for this agent.'),
+      allowedOrigins: z
+        .array(z.string())
+        .max(20)
+        .optional()
+        .describe('Agents without embedKey: issue a new embed key limited to these exact origins (e.g. ["https://www.example.com"]).'),
     }),
     execute: async (input, { client, config, localFilesystem }) => {
       const writer = new ConfinedWriter({ forbidden: [config.credential], inline: localFilesystem === false });
       const target = input.targetFile ? writer.resolve(input.targetFile) : null;
       const r = parseCatalogRef(input.catalogRef);
+      const write = (content: string, extra: Record<string, unknown>) => {
+        writer.assertNoSecrets('embed markup', content);
+        if (!target) return { catalogRef: r.ref, embeddable: true, html: content, written: [], ...extra };
+        writer.create(target, content, input.force);
+        return { catalogRef: r.ref, embeddable: true, html: content, written: writer.commit(), ...extra };
+      };
+
+      if (r.kind === 'agent') {
+        if (input.embedKey !== undefined && !EMBED_KEY_PATTERN.test(input.embedKey)) {
+          // Never echo what was passed: it may be a secret key pasted by mistake.
+          throw new Error('embedKey must be a publishable swfte_pk_ key. A workspace API key or PAT must never be put in a web page.');
+        }
+        let key = input.embedKey ?? null;
+        let issued: { keyPrefix: string | null; allowedOrigins: string[] } | null = null;
+        if (!key) {
+          if (!input.allowedOrigins?.length) {
+            return {
+              catalogRef: r.ref,
+              embeddable: true,
+              needsEmbedKey: true,
+              endpoint: publicAgentChatPath(r.id),
+              message:
+                'Agents embed through the public chat with a publishable key. Pass allowedOrigins (the exact site origins, ' +
+                'e.g. ["https://www.example.com"]) to issue one, or embedKey if you already have one (Studio → agent → Embed).',
+            };
+          }
+          const k = await issueEmbedKey(client, r.id, input.allowedOrigins);
+          key = k.key;
+          issued = { keyPrefix: k.keyPrefix, allowedOrigins: k.allowedOrigins };
+        }
+        const entry = await getEntry(client, r).catch(() => null);
+        const html = agentEmbedHtml({ agentId: r.id, name: entry?.name || r.id, baseUrl: config.baseUrl, embedKey: key, catalogRef: r.ref });
+        return write(html, {
+          endpoint: publicAgentChatPath(r.id),
+          ...(issued ? { issuedKey: issued, note: 'A new embed key was issued; it is shown only in this markup. Revoke it in Studio (agent → Embed) if unused.' } : {}),
+        });
+      }
+
       const contract = await getContract(client, r);
       const html = contract?.embed?.html;
       if (!html) {
@@ -167,11 +216,7 @@ export const scaffoldTools: ToolDefinition[] = [
         };
       }
       writer.assertNoSecrets('embed markup', html);
-      const content = `<!-- Swfte embed: ${r.ref.replace(/--/g, '-')} (contract ${contractHash(contract)}) -->\n${html.trim()}\n`;
-      if (!target) return { catalogRef: r.ref, embeddable: true, html: content, written: [] };
-      writer.create(target, content, input.force);
-      const written = writer.commit();
-      return { catalogRef: r.ref, embeddable: true, html: content, written };
+      return write(`<!-- Swfte embed: ${r.ref.replace(/--/g, '-')} (contract ${contractHash(contract)}) -->\n${html.trim()}\n`, {});
     },
   },
 ];

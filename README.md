@@ -259,7 +259,9 @@ the entry's diary. The prompt `pick-up-tailor-deploy` chains find → fit → ad
 
 **4. Bake it into the codebase** — see [Bake it into your codebase](#bake-it-into-your-codebase)
 below; `swfte_scaffold_client` is the MCP face of `swfte add`.
-`swfte_embed_widget` writes an artifact's embed markup instead.
+`swfte_embed_widget` writes embed markup instead: a widget's published markup, or for an
+agent a small chat box on the public agent chat (`/v1/public/agents/{id}/chat`) with a
+publishable, origin-restricted `swfte_pk_` embed key — never a secret key.
 
 **5. Wire analytics, payments and deploys — with approval.** Platform changes go
 through approval-gated actions: `swfte_request_approval` proposes one (deploy,
@@ -293,17 +295,36 @@ in step and fails CI when they drift. Leaving is always possible — the generat
 files are plain source with no runtime dependency.
 
 ```bash
-export SWFTE_API_KEY=sk-swfte-…            # or a PAT (pat_…); SWFTE_BASE_URL / SWFTE_WORKSPACE_ID optional
+npx -p @swfte/mcp-server swfte init                          # swfte.json + .env.example, stack, which key to create
+export SWFTE_API_KEY=sk-swfte-…            # best: a key scoped to these artifacts; SWFTE_BASE_URL / SWFTE_WORKSPACE_ID optional
 
-npx -p @swfte/mcp-server swfte add workflow:wf_123          # detect the stack, write client + adapter, pin it
+npx -p @swfte/mcp-server swfte add workflow:wf_123          # detect the stack, write client + adapter, pin the published version
+npx -p @swfte/mcp-server swfte dev                           # offline mock of every baked artifact on 127.0.0.1:4010
 npx -p @swfte/mcp-server swfte sync                          # refetch contracts, regenerate what moved, print a diff
 npx -p @swfte/mcp-server swfte verify                        # CI gate (below)
-npx -p @swfte/mcp-server swfte upgrade invoice-extractor     # take a breaking change on purpose
+npx -p @swfte/mcp-server swfte upgrade invoice-extractor     # move the pin / take a breaking change on purpose
 ```
+
+**`swfte init`** writes an empty `swfte.json` and the variable *names* into
+`.env.example`, reports the detected stack, and says which credential to create:
+an API key scoped to the artifacts the code calls (`resourceScopes` — the key
+gets `403` anywhere else) rather than a personal access token, which acts as you.
+It never writes a credential: no flag accepts one (`--token`, `--api-key`, … are
+refused without echoing the value) and every write is checked for secrets.
+
+**`swfte dev [--port 4010] [--record]`** serves each artifact's invoke route
+(and the execution-status route for workflows) on `127.0.0.1` from fixtures
+derived from its contract, so the app runs with no network: point it at
+`SWFTE_BASE_URL=http://127.0.0.1:4010` with any non-empty `SWFTE_API_KEY`.
+Required inputs are validated (`400`), a missing credential is `401`, responses
+are built from the output schema's `examples` / `default` / `enum` / types, and a
+request header `X-Swfte-Dev-Status: WAITING_FOR_INPUT` (or `FAILED`) makes a run
+end that way. Without `--record` the fixtures come from the generated clients
+themselves; `--record` fetches the full contracts into `.swfte/fixtures/` first.
 
 (Installed globally, it is just `swfte …`; `npx @swfte/mcp-server swfte …` works too.)
 
-**`swfte add <catalogRef> [--framework] [--out] [--alias] [--force]`** detects the
+**`swfte add <catalogRef> [--framework] [--out] [--alias] [--force] [--no-pin]`** detects the
 stack from the repo's manifests — nothing leaves the machine:
 
 | Found | Framework | What is written |
@@ -315,9 +336,19 @@ stack from the repo's manifests — nothing leaves the machine:
 | `flask`, `django`, or nothing | `plain-python` | the typed client only (stdlib `urllib`) |
 
 Python output goes to `swfte_clients/` (never a bare `swfte/` package, which
-would shadow the Swfte Python SDK). The adapter is **yours**: put your auth
-check where it is marked — anyone who can reach that route spends your credits —
-and `swfte sync` never rewrites it. The client is **generated**: it carries the
+would shadow the Swfte Python SDK, `pip install swfte-sdk`). The adapter is **yours**
+and **denies by default**: it starts with an `authorize(request)` hook that returns
+`null`, so every request gets `401` until you connect it to your auth (anyone who
+can reach the route would otherwise spend your credits); the caller it returns
+also owns agent conversations. `swfte sync` never rewrites an adapter.
+
+**Version pins.** A workflow is pinned to its current published version: the
+client calls `POST /v2/workflows/{id}/versions/{version}/invoke`, so a newer
+publish upstream never changes what your code runs. `swfte sync` never moves a
+pin (it reports that a newer version exists); `swfte upgrade <alias>` moves it to
+the current published version after the breaking and re-approval checks, and
+refuses an unpublished target. `--no-pin` makes the client call `/invoke` and
+follow every publish. The client is **generated**: it carries the
 contract hash and a checksum, sends `X-Swfte-Client: <lang>/<version>; ref=<catalogRef>; hash=<contractHash>`
 (adopter usage counts, never payloads), reads agent replies as `content ?? response`,
 and polls workflow runs via `execution.status`. Nothing is overwritten without
@@ -360,7 +391,13 @@ Studio flags `requiresReapproval`.
 
 - `0` and prints `SWFTE_VERIFY_OK` — every client matches the lock and no upgrade is breaking or awaiting re-approval;
 - `1` — local drift (a client missing, hand-edited, or generated against a different hash than the lock pins), a breaking upgrade pending, or `requiresReapproval`;
-- `2` — it could not check (no `swfte.json`, no credential, backend unreachable). `--offline` checks local drift only.
+- `1` also when a pinned artifact vanished (deleted, moved out of the workspace) or its pinned version is no longer published;
+- `2` — it could not check (no `swfte.json`, no credential, backend unreachable or silent past `SWFTE_TIMEOUT_MS` — 60 s by default —, or an upgrades answer that is truncated or not the documented shape). `--offline` checks local drift only.
+
+`swfte sync` holds a moved contract back (exit `2`, nothing written, pin
+unchanged) when the upgrades check is unavailable, because re-approval cannot
+be ruled out. Paths are checked component by component and symlinks are never
+written through, dangling or not.
 
 ```yaml
 # .github/workflows/swfte.yml
@@ -496,7 +533,7 @@ Repository secrets required: `NPM_TOKEN`, `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN
 
 If you'd rather call the Swfte API directly, use one of the official SDKs:
 
-- 🐍 [Python](https://github.com/SwfteAI/swfte-python) — `pip install swfte`
+- 🐍 [Python](https://github.com/SwfteAI/swfte-python) — `pip install swfte-sdk` (imported as `swfte`)
 - 🟦 [Node / TypeScript](https://github.com/SwfteAI/swfte-node) — `npm install @swfte/sdk`
 - ☕ [Java](https://github.com/SwfteAI/swfte-java) — `com.swfte:swfte-sdk`
 - 💬 [Chat Widget](https://github.com/SwfteAI/swfte-chat-widget) — embeddable chat bubble

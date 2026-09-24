@@ -614,11 +614,56 @@ describe('swfte_embed_widget', () => {
   });
 
   test('no embed is reported; a secret in markup is refused', async () => {
-    route('GET', /^\/v2\/catalog\/agent\/ag_1\/contract$/, { body: { ...widgetContract(null), catalogRef: 'agent:ag_1' } });
-    assert.equal((await run('swfte_embed_widget', { catalogRef: 'agent:ag_1' })).embeddable, false);
+    route('GET', /^\/v2\/catalog\/workflow\/wf_9\/contract$/, { body: { ...widgetContract(null), catalogRef: 'workflow:wf_9' } });
+    assert.equal((await run('swfte_embed_widget', { catalogRef: 'workflow:wf_9' })).embeddable, false);
     routes = [];
     route('GET', /^\/v2\/catalog\/widget\/wd_1\/contract$/, { body: widgetContract('<script data-key="sk-swfte-LEAKEDLEAKED123"></script>') });
     await assert.rejects(run('swfte_embed_widget', { catalogRef: 'widget:wd_1' }), /secret-shaped/);
+  });
+});
+
+describe('swfte_embed_widget for agents: public agent chat + publishable embed key (rev 8b)', () => {
+  const EMBED_KEY = 'swfte_pk_embedkey0123456789';
+
+  test('an existing embed key: markup calls /v1/public/agents/{id}/chat with X-Swfte-Embed-Key, never a secret', async () => {
+    route('GET', /^\/v2\/catalog\/agent\/ag_1$/, { body: { catalogRef: 'agent:ag_1', kind: 'agent', id: 'ag_1', name: 'Support </script> Triage' } });
+    const res = await run('swfte_embed_widget', { catalogRef: 'agent:ag_1', embedKey: EMBED_KEY, targetFile: 'public/chat.html' });
+    assert.equal(res.embeddable, true);
+    assert.equal(res.endpoint, '/v1/public/agents/ag_1/chat');
+    const html = readFileSync(join(tmp, 'public/chat.html'), 'utf8');
+    assert.match(html, /"endpoint":"https:\/\/api\.swfte\.com\/agents\/v1\/public\/agents\/ag_1\/chat"/);
+    assert.match(html, /'X-Swfte-Embed-Key': cfg\.key/);
+    assert.match(html, /"key":"swfte_pk_embedkey0123456789"/);
+    assert.match(html, /visitorId: visitor/);
+    assert.match(html, /res\.body\.content != null \? res\.body\.content : res\.body\.response/);
+    // A hostile name cannot close the script element.
+    assert.doesNotMatch(html.slice(html.indexOf('<script>') + 8), /<\/script>[\s\S]*<\/script>/);
+    assert.ok(!html.includes(CREDENTIAL));
+    assert.doesNotMatch(html, /\/v1\/agents\/ag_1\/chat\/|Authorization|sk-swfte-|pat_/);
+    assert.ok(!seen.some((r) => r.method === 'POST'), 'no key was issued');
+  });
+
+  test('allowedOrigins issues a key through POST /v2/agents/{id}/embed-keys (not retried)', async () => {
+    route('GET', /^\/v2\/catalog\/agent\/ag_1$/, { body: { catalogRef: 'agent:ag_1', kind: 'agent', id: 'ag_1', name: 'Support' } });
+    route('POST', /^\/v2\/agents\/ag_1\/embed-keys$/, (req) => ({ status: 201, body: { key: EMBED_KEY, keyPrefix: 'swfte_pk_emb', allowedOrigins: req.body.allowedOrigins } }));
+    const res = await run('swfte_embed_widget', { catalogRef: 'agent:ag_1', allowedOrigins: ['https://www.example.com'] });
+    assert.deepEqual(seen.filter((r) => r.method === 'POST').map((r) => r.body), [{ allowedOrigins: ['https://www.example.com'] }]);
+    assert.deepEqual(res.issuedKey, { keyPrefix: 'swfte_pk_emb', allowedOrigins: ['https://www.example.com'] });
+    assert.match(res.html, /swfte_pk_embedkey0123456789/);
+  });
+
+  test('refuses a secret passed as embedKey without echoing it; a non-publishable issued key writes nothing', async () => {
+    await assert.rejects(run('swfte_embed_widget', { catalogRef: 'agent:ag_1', embedKey: 'sk-swfte-notpublishable123' }), (e: Error) => /publishable swfte_pk_/.test(e.message) && !e.message.includes('sk-swfte-notpublishable123'));
+    route('POST', /^\/v2\/agents\/ag_1\/embed-keys$/, { status: 201, body: { key: 'sk-swfte-wrongwrongwrong1' } });
+    await assert.rejects(run('swfte_embed_widget', { catalogRef: 'agent:ag_1', allowedOrigins: ['https://a.example'], targetFile: 'x.html' }), /did not return a publishable/);
+    assert.ok(!existsSync(join(tmp, 'x.html')));
+  });
+
+  test('without a key or origins it says how to get one instead of guessing', async () => {
+    const res = await run('swfte_embed_widget', { catalogRef: 'agent:ag_1' });
+    assert.equal(res.needsEmbedKey, true);
+    assert.match(res.message, /allowedOrigins/);
+    assert.equal(seen.length, 0);
   });
 });
 

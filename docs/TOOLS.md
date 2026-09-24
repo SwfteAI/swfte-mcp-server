@@ -18,7 +18,7 @@ alongside it is overridden.
 | `swfte_get_evidence` | GET | `/v2/catalog/{kind}/{id}` |
 | `swfte_trace_dependencies` | GET | `/v2/catalog/{kind}/{id}` (+ the artifact's own record; upstream scans `/v2/catalog/search`) |
 | `swfte_scaffold_client` | GET | `/v2/catalog/{kind}/{id}` + `/contract` — writes locally |
-| `swfte_embed_widget` | GET | `/v2/catalog/{kind}/{id}/contract` — writes locally |
+| `swfte_embed_widget` | GET / POST | widgets: `/v2/catalog/{kind}/{id}/contract`; agents: markup calling `POST /v1/public/agents/{id}/chat` with a `swfte_pk_` embed key (optionally issued via `POST /v2/agents/{id}/embed-keys`) — writes locally |
 | `swfte_request_approval` | POST | `/v2/actions` |
 | `swfte_execute_approved_action` | POST | `/v2/actions/{id}/execute` |
 | `swfte_get_action_status` | GET | `/v2/actions/{id}` · `/v2/actions?status=` |

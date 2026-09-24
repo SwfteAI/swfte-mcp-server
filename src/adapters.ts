@@ -8,7 +8,7 @@
  *   plain-*  no adapter — call the client directly
  *
  * Unlike the client, an adapter is the developer's file from the moment it is
- * written: it is where their auth check goes. `swfte sync` never rewrites one,
+ * written: its authorize() hook (deny by default, 401 until wired) is where their auth goes. `swfte sync` never rewrites one,
  * and `swfte add` never overwrites one without force. Its call into the client
  * uses names derived from the alias, which a contract change does not move,
  * so a regenerated client keeps compiling underneath it.
