@@ -1,6 +1,6 @@
 # Tool reference
 
-`@swfte/mcp-server` exposes **235 tools**, of which a curated **103** are
+`@swfte/mcp-server` exposes **237 tools**, of which a curated **105** are
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
 
 Tools that take a `workspaceId` only honour it for **API-key** credentials. A
@@ -25,7 +25,9 @@ alongside it is overridden.
 | `swfte_wire_analytics` | POST/GET | `/v2/actions` (analytics.enable) → `/v2/actions/{id}/execute` — writes locally |
 | `swfte_wire_payments` | POST/GET | `/v2/actions` (app.payments.enable) → `/v2/actions/{id}/execute` — writes locally |
 | `swfte_fit_check` | POST | `/v2/catalog/{kind}/{id}/fit` — `{problem, stack}`; stack detected from the local project when omitted |
-| `swfte_adopt` | POST | `/v2/catalog/{kind}/{id}/adopt` — `{name?, tailoring?:{problem, stack, notes}, deploy?:{environment}}`; a deploy comes back PROPOSED, never executed |
+| `swfte_adopt` | POST | `/v2/catalog/{kind}/{id}/adopt[?sourceWorkspaceId=]` — `{name?, tailoring?:{problem, stack, notes}, deploy?:{environment}, acknowledgeProviderRole?, intendedPurpose?, annexIII?}`; a deploy comes back PROPOSED, never executed; `422 PROVIDER_ROLE_ACK_REQUIRED` is a question for the human; a proprietary entry is a `mode:"binding"` |
+| `swfte_deliver` | POST | `/v2/catalog/{kind}/{id}/deliver` — `{targetWorkspaceId, name?, tailoring?, deploy?, idempotencyKey?, acknowledgeProviderRole?, intendedPurpose?, annexIII?}` + `Idempotency-Key` header; needs a live delivery grant in the target (404 otherwise, indistinguishable from a missing entry); a deploy is PROPOSED for the customer's approvers |
+| `swfte_handover_record` | GET | `/v2/catalog/{kind}/{id}/handover?format=markdown` — writes the runbook locally (confined); the handover itself (`POST …/handover`) is Studio-only (`403 SESSION_REQUIRED` for tokens) |
 | `swfte_get_timeline` | GET | `/v2/catalog/{kind}/{id}/timeline` |
 | `swfte_sync` | GET | `/v2/catalog/{kind}/{id}` + `/contract` per swfte.json entry, `/v2/catalog/upgrades` — rewrites generated clients locally (= `swfte sync` / `swfte upgrade`) |
 | `swfte_check_upgrades` | GET | `/v2/catalog/upgrades?refs=<catalogRef:contractHash>,…` + local drift check (= `swfte verify`) |

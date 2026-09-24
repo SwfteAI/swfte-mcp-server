@@ -70,7 +70,7 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is 235 tools, which measurably degrades a model's ability
+ * The full surface is 237 tools, which measurably degrades a model's ability
  * to pick the right one (test/tools.test.ts "the budget comment carries the measured counts" keeps
  * these two numbers true). This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
@@ -122,13 +122,29 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   //   swfte_verify_batch         = a loop over swfte_verify
   //   swfte_workflows_validate   ⊂ swfte_validate {kind:"workflow"} (review + static graph analysis)
   //   swfte_agents_wizard_quick  ⊂ swfte_build {kind:"agent"} + swfte_create (with a review step)
-  // Measured now: 235 registered, 103 advertised against the ceiling of 103 —
-  //   core 39, workflows 16, agents 10, chatflows 12, deployments 7,
+  // Measured at that point: 235 registered, 103 advertised against the ceiling
+  // of 103 — core 39, workflows 16, agents 10, chatflows 12, deployments 7,
   //   datasets 6, modules 6, connect 4, untagged 3.
   // The next addition has no covered tool left to trade; argue the number.
+  //
+  // Argued (leaf-2.24, cross-organisation delivery, agents-service #452): two
+  // `core` tools joined the Solution Hub beside swfte_adopt — swfte_deliver
+  // (push an entry into a customer's workspace on their delivery grant) and
+  // swfte_handover_record (export the runbook of a handover taken in Studio
+  // into the repo). DEFAULT_GROUPS did not change; the default SURFACE grew by
+  // exactly these two, and the ceiling moved 103 → 105 with it. Why not trade:
+  // nothing advertised covers either (no other tool delivers across workspaces
+  // or exports a handover), and the remaining advertised tools are not exact
+  // duplicates of one another. Why `core` and not an opt-in group: deliver
+  // shares adopt's Art. 25 question flow and licence-binding reading, and a
+  // step of the pick-up → adopt → deliver → hand over path that a group filter
+  // can hide is a step that gets skipped.
+  // Measured now: 237 registered, 105 advertised against the ceiling of 105 —
+  //   core 41, workflows 16, agents 10, chatflows 12, deployments 7,
+  //   datasets 6, modules 6, connect 4, untagged 3.
   // `journeys` and `relay` are deliberately absent, and that is a decision to
-  // revisit rather than a default to inherit. The surface sits at 103 against
-  // a ceiling of 103 — a ceiling that exists because a large advertised surface
+  // revisit rather than a default to inherit. The surface sits at 105 against
+  // a ceiling of 105 — a ceiling that exists because a large advertised surface
   // measurably degrades a model's ability to pick the right tool. Adding them
   // (17 tools) would push well past it. They stay reachable through
   // SWFTE_TOOLS; whether an agent should reach for Relay tools unprompted is a

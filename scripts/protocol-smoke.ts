@@ -87,6 +87,9 @@ async function main(): Promise<void> {
     'swfte_get_timeline',
     'swfte_sync',
     'swfte_check_upgrades',
+    // Cross-organisation delivery.
+    'swfte_deliver',
+    'swfte_handover_record',
   ];
   const names = new Set(tools.map((t) => t.name));
   for (const r of required) if (!names.has(r)) problems.push(`missing required tool: ${r}`);

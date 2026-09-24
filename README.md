@@ -17,7 +17,7 @@ If you don't know what Swfte is, [start here](https://www.swfte.com). It's the u
 
 ## What this gives you
 
-- **235 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
+- **237 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
 - **Stdio transport** — works out of the box with Claude Desktop and Claude Code.
 - **Workspace-scoped** — set `SWFTE_WORKSPACE_ID` once, or pass `workspaceId` per call.
 - **Zero-config security** — your API key stays on the machine running the MCP server, never in the LLM context.
@@ -51,7 +51,7 @@ widget, application, or MCP server**.
   server-side page cap, read-merge-write updates where the raw PATCH would wipe
   omitted fields, retry with load-shedding detection, and typed error envelopes
   carrying the backend's own code plus a suggested action.
-- **235 tools available, 103 advertised by default**, adjustable via `SWFTE_TOOLS`.
+- **237 tools available, 105 advertised by default**, adjustable via `SWFTE_TOOLS`.
 - **Stdio transport**, multi-arch Docker image, and Zod-typed inputs published
   as JSON Schema over `tools/list`.
 
@@ -234,8 +234,8 @@ or `mcp-server`.
 | Cost control | `swfte_cost_*` | `cost` | |
 | Agent mail | `swfte_agent_mail_*` | `agent-mail` | |
 
-Advertising all 235 tools measurably degrades a model's ability to pick the
-right one, so 103 are advertised by default. `SWFTE_TOOLS=all` widens it, and
+Advertising all 237 tools measurably degrades a model's ability to pick the
+right one, so 105 are advertised by default. `SWFTE_TOOLS=all` widens it, and
 `swfte_whoami` reports which groups are live and what is hidden — nothing
 disappears silently.
 
@@ -281,9 +281,24 @@ gaps and missing connections. `swfte_adopt {catalogRef, problem?, notes?,
 deploy?}` copies it into your workspace, tailored, with lineage recorded; it
 surfaces `needsInput` and missing connections (with the `swfte_connect_start`
 call that fixes each) and, if you asked for a deploy, a **PROPOSED** action a
-human approves — never executed by the adopt itself. `swfte_get_timeline` is
+human approves — never executed by the adopt itself. `sourceWorkspaceId` adopts
+from another workspace you are a member of; a proprietary entry comes back as a
+hosted **binding** (nothing copied, called through its invoke path). `swfte_get_timeline` is
 the entry's diary. The prompt `pick-up-tailor-deploy` chains find → fit → adopt
 → bake → approval → status.
+
+**Deliver to a customer, then hand over.** `swfte_deliver {catalogRef,
+targetWorkspaceId, problem?, deploy?, idempotencyKey?}` pushes an entry into a
+customer's workspace on the delivery grant they issued your organisation (works
+with a PAT). It reads the answers exactly as adopt does — the EU AI Act Art. 25
+acknowledgement is a question for the human, a proprietary licence means a
+binding — and a 404 means "not visible to you, or no live grant", deliberately
+indistinguishable: the customer's owner/admin issues a grant in Studio →
+Settings → Delivery grants (≤30 days). A deploy is only PROPOSED there, for the
+customer's approvers. The handover itself is Studio-only (the API refuses tokens
+with `403 SESSION_REQUIRED`); `swfte_handover_record {catalogRef}` then exports
+the runbook into the repo under the same file-confinement rules as every other
+writer.
 
 **4. Bake it into the codebase** — see [Bake it into your codebase](#bake-it-into-your-codebase)
 below; `swfte_scaffold_client` is the MCP face of `swfte add`.

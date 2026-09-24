@@ -237,7 +237,14 @@ describe('advertised surface', () => {
     // verify_batch, workflows_validate, agents_wizard_quick) moved to `extras`.
     // Measured at 103 — core 39, workflows 16, agents 10, chatflows 12,
     // deployments 7, datasets 6, modules 6, connect 4, untagged 3.
-    assert.ok(selected.length <= 103, `default surface is ${selected.length} tools`);
+    //
+    // 103 -> 105, argued rather than traded (the note above said the next
+    // addition would have to): cross-organisation delivery (leaf-2.24) put
+    // swfte_deliver and swfte_handover_record in `core` beside swfte_adopt.
+    // Nothing advertised covers either, so there was no duplicate to move to
+    // `extras`; DEFAULT_GROUPS is unchanged (test/delivery.test.ts pins it).
+    // Measured at 105 — core 41, the rest as above.
+    assert.ok(selected.length <= 105, `default surface is ${selected.length} tools`);
     assert.ok(selected.length > 40, `default surface is only ${selected.length} tools`);
   });
 
@@ -263,6 +270,7 @@ describe('advertised surface', () => {
       'swfte_scaffold_client', 'swfte_embed_widget', 'swfte_request_approval', 'swfte_execute_approved_action',
       'swfte_get_action_status', 'swfte_wire_analytics', 'swfte_wire_payments',
       'swfte_fit_check', 'swfte_adopt', 'swfte_get_timeline', 'swfte_sync', 'swfte_check_upgrades',
+      'swfte_deliver', 'swfte_handover_record',
     ];
     const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x', SWFTE_TOOLS: 'voice' } as never));
     for (const n of names) assert.ok(selected.some((t) => t.name === n), `${n} hidden by SWFTE_TOOLS=voice`);

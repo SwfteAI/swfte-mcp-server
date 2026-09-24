@@ -302,10 +302,11 @@ export class SwfteClient {
    */
   async getBinary(
     path: string,
-    opts: { query?: RequestOptions['query']; timeoutMs?: number } = {}
+    opts: { query?: RequestOptions['query']; timeoutMs?: number; accept?: string } = {}
   ): Promise<{ bytes: Uint8Array; headers: Record<string, string>; contentType: string }> {
     const url = this.buildUrl(path, opts.query);
-    const headers = this.buildHeaders({ method: 'GET', path });
+    // `accept` for a non-JSON document (a Markdown export); the body comes back as bytes either way.
+    const headers = this.buildHeaders({ method: 'GET', path, ...(opts.accept ? { headers: { Accept: opts.accept } } : {}) });
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestBudget(opts.timeoutMs ?? 180_000));

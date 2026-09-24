@@ -98,8 +98,8 @@ copy the secret into a header that has no use for it.
 
 ### Tool groups
 
-The full surface is 235 tools. Advertising all of them measurably degrades a
-model's ability to pick the right one, so a **103-tool default** is advertised:
+The full surface is 237 tools. Advertising all of them measurably degrades a
+model's ability to pick the right one, so a **105-tool default** is advertised:
 
 ```
 core, workflows, agents, chatflows, datasets, modules, deployments, connect
@@ -108,11 +108,16 @@ core, workflows, agents, chatflows, datasets, modules, deployments, connect
 `analytics` (13 read-only reporting tools) is opt-in: add it with
 `SWFTE_TOOLS=core,workflows,agents,chatflows,datasets,modules,deployments,connect,analytics`.
 
+The default groups did not change when cross-organisation delivery landed; the
+default surface grew from 103 to 105 because `swfte_deliver` and
+`swfte_handover_record` joined `core` beside `swfte_adopt` (nothing advertised
+covered either, so there was no duplicate to trade into `extras`).
+
 Widen or narrow it explicitly:
 
 ```bash
 SWFTE_TOOLS=all                       # everything
-SWFTE_TOOLS=core,workflows            # 58 tools — a focused workflow session
+SWFTE_TOOLS=core,workflows            # 60 tools — a focused workflow session
 SWFTE_TOOLS=core,voice,conversations  # a voice-ops session
 ```
 
