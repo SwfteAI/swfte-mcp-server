@@ -221,9 +221,11 @@ describe('swfte_deliver', () => {
         },
       }),
     });
-    const res = await run('swfte_deliver', { catalogRef: 'workflow:wf_1', targetWorkspaceId: TARGET });
+    const res = await run('swfte_deliver', { catalogRef: 'workflow:wf_1', targetWorkspaceId: TARGET, deploy: { environment: 'staging' } });
     assert.equal(res.delivered, true);
     assert.equal(res.mode, 'binding');
+    assert.equal(res.deployAction, null);
+    assert.match(res.deployNote, /nothing to deploy in the customer's workspace/, 'a binding has no deploy to propose');
     assert.equal(res.forkedFrom, null, 'a binding is not a fork');
     assert.equal(res.binding.bindingId, 'bnd_1');
     assert.equal(res.binding.invoke.path, '/v2/catalog/bindings/bnd_1/invoke');

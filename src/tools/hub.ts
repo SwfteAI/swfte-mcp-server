@@ -525,7 +525,15 @@ export const hubTools: ToolDefinition[] = [
         );
       }
       if (asks.length && !bound) nextSteps.push(`Open inputs (${asks.join(', ')}) are answered in the customer's workspace before it runs.`);
-      if (input.deploy || deployAction) nextSteps.push(DEPLOY_ONLY_PROPOSED);
+      // A binding runs the author's published version: there is no deploy to propose at all.
+      const deployNote = bound
+        ? input.deploy
+          ? 'A binding runs the author\'s published version: there is nothing to deploy in the customer\'s workspace, so no deploy was proposed.'
+          : null
+        : input.deploy || deployAction
+          ? DEPLOY_ONLY_PROPOSED
+          : null;
+      if (deployNote) nextSteps.push(deployNote);
       if (newRef && !bound) {
         nextSteps.push(
           `When the customer takes it over, their owner/admin takes the handover in Studio (interactive session only); ` +
@@ -552,7 +560,7 @@ export const hubTools: ToolDefinition[] = [
         needsInput,
         missingConnections: providers,
         deployAction,
-        ...(input.deploy || deployAction ? { deployNote: DEPLOY_ONLY_PROPOSED } : {}),
+        ...(deployNote ? { deployNote } : {}),
         ...(bound ? { binding: bound.binding, bindingNote: bound.bindingNote } : {}),
         ...(d.licence ? { licence: d.licence } : {}),
         ...(d.attributedTo ? { attributedTo: d.attributedTo } : {}),
