@@ -881,6 +881,27 @@ describe('Solution Hub', () => {
     assert.match(tailored.tailoringNote, /plain copy/);
   });
 
+  test('swfte_adopt Art. 25: a 422 PROVIDER_ROLE_ACK_REQUIRED becomes a question for the human, never an auto-acknowledgement', async () => {
+    route('POST', /\/adopt$/, { status: 422, body: { code: 'PROVIDER_ROLE_ACK_REQUIRED', message: 'Tailoring this may make you its provider under the EU AI Act (Article 25).' } });
+    const res = await run('swfte_adopt', { catalogRef: 'workflow:wf_1', problem: 'route claims' });
+    assert.equal(res.adopted, false);
+    assert.equal(res.needsAcknowledgement, true);
+    assert.match(res.notice, /Article 25/);
+    assert.match(res.nextStep, /ASK them/);
+    // the tool never acknowledged on the user's behalf
+    assert.equal(seen[0]!.body.acknowledgeProviderRole, undefined);
+  });
+
+  test('swfte_adopt Art. 25: acknowledgement + intended purpose are sent only when explicitly given', async () => {
+    route('POST', /\/adopt$/, { body: { catalogRef: 'workflow:wf_3', forkedFrom: 'workflow:wf_1', tailoringApplied: true, needsInput: [], deployAction: null } });
+    await run('swfte_adopt', { catalogRef: 'workflow:wf_1', problem: 'route claims', acknowledgeProviderRole: true, intendedPurpose: 'Route motor claims for our brokerage', annexIII: 'none' });
+    assert.equal(seen[0]!.body.acknowledgeProviderRole, true);
+    assert.equal(seen[0]!.body.intendedPurpose, 'Route motor claims for our brokerage');
+    assert.equal(seen[0]!.body.annexIII, 'none');
+    await run('swfte_adopt', { catalogRef: 'workflow:wf_1', problem: 'route claims', acknowledgeProviderRole: false });
+    assert.equal(seen[1]!.body.acknowledgeProviderRole, undefined);
+  });
+
   test('swfte_get_timeline filters, limits and counts events', async () => {
     route('GET', /^\/v2\/catalog\/workflow\/wf_1\/timeline$/, {
       body: {

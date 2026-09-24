@@ -11,6 +11,7 @@
  * approves in Studio, then swfte_execute_approved_action runs it.
  */
 import { z } from 'zod';
+import { SwfteApiError } from '../client.js';
 import { CatalogRefArg, ENVIRONMENTS, catalogPath, parseCatalogRef } from '../catalog.js';
 import { presentAction, type ActionRequest } from '../actions.js';
 import { detectStack, type StackDetection } from '../stack.js';
@@ -139,6 +140,13 @@ export const hubTools: ToolDefinition[] = [
       stack: StackArg,
       notes: z.string().max(4000).optional().describe('Extra tailoring instructions.'),
       deploy: z.object({ environment: z.enum(ENVIRONMENTS) }).optional().describe('Also propose (not perform) a deploy of the copy.'),
+      acknowledgeProviderRole: z.boolean().optional().describe(
+        'EU AI Act Art. 25 acknowledgement, required by the server when tailoring or adopting a PUBLIC entry. ' +
+          'This is the HUMAN user\'s declaration: set true ONLY after the user has explicitly confirmed, in this ' +
+          'conversation, that they accept they may become the provider. Never set it on your own.',
+      ),
+      intendedPurpose: z.string().min(3).max(1000).optional().describe('The user\'s own words for what they will use it for (human-declared, recorded with the acknowledgement).'),
+      annexIII: z.string().max(200).optional().describe('User-declared Annex III category, "none" or "unsure". Optional.'),
     }),
     execute: async (input, { client, localFilesystem }) => {
       const r = parseCatalogRef(input.catalogRef);
@@ -158,10 +166,28 @@ export const hubTools: ToolDefinition[] = [
           ...(input.name ? { name: input.name } : {}),
           ...(tailoring ? { tailoring } : {}),
           ...(input.deploy ? { deploy: { environment: input.deploy.environment } } : {}),
+          ...(input.acknowledgeProviderRole === true ? { acknowledgeProviderRole: true } : {}),
+          ...(input.intendedPurpose ? { intendedPurpose: input.intendedPurpose } : {}),
+          ...(input.annexIII ? { annexIII: input.annexIII } : {}),
         },
         // Adoption creates an artifact; a retried POST could create two.
         retries: 0,
+      }).catch((e: unknown) => {
+        // Art. 25: the server refuses until the HUMAN acknowledges. Surface it as a question, not an error.
+        if (e instanceof SwfteApiError && e.status === 422 && e.code === 'PROVIDER_ROLE_ACK_REQUIRED') {
+          return { __needsAck: String((e.envelope as Record<string, unknown>)?.message ?? e.message) } as AdoptResponse & { __needsAck: string };
+        }
+        throw e;
       })) ?? {};
+      if ((res as { __needsAck?: string }).__needsAck) {
+        return {
+          adopted: false,
+          needsAcknowledgement: true,
+          notice: (res as { __needsAck: string }).__needsAck,
+          nextStep: 'Show this notice to the user and ASK them. Only if they explicitly accept, call swfte_adopt again with ' +
+            'acknowledgeProviderRole:true and intendedPurpose in their own words. Do not acknowledge on their behalf.',
+        };
+      }
 
       const newRef = res.catalogRef ?? (res.kind && res.id ? `${res.kind}:${res.id}` : null);
       const needsInput = Array.isArray(res.needsInput) ? res.needsInput : [];
