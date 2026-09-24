@@ -242,7 +242,7 @@ const NO_GRANT =
   'with swfte_get_context), or the target workspace holds no LIVE delivery grant covering it for your organisation: no grant, ' +
   'an expired or revoked one, one ended by a handover or narrowed to support-only, one issued to another account, one listing ' +
   'other entries — or the target is your own workspace. The server does not say which, so this tool cannot either. Ask the ' +
-  'customer\'s workspace owner or admin to issue a delivery grant in Studio → Settings → Delivery grants naming your ' +
+  'customer\'s workspace owner or admin to issue a delivery grant in Studio → Data → Delivery grants (/v2/studio/delivery-grants) naming your ' +
   'organisation\'s account (valid at most 30 days, optionally listing this catalogRef), then deliver again.';
 
 const DELIVER_HINTS: Record<string, string> = {
@@ -452,8 +452,8 @@ export const hubTools: ToolDefinition[] = [
       '(mode "binding": nothing copied; the customer calls it through the binding\'s invoke path). Same EU AI Act Art. 25 ' +
       'flow as swfte_adopt: tailoring or a public source needs the HUMAN\'s acknowledgement, which comes back as a notice ' +
       'to show them, never acknowledged here. A 404 means the entry is not visible to you OR there is no live grant ' +
-      'covering it (deliberately indistinguishable): the customer\'s owner/admin issues one in Studio → Settings → ' +
-      'Delivery grants naming your organisation\'s account (≤30 days). deploy is only PROPOSED in the customer\'s ' +
+      'covering it (deliberately indistinguishable): the customer\'s owner/admin issues one in Studio → Data → ' +
+      'Delivery grants (/v2/studio/delivery-grants) naming your organisation\'s account (≤30 days). deploy is only PROPOSED in the customer\'s ' +
       'workspace for THEIR approvers — you cannot approve it and must not run swfte_execute_approved_action on it. ' +
       'Pass idempotencyKey (sent as the Idempotency-Key header and in the body) and reuse it to retry safely.',
     inputSchema: z.object({

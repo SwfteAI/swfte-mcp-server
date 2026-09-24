@@ -241,7 +241,7 @@ describe('swfte_deliver', () => {
     assert.equal(err.code, 'NOT_FOUND');
     const hint = String(err.suggestedAction);
     assert.match(hint, /deliberately indistinguishable/);
-    assert.match(hint, /Studio → Settings → Delivery grants/);
+    assert.match(hint, /Studio → Data → Delivery grants \(\/v2\/studio\/delivery-grants\)/);
     assert.match(hint, /at most 30 days/);
     assert.match(hint, /does not say which, so this tool cannot either/);
     assert.equal(seen.length, 1, 'a 404 is an answer, not something to retry');

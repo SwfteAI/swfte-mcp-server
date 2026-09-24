@@ -294,7 +294,7 @@ with a PAT). It reads the answers exactly as adopt does — the EU AI Act Art. 2
 acknowledgement is a question for the human, a proprietary licence means a
 binding — and a 404 means "not visible to you, or no live grant", deliberately
 indistinguishable: the customer's owner/admin issues a grant in Studio →
-Settings → Delivery grants (≤30 days). A deploy is only PROPOSED there, for the
+Data → Delivery grants, `/v2/studio/delivery-grants` (≤30 days). A deploy is only PROPOSED there, for the
 customer's approvers. The handover itself is Studio-only (the API refuses tokens
 with `403 SESSION_REQUIRED`); `swfte_handover_record {catalogRef}` then exports
 the runbook into the repo under the same file-confinement rules as every other
