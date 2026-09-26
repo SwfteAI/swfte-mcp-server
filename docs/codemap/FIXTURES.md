@@ -73,7 +73,9 @@ scripts, React components, FastAPI routers, Celery tasks, Spring controllers/ser
   or `monorepo` (key lists them under `notAnalysed`, not `sites`).
 
 ### 3.1 ts-next specifics (impact, drift, lens, fix-PR, provenance)
-Workflow "Content pipeline" `workflow:wf_8K2mQ4`, alias `content-pipeline`, pinned `"3"`, contract v3:
+Workflow "Content pipeline" `workflow:wf_8K2mQ4`, alias `content-pipeline`, **unpinned**
+(`pinnedVersion: null`, `contractHash` = the v3 contract's hash: it follows the live pointer, CONTRACT
+decision D9), contract v3:
 input `{sources: string[] (required), topic: string (required), maxWords?: number}`, output
 `{runId: string, articles: object[], status: string}`; v4 renames `topic` → `topics: string[]`
 (required) and changes an internal prompt. Required sites:
@@ -87,6 +89,21 @@ input `{sources: string[] (required), topic: string (required), maxWords?: numbe
 reads, type change, add optional input, add output, internal prompt change, change on an artifact
 pinned to another version) the exact `breaking`, `cannotCheck` and `safe` site sets by `(path, line)`,
 with the v3/v4/vN contracts inline as JSON Schemas.
+
+`impact-key.json` format:
+```json
+{ "artifactRef": "workflow:wf_8K2mQ4", "fixture": "ts-next",
+  "contracts": { "v2": {"input": {…JSON Schema…}, "output": {…}}, "v3": {…}, "v4": {…}, "v3-prompt": {…} },
+  "versionHashes": { "3": "<contractHash of v3>" },
+  "cases": [ { "name": "rename-input", "from": "3", "to": "4", "fromContract": "v3", "toContract": "v4",
+               "expect": { "breaking": [{"path","line","reasons":["REQUIRED_INPUT_ADDED topics", …]}],
+                           "safe": [{"path","line"}], "cannotCheck": [{"path","line","reason":"raw-http"}],
+                           "pinned": [{"path","line","wouldBreakOnUpgrade": true}] } } ] }
+```
+Eight cases, in this order: `rename-input` (topic → topics[]), `add-required-input`,
+`remove-output-read-by-one-site`, `type-change`, `add-optional-input`, `add-output`,
+`internal-prompt-change` (identical contract), `pinned-elsewhere` (a promotion of a version no ts-next
+site runs, e.g. from "2"). Sets are exact (CONTRACT decision D9 says which sites a promotion touches).
 
 ### 3.2 monorepo specifics
 `packages/web` (pnpm, own swfte.json) pins `content-pipeline` to `"3"`; `packages/admin` (own

@@ -159,7 +159,20 @@ stores nothing.
   `REQUIRED_INPUT_ADDED, INPUT_BECAME_REQUIRED, REQUIRED_INPUT_REMOVED, INPUT_NO_LONGER_REQUIRED,
   INPUT_TYPE_CHANGED, OUTPUT_REMOVED, OUTPUT_TYPE_CHANGED`; `breaking(...)` becomes a formatting of it
   with byte-identical strings.
-- Impact rule (brief §3.5) over sites pinned to `from`: REQUIRED_INPUT_ADDED / INPUT_BECAME_REQUIRED
+- **Which sites a promotion `from → to` touches (decision D9).** The SoT client pinned to version P
+  calls `/versions/P/invoke`, and nothing moves that pin, so a promotion never changes what a
+  runtime-pinned site runs. Therefore:
+  - *live-tracking* sites — typed client with `pinnedVersion: null` generated against `from`'s
+    contract hash, every SDK site, raw HTTP to `/invoke` — run `to` after the promotion and are judged
+    by the rule below (`breaking` / `safe` / `cannotCheck`);
+  - *runtime-pinned to `from`* sites are never `breaking`; they are listed in `pinned` with
+    `wouldBreakOnUpgrade` computed by the same rule (drift, proactive upgrades);
+  - sites pinned to any other version, or whose contract hash matches another version, are untouched
+    (`otherVersions` count).
+  "Keep vN for this call site" sets `pinnedVersion: "N"` on that site's alias (typed client only),
+  which moves every caller of that alias onto the pinned invoke; the UI says so.
+  `ImpactReport` gains `pinned: [{site, wouldBreakOnUpgrade, reasons}]`.
+- Impact rule (brief §3.5) over the live-tracking sites that run `from`: REQUIRED_INPUT_ADDED / INPUT_BECAME_REQUIRED
   break every site with `op` run|chat|stream|embed; REQUIRED_INPUT_REMOVED / INPUT_TYPE_CHANGED break
   sites whose `inputKeys` hold the path or a dotted prefix of it; OUTPUT_REMOVED / OUTPUT_TYPE_CHANGED
   break sites whose `outputKeys` hold it (or a prefix); INPUT_NO_LONGER_REQUIRED, optional-added and
