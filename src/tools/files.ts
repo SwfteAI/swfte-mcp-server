@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
+import { basename } from 'node:path';
+import { assertLocalFilesystem, assertSafeName, confineReadableFile } from '../fsguard.js';
 import { z } from 'zod';
 import type { ToolDefinition } from './_types.js';
 
@@ -14,15 +15,21 @@ export const fileTools: ToolDefinition[] = [
       'what swfte_datasets_documents_create takes as fileId — a dataset document is always backed by ' +
       'an uploaded file, so this is the first half of every "add knowledge" flow.',
     inputSchema: Workspace.extend({
-      path: z.string().describe('Absolute path to the local file to upload.'),
+      path: z.string().describe('Path to the local file to upload, inside the project directory the server runs in. Not available on a hosted server.'),
       name: z.string().optional().describe('Name to store it under. Defaults to the file basename.'),
       mimeType: z
         .string()
         .optional()
         .describe('Content type of the part. Defaults to application/octet-stream.'),
     }),
-    execute: async (input, { client }) => {
-      const file = resolve(input.path);
+    execute: async (input, { client, localFilesystem }) => {
+      assertLocalFilesystem(
+        localFilesystem,
+        'swfte_files_upload',
+        'To add text to a dataset from a hosted server, pass it inline as documents[].text to swfte_knowledge_build.'
+      );
+      const file = confineReadableFile(input.path);
+      if (input.name !== undefined) assertSafeName(input.name, 'File name');
       // Copy into a tight Uint8Array: readFileSync hands back a Buffer that may
       // sit in a larger pooled ArrayBuffer, and Blob would upload the slack.
       const bytes = new Uint8Array(readFileSync(file));
