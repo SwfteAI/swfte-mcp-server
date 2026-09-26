@@ -170,9 +170,15 @@ stores nothing.
 `X-Swfte-Callsite: cs_<24 hex>` — exactly that, ≤27 chars, else ignored. SDKs send it only when a
 `callsite` option is given, or stack capture is on (`SWFTE_CALLSITE_STACK=1`, refused when the runtime
 reports production: node `NODE_ENV=production`, python `SWFTE_ENV`/`ENV`/`PYTHON_ENV=production`,
-java system property `swfte.env` or env `SWFTE_ENV=production`). Stack capture hashes the caller frame
-`(file, symbol, ordinal)` through the local caller map `.swfte/codemap/callers.json` written by
-`swfte scan` (never uploaded). Default: no header.
+java system property `swfte.env` or env `SWFTE_ENV=production`). Stack capture resolves the calling
+frame through the local caller map written by `swfte scan` (never uploaded): the scanner, which holds
+the workspace key, precomputes each site's keyed fingerprint, so the SDK needs no key at runtime.
+Caller map: path from env `SWFTE_CODEMAP_CALLERS`, else `<cwd>/.swfte/codemap/callers.json`:
+`{"version":1,"root":"<absolute scan root>","entries":{"<posix path relative to root>:<line>":"cs_…"}}`.
+The SDK takes the first stack frame outside its own package, makes its file path relative to `root`,
+and sends the id for `path:line` if present; otherwise nothing. Production refusal: stack capture is
+ignored (one warning), an explicit `callsite` option is still honoured. An explicit option always wins.
+Invalid ids (not `^cs_[0-9a-f]{24}$`) are never sent. Default: no header.
 
 Backend attaches (W-G) only when: `codemap.attribution.enabled`, header valid, caller authenticated,
 the call site is in the **caller's** workspace's latest default-branch map of a repo opted in with
