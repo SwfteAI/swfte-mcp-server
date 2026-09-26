@@ -1,5 +1,15 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CallToolRequestSchema,
+  ErrorCode,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ListToolsRequestSchema,
+  McpError,
+  ReadResourceRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod';
 
@@ -10,9 +20,10 @@ import { loadConfig, type ServerConfig } from './config.js';
 import { UnsupportedKindError, UnsupportedVerbError } from './kinds/index.js';
 import { allTools } from './tools/index.js';
 import type { ToolDefinition } from './tools/_types.js';
+import { RESOURCE_TEMPLATES, STATIC_RESOURCES, ResourceNotFoundError, readResource } from './resources.js';
+import { PROMPTS, getPrompt } from './prompts.js';
 
-const PACKAGE_NAME = '@swfte/mcp-server';
-const PACKAGE_VERSION = '0.2.0';
+import { PACKAGE_NAME, PACKAGE_VERSION } from './version.js';
 
 export interface BuildServerOptions {
   config?: ServerConfig;
@@ -30,8 +41,9 @@ export interface BuildServerOptions {
   resolveClient?: (authInfo?: AuthInfo) => SwfteClient | Promise<SwfteClient>;
   /**
    * False when the server is hosted (HTTP) rather than launched inside the
-   * caller's project. Local-file tools then refuse instead of touching the
-   * server's own disk. Default true (stdio).
+   * caller's project. Local-file tools then refuse and file-producing tools
+   * return files inline instead of touching the server's own disk. Default
+   * true (stdio).
    */
   localFilesystem?: boolean;
 }
@@ -55,7 +67,7 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
 
   const server = new Server(
     { name: PACKAGE_NAME, version: PACKAGE_VERSION },
-    { capabilities: { tools: {} } }
+    { capabilities: { tools: {}, resources: {}, prompts: {} } }
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -120,6 +132,38 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
       }
       const message = err instanceof Error ? err.message : String(err);
       return { isError: true, content: [{ type: 'text', text: message }] };
+    }
+  });
+
+  // Resources: local capabilities plus a per-artifact catalog context template.
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: STATIC_RESOURCES }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: RESOURCE_TEMPLATES }));
+  server.setRequestHandler(ReadResourceRequestSchema, async (req, extra) => {
+    try {
+      const content = await readResource(req.params.uri, {
+        client: async () => resolveClient(extra?.authInfo),
+        config,
+        tools,
+      });
+      return { contents: [content] };
+    } catch (err) {
+      if (err instanceof ResourceNotFoundError) throw new McpError(ErrorCode.InvalidParams, err.message);
+      if (err instanceof SwfteApiError) throw new McpError(ErrorCode.InternalError, err.message, err.toJSON());
+      throw err;
+    }
+  });
+
+  // Prompts: the reuse-first, ship and bake-in recipes.
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+    prompts: PROMPTS.map((p) => ({ name: p.name, title: p.title, description: p.description, arguments: p.arguments })),
+  }));
+  server.setRequestHandler(GetPromptRequestSchema, async (req) => {
+    try {
+      return getPrompt(req.params.name, (req.params.arguments ?? {}) as Record<string, string>);
+    } catch (err) {
+      // Unknown prompt or a missing required argument: the caller's request is at fault.
+      if (err instanceof Error) throw new McpError(ErrorCode.InvalidParams, err.message);
+      throw err;
     }
   });
 

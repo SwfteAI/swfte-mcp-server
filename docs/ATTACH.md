@@ -80,6 +80,7 @@ answer.
 | `SWFTE_PAT` | — | Personal access token. Travels in `Authorization` only. |
 | `SWFTE_API_KEY` | — | Workspace API key. Alternative to `SWFTE_PAT`. |
 | `SWFTE_BASE_URL` | `https://api.swfte.com/agents` | Point at a local backend for development. |
+| `SWFTE_ALLOWED_HOSTS` | `api.swfte.com,localhost,127.0.0.1` | CLI: hosts a `swfte.json` `baseUrl` may name before it receives the credential. `SWFTE_BASE_URL` is always trusted. |
 | `SWFTE_WORKSPACE_ID` | — | Only meaningful for API keys. A PAT carries its own binding. |
 | `SWFTE_TOOLS` | curated subset | `all`, or a comma-separated group list. |
 | `SWFTE_ALLOW_DEPLOY` | `0` | Required, with `confirm:true`, to provision real infrastructure. |
@@ -97,25 +98,35 @@ copy the secret into a header that has no use for it.
 
 ### Tool groups
 
-The full surface is 214 tools. Advertising all of them measurably degrades a
-model's ability to pick the right one, so a **103-tool default** is advertised:
+The full surface is 237 tools. Advertising all of them measurably degrades a
+model's ability to pick the right one, so a **105-tool default** is advertised:
 
 ```
-core, workflows, agents, chatflows, datasets, modules, deployments, analytics
+core, workflows, agents, chatflows, datasets, modules, deployments, connect
 ```
+
+`analytics` (13 read-only reporting tools) is opt-in: add it with
+`SWFTE_TOOLS=core,workflows,agents,chatflows,datasets,modules,deployments,connect,analytics`.
+
+The default groups did not change when cross-organisation delivery landed; the
+default surface grew from 103 to 105 because `swfte_deliver` and
+`swfte_handover_record` joined `core` beside `swfte_adopt` (nothing advertised
+covered either, so there was no duplicate to trade into `extras`).
 
 Widen or narrow it explicitly:
 
 ```bash
 SWFTE_TOOLS=all                       # everything
-SWFTE_TOOLS=core,workflows            # 17 tools — a focused workflow session
+SWFTE_TOOLS=core,workflows            # 60 tools — a focused workflow session
 SWFTE_TOOLS=core,voice,conversations  # a voice-ops session
 ```
 
 Available groups: `core`, `workflows`, `agents`, `chatflows`, `datasets`,
 `modules`, `rag`, `voice`, `marketplace`, `files`, `conversations`, `audit`,
 `cost`, `mcp`, `analytics`, `experiments`, `connect`, `deployments`,
-`agent-mail`.
+`agent-mail`, `journeys`, `relay`, `extras` (eight tools another advertised tool
+covers, kept off the default surface), `apps`, `custom-nodes`,
+`widgets`.
 
 `agent-mail` is opt-in deliberately, not merely for the tool count: one of its
 tools sends email to real people, and its read tools return message bodies

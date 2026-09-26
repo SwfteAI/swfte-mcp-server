@@ -47,6 +47,9 @@ export const workflowTools: ToolDefinition[] = [
   },
   {
     name: 'swfte_workflows_validate',
+    // swfte_validate {kind:"workflow"} does strictly more (wizard review + static graph analysis).
+    // Redundant with a default tool (see 'extras' in src/config.ts); opt in with SWFTE_TOOLS=…,extras.
+    group: 'extras',
     title: 'Validate workflow JSON',
     description: 'Validate a workflow definition without persisting it.',
     inputSchema: Workspace.extend({ workflow: z.record(z.unknown()) }),
@@ -112,6 +115,8 @@ export const workflowTools: ToolDefinition[] = [
   },
   {
     name: 'swfte_workflows_deployment_status_simple',
+    // Redundant with a default tool (see 'extras' in src/config.ts); opt in with SWFTE_TOOLS=…,extras.
+    group: 'extras',
     title: 'Get simplified workflow deployment status',
     description: 'Simplified deployment status with counts and model status strings — cheaper than swfte_workflows_deployment_status, good for dashboards and quick checks.',
     inputSchema: Workspace.extend({ workflowId: z.string() }),
@@ -166,6 +171,8 @@ export const workflowTools: ToolDefinition[] = [
   },
   {
     name: 'swfte_workflows_executions_list',
+    // Redundant with a default tool (see 'extras' in src/config.ts); opt in with SWFTE_TOOLS=…,extras.
+    group: 'extras',
     title: 'List workflow runs',
     description: 'List the execution history for a workflow — every run that has been started, most recent first.',
     inputSchema: Workspace.extend({ workflowId: z.string() }),

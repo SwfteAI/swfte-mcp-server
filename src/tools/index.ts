@@ -36,6 +36,13 @@ import { customNodeWizardTools } from './custom-node-wizard.js';
 import { journeyTools } from './journeys.js';
 import { relayRunTools } from './relay-runs.js';
 import { relayMailboxTools } from './relay-mailboxes.js';
+// Studio as source of truth: reuse-first, code bridge, approval-gated wiring.
+import { catalogTools } from './catalog.js';
+import { scaffoldTools } from './scaffold.js';
+import { actionTools } from './actions.js';
+import { wireTools } from './wire.js';
+import { hubTools } from './hub.js';
+import { complianceTools } from './compliance.js';
 
 /**
  * Tag a whole module's tools with a group, so `SWFTE_TOOLS` can trim them
@@ -53,6 +60,15 @@ export const allTools: ToolDefinition[] = [
   ...preflightTools,
   ...solutionTools,
   ...orchestrateTools,
+  // `core` so no SWFTE_TOOLS filter hides them: reuse-before-build only works if
+  // the reuse tools are always in front of the model.
+  ...tag('core', catalogTools),
+  ...tag('core', scaffoldTools),
+  ...tag('core', actionTools),
+  ...tag('core', wireTools),
+  ...tag('core', hubTools),
+  // Compliance control plane (CONTRACT rev 7): assess, scan code, evidence records.
+  ...tag('core', complianceTools),
   ...tag('apps', appWizardTools),
   ...tag('custom-nodes', customNodeWizardTools),
 

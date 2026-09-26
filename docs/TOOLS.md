@@ -1,6 +1,6 @@
 # Tool reference
 
-`@swfte/mcp-server` exposes **214 tools**, of which a curated **103** are
+`@swfte/mcp-server` exposes **237 tools**, of which a curated **105** are
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
 
 Tools that take a `workspaceId` only honour it for **API-key** credentials. A
@@ -8,6 +8,68 @@ PAT carries its own workspace binding, injected server-side, and any value sent
 alongside it is overridden.
 
 ---
+
+## Studio as source of truth (core)
+
+| Tool | Method | Path |
+|---|---|---|
+| `swfte_find_existing` | GET | `/v2/catalog/search` |
+| `swfte_get_context` | GET | `/v2/catalog/{kind}/{id}` + `/v2/catalog/{kind}/{id}/contract` |
+| `swfte_get_evidence` | GET | `/v2/catalog/{kind}/{id}` |
+| `swfte_trace_dependencies` | GET | `/v2/catalog/{kind}/{id}` (+ the artifact's own record; upstream scans `/v2/catalog/search`) |
+| `swfte_scaffold_client` | GET | `/v2/catalog/{kind}/{id}` + `/contract` — writes locally |
+| `swfte_embed_widget` | GET / POST | widgets: `/v2/catalog/{kind}/{id}/contract`; agents: markup calling `POST /v1/public/agents/{id}/chat` with a `swfte_pk_` embed key (optionally issued via `POST /v2/agents/{id}/embed-keys`) — writes locally |
+| `swfte_request_approval` | POST | `/v2/actions` |
+| `swfte_execute_approved_action` | POST | `/v2/actions/{id}/execute` |
+| `swfte_get_action_status` | GET | `/v2/actions/{id}` · `/v2/actions?status=` |
+| `swfte_wire_analytics` | POST/GET | `/v2/actions` (analytics.enable) → `/v2/actions/{id}/execute` — writes locally |
+| `swfte_wire_payments` | POST/GET | `/v2/actions` (app.payments.enable) → `/v2/actions/{id}/execute` — writes locally |
+| `swfte_fit_check` | POST | `/v2/catalog/{kind}/{id}/fit` — `{problem, stack}`; stack detected from the local project when omitted |
+| `swfte_adopt` | POST | `/v2/catalog/{kind}/{id}/adopt[?sourceWorkspaceId=]` — `{name?, tailoring?:{problem, stack, notes}, deploy?:{environment}, acknowledgeProviderRole?, intendedPurpose?, annexIII?}`; a deploy comes back PROPOSED, never executed; `422 PROVIDER_ROLE_ACK_REQUIRED` is a question for the human; a proprietary entry is a `mode:"binding"` |
+| `swfte_deliver` | POST | `/v2/catalog/{kind}/{id}/deliver` — `{targetWorkspaceId, name?, tailoring?, deploy?, idempotencyKey?, acknowledgeProviderRole?, intendedPurpose?, annexIII?}` + `Idempotency-Key` header; needs a live delivery grant in the target (404 otherwise, indistinguishable from a missing entry); a deploy is PROPOSED for the customer's approvers |
+| `swfte_handover_record` | GET | `/v2/catalog/{kind}/{id}/handover?format=markdown` — writes the runbook locally (confined); the handover itself (`POST …/handover`) is Studio-only (`403 SESSION_REQUIRED` for tokens) |
+| `swfte_get_timeline` | GET | `/v2/catalog/{kind}/{id}/timeline` |
+| `swfte_sync` | GET | `/v2/catalog/{kind}/{id}` + `/contract` per swfte.json entry, `/v2/catalog/upgrades` — rewrites generated clients locally (= `swfte sync` / `swfte upgrade`) |
+| `swfte_check_upgrades` | GET | `/v2/catalog/upgrades?refs=<catalogRef:contractHash>,…` + local drift check (= `swfte verify`) |
+
+`swfte_scaffold_client` detects the framework (Next.js, Express, FastAPI, or a
+plain TypeScript/Python client), writes the typed client plus an adapter, and
+pins it in the repo-root `swfte.json` v1. `swfte_find_existing` and
+`swfte_get_context` carry each entry's provenance (author, why, forkedFrom,
+licence) and evidence split into independent workspaces, success-rate interval
+and freshness, with a fork's `parentEvidence` kept apart. The CLI that shares
+this code is described in the README, "Bake it into your codebase".
+
+### Opt-in `extras` group
+
+Eight tools that an advertised tool already covers sit outside the default
+surface (`SWFTE_TOOLS=…,extras` brings them back): `swfte_workflows_executions_list`
+(same endpoint as `swfte_workflows_executions`),
+`swfte_workflows_deployment_status_simple` (a subset of
+`swfte_workflows_deployment_status`), `swfte_deployments_count` (a subset of
+`swfte_deployments_list`), `swfte_agents_chat` (same endpoint as `swfte_run`
+with `kind:"agent"`), `swfte_connect_status` (same endpoint as
+`swfte_connect_wait`, whose first poll is immediate), `swfte_verify_batch` (a
+loop over `swfte_verify`), `swfte_workflows_validate` (covered by
+`swfte_validate` with `kind:"workflow"`) and `swfte_agents_wizard_quick`
+(covered by `swfte_build` + `swfte_create`, with a review step).
+
+## Compliance control plane (core)
+
+CONTRACT rev 7. UNAVAILABLE is reported as "not checked", never as passing. A
+Control Evidence Record supports your audit; it is not an audit opinion.
+Attesting and issuing a record need an interactive Studio session, so no tool
+does either; `swfte_compliance_assess` returns the Studio link.
+
+| Tool | Method | Path |
+|---|---|---|
+| `swfte_compliance_assess` | POST | `/v2/compliance/assess` — `{target:{kind,id}, frameworks?}`; returns summary, blocking controls, failing controls with evidence and remediation, and not-checked controls |
+| `swfte_compliance_scan_code` | POST | `/v2/compliance/scan`, batched ≤ 50 files / 600 KB; local paths and globs confined to the working directory (refused on a hosted server, where `files`/`snippet` inline work) |
+| `swfte_get_evidence_record` | GET | `/v2/compliance/evidence-records/{id}` + `/verify` + `/signing-key` (offline Ed25519 check) |
+| `swfte_compliance_export` | GET | `/v2/compliance/export?format=json\|csv` — manifest `bodySha256` / CSV hash recomputed locally |
+| `swfte_compliance_history` | GET | `/v2/compliance/controls/{controlId}/history?target=<kind>:<id>` |
+
+## Agents — `swfte_agents_*`
 
 | Tool | Method | Path |
 |---|---|---|
@@ -73,7 +135,7 @@ same eleven tools cover every artifact type.
 | `swfte_run` | Execute to terminal, with per-node traces. |
 | `swfte_deploy` | Preview / deploy / teardown. **Previews by default**, and gated on preflight for workflows. |
 | `swfte_verify` | Kind-appropriate assertion sweep — "does this actually work?" |
-| `swfte_verify_batch` | The same, over up to 25 artifacts. |
+| `swfte_verify_batch` | The same, over up to 25 artifacts (opt-in `extras`). |
 | `swfte_preflight` | 28 rules over a whole solution, each a way the platform reports success while doing nothing. Read-only. |
 | `swfte_preflight_manifest` | Derive preflight's input from an id registry, a spec, or seed ids. |
 | `swfte_publish` | `POST /v2/workflows/{id}/publish`, refused unless preflight passes. |

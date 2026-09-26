@@ -17,7 +17,7 @@ If you don't know what Swfte is, [start here](https://www.swfte.com). It's the u
 
 ## What this gives you
 
-- **99 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
+- **237 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
 - **Stdio transport** — works out of the box with Claude Desktop and Claude Code.
 - **Workspace-scoped** — set `SWFTE_WORKSPACE_ID` once, or pass `workspaceId` per call.
 - **Zero-config security** — your API key stays on the machine running the MCP server, never in the LLM context.
@@ -51,7 +51,7 @@ widget, application, or MCP server**.
   server-side page cap, read-merge-write updates where the raw PATCH would wipe
   omitted fields, retry with load-shedding detection, and typed error envelopes
   carrying the backend's own code plus a suggested action.
-- **214 tools available, 103 advertised by default**, adjustable via `SWFTE_TOOLS`.
+- **237 tools available, 105 advertised by default**, adjustable via `SWFTE_TOOLS`.
 - **Stdio transport**, multi-arch Docker image, and Zod-typed inputs published
   as JSON Schema over `tools/list`.
 
@@ -145,11 +145,36 @@ guide, [`docs/RECIPES.md`](./docs/RECIPES.md) for worked examples, and
 | `SWFTE_PAT` | one of | — | Personal access token (`pat_…`). Acts as you. |
 | `SWFTE_API_KEY` | one of | — | Workspace API key (`sk-swfte-…` / `sk_…`). |
 | `SWFTE_BASE_URL` | ⛔ | `https://api.swfte.com/agents` | Point at a local or staging backend. |
+| `SWFTE_ALLOWED_HOSTS` | ⛔ | `api.swfte.com,localhost,127.0.0.1` | CLI: hosts a `swfte.json` `baseUrl` may name before it receives the credential (`*.example.com` for subdomains). `SWFTE_BASE_URL` is always trusted. |
 | `SWFTE_WORKSPACE_ID` | ⛔ | — | API keys only; a PAT carries its own binding. |
 | `SWFTE_TOOLS` | ⛔ | curated subset | `all`, or a comma-separated group list. |
 | `SWFTE_ALLOW_DEPLOY` | ⛔ | `0` | Required, with `confirm:true`, to provision real infrastructure. |
 | `SWFTE_DEFAULT_WAIT_MS` | ⛔ | `240000` | How long build/run tools wait before returning a resumable handle. |
 | `SWFTE_DEBUG` | ⛔ | `0` | Log request lines to stderr. |
+| `SWFTE_TELEMETRY` | ⛔ | on | `0` (or `false`, `off`, `no`) sends no usage events at all. See [Telemetry](#telemetry). |
+
+### Telemetry
+
+Four tools report, to your own workspace, that they ran — so Studio's **Solution
+Hub → Insights** can show whether reuse actually happens instead of claiming it
+saves anything:
+
+| Tool | Event | Also sends |
+|---|---|---|
+| `swfte_find_existing` | `search`, then `reuse_decision` | the recommended `catalogRef` and `decision` (`reuse`, `inspect` or `build`) |
+| `swfte_build` | `build` | the built artifact's `catalogRef`, when the build persisted one |
+| `swfte_adopt` | `adopt` | the new copy's `catalogRef` |
+| `swfte_scaffold_client` | `scaffold` | the bound artifact's `catalogRef` |
+
+Each is one `POST /v2/catalog/telemetry` with exactly
+`{ event, catalogRef?, decision?, client }` (`client` is `mcp/<version>`). No
+query text, prompt, code, inputs, outputs, file paths or user ids are sent; the
+server refuses any other field. It goes to `SWFTE_BASE_URL` with the credential
+you configured and is stored against that credential's workspace.
+
+It is best effort: fire-and-forget (a tool never waits for it), one attempt with a
+short timeout and never retried, and a failure is swallowed — telemetry cannot
+fail or slow a tool. `SWFTE_TELEMETRY=0` turns it off; nothing is sent at all.
 
 ---
 
@@ -181,7 +206,7 @@ Full endpoint→tool mapping is in [`docs/TOOLS.md`](docs/TOOLS.md). Underlying 
 
 `swfte_whoami` · `swfte_build` · `swfte_build_status` · `swfte_build_steer` ·
 `swfte_validate` · `swfte_create` · `swfte_refine` · `swfte_run` ·
-`swfte_deploy` · `swfte_verify` · `swfte_verify_batch`
+`swfte_deploy` · `swfte_verify` (`swfte_verify_batch` is in the opt-in `extras` group)
 
 Each takes a `kind`: `workflow`, `agent`, `chatflow`, `widget`, `application`,
 or `mcp-server`.
@@ -196,9 +221,9 @@ or `mcp-server`.
 | Datasets | `swfte_datasets_*` | `datasets` | ✓ |
 | Modules | `swfte_modules_*` | `modules` | ✓ |
 | Deployments | `swfte_deployments_*` | `deployments` | ✓ |
-| Analytics | `swfte_analytics_*` | `analytics` | ✓ |
+| Analytics | `swfte_analytics_*` | `analytics` | |
 | A/B experiments | `swfte_experiments_*` | `experiments` | |
-| OAuth connect | `swfte_connect_*` | `connect` | |
+| OAuth connect | `swfte_connect_*` | `connect` | ✓ |
 | Conversations | `swfte_conversations_*` | `conversations` | |
 | RAG | `swfte_rag_*` | `rag` | |
 | Voice | `swfte_voice_*` | `voice` | |
@@ -209,13 +234,256 @@ or `mcp-server`.
 | Cost control | `swfte_cost_*` | `cost` | |
 | Agent mail | `swfte_agent_mail_*` | `agent-mail` | |
 
-Advertising all 214 tools measurably degrades a model's ability to pick the
-right one, so 96 are advertised by default. `SWFTE_TOOLS=all` widens it, and
+Advertising all 237 tools measurably degrades a model's ability to pick the
+right one, so 105 are advertised by default. `SWFTE_TOOLS=all` widens it, and
 `swfte_whoami` reports which groups are live and what is hidden — nothing
 disappears silently.
 
 Full reference: [`docs/TOOLS.md`](docs/TOOLS.md). API docs:
 [swfte.com/developers](https://www.swfte.com/developers).
+
+---
+
+## Use Studio as your source of truth from Claude Code
+
+Swfte Studio keeps a catalog of every workflow, agent, chatflow, widget,
+application, MCP server, model, module and solution in your workspace (plus the
+public catalog), each with an **evidence level** computed from real runs, evals
+and reviews: `unmeasured → observed → corroborated → validated → verified`,
+plus `stale` and `disputed`. This server makes that catalog the first thing a
+coding agent consults, and the path by which proven artifacts land in your code.
+
+**1. Reuse before you generate.** `swfte_find_existing {query}` searches the
+catalog and returns ranked matches with their evidence level, the reasons they
+matched, and a recommendation — `REUSE`, `INSPECT_BEFORE_REUSE` or `BUILD`.
+A reuse recommendation carries `generationAvoidedEstimate`: a planning estimate
+for one wizard build of that kind, flagged `estimate: true` — not a measurement,
+not a saving, and never summed anywhere. What reuse actually does is measured in
+Studio → Solution Hub → Insights, from the [telemetry](#telemetry) counts.
+`swfte_build` says so in its description and repeats it in every response. If
+Jev re-ranking is unavailable the search still answers and lists it under
+`degraded`.
+
+**2. Read the context package.** `swfte_get_context {catalogRef}` returns the
+invocation contract (method, path, auth, async status path, input/output JSON
+Schemas, snippets, embed), evidence and its reasons, Jev facets (proposed vs
+confirmed), the stored design rationale, reviews and dependencies.
+`swfte_get_evidence` and `swfte_trace_dependencies` (downstream, or a bounded
+upstream scan before you change something others reuse) go deeper.
+
+**3. Check fit, then adopt — the Solution Hub.** Every entry shows who made it
+and why (`provenance`: author, why, forkedFrom, licence) and what its evidence
+rests on (independent workspaces, a Wilson interval around the success rate,
+freshness; a fork's inherited `parentEvidence` is shown apart, never merged).
+`swfte_fit_check {catalogRef, problem}` asks how well it fits *your* problem and
+stack — the stack is detected from this repo when you leave it out — and lists
+gaps and missing connections. `swfte_adopt {catalogRef, problem?, notes?,
+deploy?}` copies it into your workspace, tailored, with lineage recorded; it
+surfaces `needsInput` and missing connections (with the `swfte_connect_start`
+call that fixes each) and, if you asked for a deploy, a **PROPOSED** action a
+human approves — never executed by the adopt itself. `sourceWorkspaceId` adopts
+from another workspace you are a member of; a proprietary entry comes back as a
+hosted **binding** (nothing copied, called through its invoke path). `swfte_get_timeline` is
+the entry's diary. The prompt `pick-up-tailor-deploy` chains find → fit → adopt
+→ bake → approval → status.
+
+**Deliver to a customer, then hand over.** `swfte_deliver {catalogRef,
+targetWorkspaceId, problem?, deploy?, idempotencyKey?}` pushes an entry into a
+customer's workspace on the delivery grant they issued your organisation (works
+with a PAT). It reads the answers exactly as adopt does — the EU AI Act Art. 25
+acknowledgement is a question for the human, a proprietary licence means a
+binding — and a 404 means "not visible to you, or no live grant", deliberately
+indistinguishable: the customer's owner/admin issues a grant in Studio →
+Data → Delivery grants, `/v2/studio/delivery-grants` (≤30 days). A deploy is only PROPOSED there, for the
+customer's approvers. The handover itself is Studio-only (the API refuses tokens
+with `403 SESSION_REQUIRED`); `swfte_handover_record {catalogRef}` then exports
+the runbook into the repo under the same file-confinement rules as every other
+writer.
+
+**4. Bake it into the codebase** — see [Bake it into your codebase](#bake-it-into-your-codebase)
+below; `swfte_scaffold_client` is the MCP face of `swfte add`.
+`swfte_embed_widget` writes embed markup instead: a widget's published markup, or for an
+agent a small chat box on the public agent chat (`/v1/public/agents/{id}/chat`) with a
+publishable, origin-restricted `swfte_pk_` embed key — never a secret key.
+
+**5. Wire analytics, payments and deploys — with approval.** Platform changes go
+through approval-gated actions: `swfte_request_approval` proposes one (deploy,
+host, payments, connect, analytics), a human approves it in Studio → Actions,
+and `swfte_execute_approved_action` runs it (`409` = not approved yet, `410` =
+expired — both reported as explicit outcomes). There is deliberately no approve
+tool. `swfte_wire_analytics` and `swfte_wire_payments` wrap that flow: the
+first call proposes the action; the second, with the `actionId`, executes it
+and writes an `@swfte/analytics` init module (publishable `swfte_pk_` key in
+your env file) or a server-side checkout helper (runtime token read from
+`SWFTE_APP_RUNTIME_TOKEN`, never written). Deploys stay with `swfte_deploy`,
+which previews by default.
+
+`swfte_run` on a workflow now runs the **published** snapshot through
+`POST /v2/workflows/{id}/invoke`; a workflow with no active published version
+falls back to `/execute` and then to the draft test path, and says which path
+it took.
+
+Resources and prompts carry the same flow for clients that use them:
+`swfte://capabilities`, `swfte://catalog/{kind}/{id}` (the context package),
+and the prompts `reuse-then-build`, `ship-with-analytics-and-payments`,
+`bake-into-codebase` and `pick-up-tailor-deploy`.
+
+---
+
+## Bake it into your codebase
+
+The same package ships a `swfte` CLI. Generated code is a thin, typed binding to
+the living artifact, pinned in a committed `swfte.json`; the CLI keeps the two
+in step and fails CI when they drift. Leaving is always possible — the generated
+files are plain source with no runtime dependency.
+
+```bash
+npx -p @swfte/mcp-server swfte init                          # swfte.json + .env.example, stack, which key to create
+export SWFTE_API_KEY=sk-swfte-…            # best: a key scoped to these artifacts; SWFTE_BASE_URL / SWFTE_WORKSPACE_ID optional
+
+npx -p @swfte/mcp-server swfte add workflow:wf_123          # detect the stack, write client + adapter, pin the published version
+npx -p @swfte/mcp-server swfte dev                           # offline mock of every baked artifact on 127.0.0.1:4010
+npx -p @swfte/mcp-server swfte sync                          # refetch contracts, regenerate what moved, print a diff
+npx -p @swfte/mcp-server swfte verify                        # CI gate (below)
+npx -p @swfte/mcp-server swfte upgrade invoice-extractor     # move the pin / take a breaking change on purpose
+```
+
+**`swfte init`** writes an empty `swfte.json` and the variable *names* into
+`.env.example`, reports the detected stack, and says which credential to create:
+an API key scoped to the artifacts the code calls (`resourceScopes` — the key
+gets `403` anywhere else) rather than a personal access token, which acts as you.
+It never writes a credential: no flag accepts one (`--token`, `--api-key`, … are
+refused without echoing the value) and every write is checked for secrets.
+
+**`swfte dev [--port 4010] [--record]`** serves each artifact's invoke route
+(and the execution-status route for workflows) on `127.0.0.1` from fixtures
+derived from its contract, so the app runs with no network: point it at
+`SWFTE_BASE_URL=http://127.0.0.1:4010` with any non-empty `SWFTE_API_KEY`.
+Required inputs are validated (`400`), a missing credential is `401`, responses
+are built from the output schema's `examples` / `default` / `enum` / types, and a
+request header `X-Swfte-Dev-Status: WAITING_FOR_INPUT` (or `FAILED`) makes a run
+end that way. Without `--record` the fixtures come from the generated clients
+themselves; `--record` fetches the full contracts into `.swfte/fixtures/` first.
+
+(Installed globally, it is just `swfte …`; `npx @swfte/mcp-server swfte …` works too.)
+
+**`swfte add <catalogRef> [--framework] [--out] [--alias] [--force] [--no-pin]`** detects the
+stack from the repo's manifests — nothing leaves the machine:
+
+| Found | Framework | What is written |
+|---|---|---|
+| `next` in package.json | `nextjs` | client in `lib/swfte/` (`src/lib/swfte/` with a `src/` dir) + App Router handler `app/api/<alias>/route.ts` (respects `src/app`) |
+| `express` | `express` | client + `<alias>.router.ts` exporting an Express `Router` (`.js` import specifiers when `"type": "module"`) |
+| `@nestjs/core`, `hono`, or just `tsconfig.json`/`package.json` | `plain-ts` | the typed client only |
+| `fastapi` in pyproject.toml / requirements*.txt / Pipfile | `fastapi` | client + `<alias>_router.py` with an `APIRouter` (the sync client runs in a threadpool) |
+| `flask`, `django`, or nothing | `plain-python` | the typed client only (stdlib `urllib`) |
+
+Python output goes to `swfte_clients/` (never a bare `swfte/` package, which
+would shadow the Swfte Python SDK, `pip install swfte-sdk`). The adapter is **yours**
+and **denies by default**: it starts with an `authorize(request)` hook that returns
+`null`, so every request gets `401` until you connect it to your auth (anyone who
+can reach the route would otherwise spend your credits); the caller it returns
+also owns agent conversations. `swfte sync` never rewrites an adapter.
+
+**Version pins.** A workflow is pinned to its current published version: the
+client calls `POST /v2/workflows/{id}/versions/{version}/invoke`, so a newer
+publish upstream never changes what your code runs. `swfte sync` never moves a
+pin (it reports that a newer version exists); `swfte upgrade <alias>` moves it to
+the current published version after the breaking and re-approval checks, and
+refuses an unpublished target. `--no-pin` makes the client call `/invoke` and
+follow every publish. The client is **generated**: it carries the
+contract hash and a checksum, sends `X-Swfte-Client: <lang>/<version>; ref=<catalogRef>; hash=<contractHash>`
+(adopter usage counts, never payloads), reads agent replies as `content ?? response`,
+and polls workflow runs via `execution.status`. Nothing is overwritten without
+`--force`, paths stay inside the repo, and no credential is ever written.
+
+**`swfte.json`** (repo root, commit it):
+
+```json
+{
+  "version": 1,
+  "baseUrl": "https://api.swfte.com/agents",
+  "workspaceId": null,
+  "artifacts": [
+    {
+      "catalogRef": "workflow:wf_123",
+      "alias": "invoice-extractor",
+      "language": "typescript",
+      "framework": "nextjs",
+      "outDir": "src/lib/swfte",
+      "contractHash": "<sha256 hex of the canonical sorted-key JSON of {invoke, inputSchema, outputSchema}>",
+      "pinnedVersion": "v3",
+      "files": ["src/app/api/invoice-extractor/route.ts", "src/lib/swfte/invoice-extractor.ts"]
+    }
+  ]
+}
+```
+
+It is written deterministically (sorted, no timestamps) so parallel branches
+merge cleanly; a lock with conflict markers is refused, never rewritten blind.
+Locks written by earlier versions of this package are migrated on the next write.
+
+**`swfte sync`** regenerates clients whose contract hash moved and prints what
+changed (`+out dueDate`, `-in legacyId`). Breaking changes (a required input
+added or removed, an output field removed or retyped) and capability changes
+that need re-approval are **held back** — `swfte upgrade <alias>` takes a
+breaking change on purpose; `--accept-capability-changes` is needed as well when
+Studio flags `requiresReapproval`.
+
+**`swfte verify`** is the CI gate. It exits:
+
+- `0` and prints `SWFTE_VERIFY_OK` — every client matches the lock and no upgrade is breaking or awaiting re-approval;
+- `1` — local drift (a client missing, hand-edited, or generated against a different hash than the lock pins), a breaking upgrade pending, or `requiresReapproval`;
+- `1` also when a pinned artifact vanished (deleted, moved out of the workspace) or its pinned version is no longer published;
+- `2` — it could not check (no `swfte.json`, no credential, backend unreachable or silent past `SWFTE_TIMEOUT_MS` — 60 s by default —, or an upgrades answer that is truncated or not the documented shape). `--offline` checks local drift only.
+
+`swfte sync` holds a moved contract back (exit `2`, nothing written, pin
+unchanged) when the upgrades check is unavailable, because re-approval cannot
+be ruled out. Paths are checked component by component and symlinks are never
+written through, dangling or not.
+
+```yaml
+# .github/workflows/swfte.yml
+name: swfte
+on: [pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npx -y @swfte/mcp-server swfte verify
+        env:
+          SWFTE_API_KEY: ${{ secrets.SWFTE_API_KEY }}
+```
+
+From an MCP client the same code runs as `swfte_scaffold_client`, `swfte_sync`
+and `swfte_check_upgrades`.
+
+### Compliance checks on generated code
+
+`swfte verify --compliance` also sends the files swfte generated (every path in
+`swfte.json` `files`) plus any `--paths a,b` to `POST /v2/compliance/scan`, and
+exits `1` on a critical or high finding, `2` when some code could not be checked
+(an incomplete scan is never a pass). `swfte add` scans what it just wrote and
+prints the findings; they are advisory unless you pass `--strict`. Credential
+files (`.env`, keys), binaries, symlinks and files over 200 KB are never
+uploaded, and nothing outside the project directory is read. The MCP face is
+`swfte_compliance_scan_code`; `swfte_compliance_assess`,
+`swfte_get_evidence_record`, `swfte_compliance_export` and
+`swfte_compliance_history` cover artifacts. A Control Evidence Record supports
+your audit; it is not an audit opinion.
+
+### Where your credential goes
+
+The CLI sends `SWFTE_API_KEY` / `SWFTE_PAT` only to `SWFTE_BASE_URL` from the
+environment, or to the `baseUrl` in `swfte.json` when that host is allowed:
+`SWFTE_ALLOWED_HOSTS` (comma-separated, `*.example.com` for subdomains) or, by
+default, `api.swfte.com`, `localhost` and `127.0.0.1`, over https except on
+loopback. `swfte.json` is committed, so a pull request could otherwise point CI
+at another host. Any other host is refused (`swfte verify` exits `2`), and it is
+never baked into a generated client as its default.
 
 ---
 
@@ -308,7 +576,7 @@ Repository secrets required: `NPM_TOKEN`, `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN
 
 If you'd rather call the Swfte API directly, use one of the official SDKs:
 
-- 🐍 [Python](https://github.com/SwfteAI/swfte-python) — `pip install swfte`
+- 🐍 [Python](https://github.com/SwfteAI/swfte-python) — `pip install swfte-sdk` (imported as `swfte`)
 - 🟦 [Node / TypeScript](https://github.com/SwfteAI/swfte-node) — `npm install @swfte/sdk`
 - ☕ [Java](https://github.com/SwfteAI/swfte-java) — `com.swfte:swfte-sdk`
 - 💬 [Chat Widget](https://github.com/SwfteAI/swfte-chat-widget) — embeddable chat bubble

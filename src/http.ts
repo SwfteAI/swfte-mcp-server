@@ -61,6 +61,8 @@ export function createHttpHandler(opts: HttpHandlerOptions): (req: Request) => P
       authInfo = result.authInfo;
     }
 
+    // Hosted: this process's disk is not the caller's project. Local-file tools
+    // refuse, and file-producing tools hand their files back inline instead.
     const server = buildServer({ config: opts.config, resolveClient: opts.resolveClient, localFilesystem: false });
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 

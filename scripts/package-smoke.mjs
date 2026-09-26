@@ -24,5 +24,17 @@ try {
   execFileSync(process.execPath, ['--import', 'tsx', join(root, 'scripts/protocol-smoke.ts')], {
     cwd: root, env: { ...process.env, SWFTE_SMOKE_ENTRY: join(packed, metadata.main) }, stdio: 'inherit', timeout: 45_000,
   });
+  // The `swfte` bin and the `npx @swfte/mcp-server swfte …` passthrough both run from the tarball.
+  for (const [name, target] of Object.entries(metadata.bin)) assert(existsSync(join(packed, target)), `bin ${name} → ${target} is missing`);
+  assert.equal(execFileSync(process.execPath, [join(packed, metadata.bin.swfte), '--version'], { encoding: 'utf8', timeout: 20_000 }).trim(), metadata.version);
+  assert.equal(execFileSync(process.execPath, [join(packed, metadata.main), 'swfte', '--version'], { encoding: 'utf8', timeout: 20_000 }).trim(), metadata.version);
+  const empty = mkdtempSync(join(temporary, 'empty-project-'));
+  let exit = 0;
+  try {
+    execFileSync(process.execPath, [join(packed, metadata.bin.swfte), 'verify', '--offline'], { cwd: empty, stdio: 'pipe', timeout: 20_000 });
+  } catch (err) {
+    exit = err.status;
+  }
+  assert.equal(exit, 2, 'swfte verify without a swfte.json must exit 2 (could not check), never 0');
   console.log(`PACKAGE_SMOKE_PASSED ${metadata.name}@${metadata.version} files=${files.size} integrity=${receipt.integrity}`);
 } finally { rmSync(temporary, { recursive: true, force: true }); }

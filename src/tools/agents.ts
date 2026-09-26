@@ -107,6 +107,9 @@ export const agentTools: ToolDefinition[] = [
   },
   {
     name: 'swfte_agents_chat',
+    // Same endpoint as swfte_run {kind:"agent"}, which also retries through load-shedding.
+    // Redundant with a default tool (see 'extras' in src/config.ts); opt in with SWFTE_TOOLS=…,extras.
+    group: 'extras',
     title: 'Chat with an agent',
     description:
       'Send one turn to an agent and return its reply. Prefer swfte_run with kind:"agent", which ' +
@@ -145,6 +148,9 @@ export const agentTools: ToolDefinition[] = [
   },
   {
     name: 'swfte_agents_wizard_quick',
+    // swfte_build {kind:"agent"} + swfte_create does the same with a review step.
+    // Redundant with a default tool (see 'extras' in src/config.ts); opt in with SWFTE_TOOLS=…,extras.
+    group: 'extras',
     title: 'Quick-create an agent',
     description:
       'Generate AND persist an agent from a description in one synchronous call. Fast, but it skips ' +

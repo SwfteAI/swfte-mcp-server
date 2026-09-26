@@ -18,6 +18,8 @@
  *   workspace id.
  */
 
+import { telemetryEnabled } from './telemetry.js';
+
 /** Which credential family the configured secret belongs to. */
 export type CredentialKind = 'pat' | 'api-key';
 
@@ -29,7 +31,7 @@ export type CredentialKind = 'pat' | 'api-key';
 export const TOOL_GROUPS = [
   'custom-nodes',
   'apps', // Hosted AppWizard sessions; opt in explicitly or use all.
-  'core', // whoami + the 8 ship tools + verify — the reason this server exists
+  'core', // ship/verify/solution/preflight + catalog reuse, scaffold, actions, wiring — always advertised
   'workflows',
   'agents',
   'chatflows',
@@ -56,6 +58,11 @@ export const TOOL_GROUPS = [
   // tool-surface budget.
   'journeys',
   'relay',
+  // Convenience variants of tools that are already advertised (same endpoint, a
+  // subset of one, or superseded by an advertised tool that does strictly
+  // more). Out of DEFAULT_GROUPS so they do not spend the budget twice; still
+  // reachable by name through SWFTE_TOOLS=…,extras.
+  'extras',
 ] as const;
 
 export type ToolGroup = (typeof TOOL_GROUPS)[number];
@@ -63,8 +70,9 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is 190 tools, which measurably degrades a model's ability
- * to pick the right one. This subset covers building, shipping, and inspecting
+ * The full surface is 237 tools, which measurably degrades a model's ability
+ * to pick the right one (test/tools.test.ts "the budget comment carries the measured counts" keeps
+ * these two numbers true). This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
  * `SWFTE_TOOLS=all` advertises everything, and `swfte_whoami` reports which
  * groups are live so nothing is hidden silently.
@@ -77,7 +85,17 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   'datasets',
   'modules',
   'deployments',
-  'analytics',
+  // `analytics` (13 read-only reporting tools) left the default set when the
+  // eleven Studio-as-source-of-truth tools joined `core` (find_existing,
+  // get_context, get_evidence, trace_dependencies, scaffold_client,
+  // embed_widget, request_approval, execute_approved_action,
+  // get_action_status, wire_analytics, wire_payments). Measured at that point:
+  // 225 registered, 101 advertised against a ceiling of 103 —
+  //   core 30, workflows 19, agents 12, chatflows 12, deployments 8,
+  //   datasets 6, modules 6, connect 5, untagged 3.
+  // Keeping analytics would have made it 114. None of its tools is needed to
+  // build, reuse or ship anything; it was the lever the budget note in
+  // test/tools.test.ts named. `SWFTE_TOOLS=core,…,analytics` brings it back.
   // Small (5 tools) and load-bearing: this is the only way to get a user signed
   // in to a provider their workflow needs. Hidden, an agent cannot repair — or
   // even name — a missing credential, so an integration workflow fails at
@@ -85,11 +103,50 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   // trimming the surface does not apply to the tools that make the advertised
   // ones work.
   'connect',
+  // Solution Hub + bake-in (leaf-1.2.4) added five `core` tools — fit_check,
+  // adopt, get_timeline, sync, check_upgrades — without raising the ceiling:
+  // three exact duplicates moved to the opt-in `extras` group
+  // (swfte_workflows_executions_list = swfte_workflows_executions, same
+  // endpoint; swfte_workflows_deployment_status_simple ⊂
+  // swfte_workflows_deployment_status; swfte_deployments_count ⊂
+  // swfte_deployments_list). Measured at that point: 230 registered, 103
+  // advertised against the ceiling of 103.
+  //
+  // Compliance control plane (leaf-2.9, CONTRACT rev 7) added five `core`
+  // tools — compliance_assess, compliance_scan_code, get_evidence_record,
+  // compliance_export, compliance_history — and paid for them rather than
+  // raising the ceiling: five advertised tools that another advertised tool
+  // covers moved to `extras`:
+  //   swfte_agents_chat          = swfte_run {kind:"agent"} (same endpoint, plus retry)
+  //   swfte_connect_status       = swfte_connect_wait (same endpoint; its first poll is immediate)
+  //   swfte_verify_batch         = a loop over swfte_verify
+  //   swfte_workflows_validate   ⊂ swfte_validate {kind:"workflow"} (review + static graph analysis)
+  //   swfte_agents_wizard_quick  ⊂ swfte_build {kind:"agent"} + swfte_create (with a review step)
+  // Measured at that point: 235 registered, 103 advertised against the ceiling
+  // of 103 — core 39, workflows 16, agents 10, chatflows 12, deployments 7,
+  //   datasets 6, modules 6, connect 4, untagged 3.
+  // The next addition has no covered tool left to trade; argue the number.
+  //
+  // Argued (leaf-2.24, cross-organisation delivery, agents-service #452): two
+  // `core` tools joined the Solution Hub beside swfte_adopt — swfte_deliver
+  // (push an entry into a customer's workspace on their delivery grant) and
+  // swfte_handover_record (export the runbook of a handover taken in Studio
+  // into the repo). DEFAULT_GROUPS did not change; the default SURFACE grew by
+  // exactly these two, and the ceiling moved 103 → 105 with it. Why not trade:
+  // nothing advertised covers either (no other tool delivers across workspaces
+  // or exports a handover), and the remaining advertised tools are not exact
+  // duplicates of one another. Why `core` and not an opt-in group: deliver
+  // shares adopt's Art. 25 question flow and licence-binding reading, and a
+  // step of the pick-up → adopt → deliver → hand over path that a group filter
+  // can hide is a step that gets skipped.
+  // Measured now: 237 registered, 105 advertised against the ceiling of 105 —
+  //   core 41, workflows 16, agents 10, chatflows 12, deployments 7,
+  //   datasets 6, modules 6, connect 4, untagged 3.
   // `journeys` and `relay` are deliberately absent, and that is a decision to
-  // revisit rather than a default to inherit. The surface already sits at 81
-  // against a bound of 85 — a bound that exists because a large advertised
-  // surface measurably degrades a model's ability to pick the right tool. Adding
-  // three more modules would push past it. They stay reachable through
+  // revisit rather than a default to inherit. The surface sits at 105 against
+  // a ceiling of 105 — a ceiling that exists because a large advertised surface
+  // measurably degrades a model's ability to pick the right tool. Adding them
+  // (17 tools) would push well past it. They stay reachable through
   // SWFTE_TOOLS; whether an agent should reach for Relay tools unprompted is a
   // product question, not a merge resolution.
 ];
@@ -116,6 +173,11 @@ export interface ServerConfig {
   allowDeploy: boolean;
   /** Default ceiling (ms) for tools that poll a long-running job to terminal. */
   defaultWaitMs: number;
+  /**
+   * Counts-only usage events (see `telemetry.ts`). On unless `SWFTE_TELEMETRY` is
+   * 0 / false / off / no; best effort either way — it never blocks or fails a tool.
+   */
+  telemetry: boolean;
 }
 
 const PAT_PREFIX = 'pat_';
@@ -169,6 +231,25 @@ function parseWaitMs(raw: string | undefined): number {
 const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const isTrue = (v: string | undefined): boolean => TRUE_VALUES.has((v ?? '').toLowerCase());
 
+/**
+ * SWFTE_BASE_URL, refused when it carries credentials (`https://user:key@host`):
+ * fetch would send them as Basic auth and quote them in error text that lands
+ * in CI logs (BT-N8). The message never repeats the URL.
+ */
+export function cleanBaseUrl(raw: string): string {
+  const v = raw.trim().replace(/\/+$/, '');
+  let u: URL;
+  try {
+    u = new URL(v);
+  } catch {
+    throw new ConfigError('SWFTE_BASE_URL is not a valid absolute URL (e.g. https://api.swfte.com/agents).');
+  }
+  if (u.username || u.password) {
+    throw new ConfigError('SWFTE_BASE_URL must not contain credentials (user:password@host). Remove them; the credential belongs in SWFTE_API_KEY.');
+  }
+  return v;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const pat = env.SWFTE_PAT?.trim();
   const apiKey = env.SWFTE_API_KEY?.trim();
@@ -217,12 +298,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   return {
     credential: secret,
     credentialKind: detected,
-    baseUrl: (env.SWFTE_BASE_URL ?? 'https://api.swfte.com/agents').replace(/\/+$/, ''),
+    baseUrl: cleanBaseUrl(env.SWFTE_BASE_URL ?? 'https://api.swfte.com/agents'),
     workspaceId: env.SWFTE_WORKSPACE_ID?.trim() || undefined,
     userAgent: `swfte-mcp-server/${env.SWFTE_MCP_VERSION ?? '0.2.0'} (+https://www.swfte.com)`,
     debug: isTrue(env.SWFTE_DEBUG),
     enabledGroups: parseGroups(env.SWFTE_TOOLS),
     allowDeploy: isTrue(env.SWFTE_ALLOW_DEPLOY),
     defaultWaitMs: parseWaitMs(env.SWFTE_DEFAULT_WAIT_MS),
+    telemetry: telemetryEnabled(env),
   };
 }

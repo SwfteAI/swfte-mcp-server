@@ -24,7 +24,18 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  process.stderr.write(`[swfte-mcp] fatal: ${err instanceof Error ? err.stack : String(err)}\n`);
-  process.exit(1);
-});
+// `npx @swfte/mcp-server swfte verify` (and any `swfte-mcp-server swfte …`) runs
+// the bake-in CLI instead of the MCP server, so CI needs no second package.
+if (process.argv[2] === 'swfte') {
+  import('./cli.js')
+    .then((cli) => cli.main(process.argv.slice(3)))
+    .catch((err) => {
+      process.stderr.write(`[swfte] fatal: ${err instanceof Error ? err.stack : String(err)}\n`);
+      process.exitCode = 1;
+    });
+} else {
+  main().catch((err) => {
+    process.stderr.write(`[swfte-mcp] fatal: ${err instanceof Error ? err.stack : String(err)}\n`);
+    process.exit(1);
+  });
+}

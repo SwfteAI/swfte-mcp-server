@@ -112,6 +112,8 @@ export const deploymentTools: ToolDefinition[] = [
   },
   {
     name: 'swfte_deployments_count',
+    // Redundant with a default tool (see 'extras' in src/config.ts); opt in with SWFTE_TOOLS=…,extras.
+    group: 'extras',
     title: 'Count deployments',
     readOnly: true,
     description: 'How many deployments exist — a quick way to spot capacity left running by mistake.',
