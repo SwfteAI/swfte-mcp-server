@@ -191,3 +191,17 @@ export type SimulationEvent =
   | { event: 'coverage'; data: { cells: SimulationCoverageCell[]; completeness: number } }
   | { event: 'report'; data: { overall: SimulationOutcome } }
   | { event: 'heartbeat'; data: { at: string } }
+
+export type SimulationPersonaSummary = {
+  id: string
+  archetype: 'USER' | 'ADVERSARY' | 'CHAOS' | 'AUDITOR' | 'STAKEHOLDER'
+  name: string
+  pack: string
+  tacticId: string
+  locale: string
+}
+
+export type SimulationGraph = {
+  elements: Array<{ id: string; type: string; label: string; attrs: Record<string, unknown> }>
+  edges: Array<{ from: string; to: string; relation: string }>
+}
