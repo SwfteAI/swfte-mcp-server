@@ -21,6 +21,8 @@ export const MCP_SESSION_HEADER = 'X-Swfte-Mcp-Session';
  * strict `X-Swfte-Client` adopter-usage header, which stays untouched (validation open question 1).
  */
 export const MCP_CLIENT_HEADER = 'X-Swfte-Mcp-Client';
+/** The MCP tool name the request serves (e.g. swfte_build). Becomes the backend step's `tool`. */
+export const MCP_TOOL_HEADER = 'X-Swfte-Mcp-Tool';
 /** What the backend echoes: 32 lowercase hex. */
 export const TRACE_ECHO_HEADER = 'X-Swfte-Trace-Id';
 
