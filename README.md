@@ -233,8 +233,9 @@ or `mcp-server`.
 | Audit | `swfte_audit_*` | `audit` | |
 | Cost control | `swfte_cost_*` | `cost` | |
 | Agent mail | `swfte_agent_mail_*` | `agent-mail` | |
+| Simulations (validate locally, create, start, status, findings, report) | `swfte_simulation_*` | `simulations` | |
 
-Advertising all 237 tools measurably degrades a model's ability to pick the
+Advertising all 243 tools measurably degrades a model's ability to pick the
 right one, so 105 are advertised by default. `SWFTE_TOOLS=all` widens it, and
 `swfte_whoami` reports which groups are live and what is hidden — nothing
 disappears silently.
