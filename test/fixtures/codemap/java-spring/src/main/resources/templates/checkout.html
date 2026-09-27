@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Checkout</title>
+  <script src="https://unpkg.com/@swfte/chat-widget@1.4.0/dist/swfte-chat.umd.js"></script>
+</head>
+<body>
+<form th:action="@{/checkout}" method="post">
+  <button type="submit">Pay</button>
+</form>
+<script th:inline="javascript">
+  var checkoutHelp = new SwfteChatWidget({ agentId: 'ag_JvSales', type: 'bubble', greeting: /*[[#{checkout.greeting}]]*/ 'Questions about your order?' });
+  checkoutHelp.mount();
+</script>
+</body>
+</html>

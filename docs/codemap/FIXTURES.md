@@ -66,8 +66,8 @@ scripts, React components, FastAPI routers, Celery tasks, Spring controllers/ser
   vendored `node_modules/`, `.venv/`, `target/`, `build/`, `dist/`, a checked-in generated client
   from another tool marked `@generated` / `// Code generated … DO NOT EDIT`, a fork of the SDK under
   another package name (`@acme/swfte-fork`) not listed in swfte.json, `.d.ts` stubs.
-- **Env files:** `.env.example` with `SWFTE_*` names (names are expected in `envVarNames`); `.env` and
-  `.env.local` holding canary values (§5) that the scanner must never open.
+- **Env files:** `_env/dot-env.example` with `SWFTE_*` names (names are expected in `envVarNames`); `_env/dot-env` and
+  `_env/dot-env.local` holding canary values (§5) that the scanner must never open (CONTRACT D10: neutral names mapped onto the env-file globs; no `.env*` file anywhere).
 - **Canary plants** (§5) at the listed places.
 - **Unsupported languages:** at least one `.go`, `.rb` and `.php` file with Swfte calls in `ts-next`
   or `monorepo` (key lists them under `notAnalysed`, not `sites`).
@@ -144,6 +144,29 @@ py-fastapi: `python3 -m compileall -q .` passes; `tests/` has pytest tests using
 `line` is the 1-based line where the call expression (or the embed element / URL-bearing call) starts.
 `symbol` follows CONTRACT §2.1. `why` ∈ `comment|docstring|markdown|test-mock|vendored|generated|fork|
 dts|string-not-call`. Sites are sorted by (path, line).
+
+### 4.1 Labelling rules (detectors implement the same rules)
+
+- **inputKeys:** the top-level keys of the object/dict/Map literal passed as the artifact input
+  (shorthand `{ sources, topic }` counts); when the input is a variable bound to such a literal in the
+  same function, that literal's keys; a spread, `**kwargs`, a parameter, or anything else →
+  `["*"]`; no input argument (read-output, status) → `[]`. For chat calls the message argument is
+  not a key (`[]`) unless an inputs object is passed.
+- **outputKeys:** dotted access paths below the artifact output root read in the same function
+  (TS generated client: `res.output.x.y`; SDK: `execution.output`/`outputData`/`output_data`,
+  `getOutput()` then `.x`), cut at the first computed or index access (`out.articles[0].title` →
+  `articles`); destructuring counts (`const { articles } = res.output` → `articles`). Envelope
+  fields (`status`, `ok`, `executionId`, `execution_id`, `getStatus()`) are not output keys. The
+  result never read → `[]`. A result passed whole to another function → `["*"]`.
+- **op:** workflow invoke/execute/run → `run`; chat → `chat`; streaming variants → `stream`; widget
+  embeds → `embed`; reading executions/status/history/output of an artifact without invoking →
+  `read-output`; a handler receiving a Swfte webhook → `webhook-receive`.
+- **One site per call expression.** A multi-line call is one site at its first line. A generated
+  client's own `fetch`/`urlopen` is an implementation, not a site. SDK construction (`new Swfte()`)
+  and imports are not sites.
+- **Raw HTTP:** a request whose URL is a Swfte API URL (host `api.swfte.com`, `SWFTE_BASE_URL`, or a
+  same-file constant holding either) and whose path names an artifact route; the artifact id comes
+  from the literal path; an id from a variable/env/config → `dynamic`.
 
 ## 5. canaries.json
 

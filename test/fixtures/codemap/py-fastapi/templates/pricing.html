@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Pricing{% endblock %}
+{% block content %}
+<h1>Plans</h1>
+<div id="pricing-chat" style="height: 420px"></div>
+{% endblock %}
+{% block chat %}
+<script src="https://unpkg.com/@swfte/chat-widget@1.4.0/dist/swfte-chat.umd.js"></script>
+<script>
+  var pricingChat = new SwfteChatWidget({
+    agentId: "ag_Sales6",
+    type: "embedded",
+    container: "#pricing-chat",
+    placeholder: "Ask about plans",
+  });
+  pricingChat.mount();
+</script>
+{% endblock %}

@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<body>
+<div th:fragment="bubble">
+  <script src="https://cdn.jsdelivr.net/npm/@swfte/chat-widget@1.4.0/dist/swfte-chat.umd.js"></script>
+  <script>
+    window.addEventListener('load', function () {
+      new SwfteChatWidget({ agentId: 'ag_JvPortal', type: 'bubble' }).mount();
+    });
+  </script>
+</div>
+</body>
+</html>

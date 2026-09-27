@@ -1,0 +1,6 @@
+{
+  "name": "acme-decoys",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": { "@acme/swfte-fork": "^0.9.0" }
+}

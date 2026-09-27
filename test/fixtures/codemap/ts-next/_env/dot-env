@@ -1,0 +1,3 @@
+SWFTE_API_KEY=__CANARY_env__
+SWFTE_BASE_URL=https://api.swfte.com/agents
+SWFTE_WORKSPACE_ID=ws_acme01

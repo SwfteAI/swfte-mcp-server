@@ -1,0 +1,2195 @@
+{
+  "fixture": "py-fastapi",
+  "labelledBy": "leaf-1.1.3 (claude, hand-labelled from the code)",
+  "reviewedBy": null,
+  "sites": [
+    {
+      "path": "app/audit.py",
+      "line": 21,
+      "language": "python",
+      "category": "managed",
+      "symbol": "record",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Aud1Lg",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "actor",
+        "event"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/audit.py",
+      "line": 26,
+      "language": "python",
+      "category": "managed",
+      "symbol": "record_login",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Aud1Lg",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "actor",
+        "event"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/cli.py",
+      "line": 12,
+      "language": "python",
+      "category": "managed",
+      "symbol": "Replayer.__init__",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Ops3Bt",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/cli.py",
+      "line": 15,
+      "language": "python",
+      "category": "managed",
+      "symbol": "Replayer.replay",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Nrm1Dt",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "rows",
+        "testingFlag"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/cli.py",
+      "line": 20,
+      "language": "python",
+      "category": "managed",
+      "symbol": "Replayer.replay_all.send",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Nrm1Dt",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "rows"
+      ],
+      "outputKeys": [
+        "*"
+      ]
+    },
+    {
+      "path": "app/embeds.py",
+      "line": 9,
+      "language": "python",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Help4Py",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/embeds.py",
+      "line": 15,
+      "language": "python",
+      "category": "widget",
+      "symbol": "portal_iframe",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Portal7",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/embeds.py",
+      "line": 22,
+      "language": "python",
+      "category": "widget",
+      "symbol": "sales_widget",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Sales6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/embeds.py",
+      "line": 28,
+      "language": "python",
+      "category": "dynamic",
+      "symbol": "iframe_for",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/main.py",
+      "line": 15,
+      "language": "python",
+      "category": "managed",
+      "symbol": "lifespan",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Ops3Bt",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/routers/billing.py",
+      "line": 14,
+      "language": "python",
+      "category": "managed",
+      "symbol": "charge",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Bil6Rn",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "amount",
+        "invoiceId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/routers/billing.py",
+      "line": 20,
+      "language": "python",
+      "category": "managed",
+      "symbol": "charge_and_wait",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Bil6Rn",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "invoiceId"
+      ],
+      "outputKeys": [
+        "paid"
+      ]
+    },
+    {
+      "path": "app/routers/contracts.py",
+      "line": 20,
+      "language": "python",
+      "category": "managed",
+      "symbol": "review_contract",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Ctr8Rv",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "contract-review",
+        "pinnedVersion": "3"
+      },
+      "inputKeys": [
+        "documentUrl",
+        "jurisdiction"
+      ],
+      "outputKeys": [
+        "clauses"
+      ]
+    },
+    {
+      "path": "app/routers/leads.py",
+      "line": 21,
+      "language": "python",
+      "category": "managed",
+      "symbol": "score",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Sc",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "lead-scoring",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "company",
+        "domain"
+      ],
+      "outputKeys": [
+        "score"
+      ]
+    },
+    {
+      "path": "app/routers/leads.py",
+      "line": 27,
+      "language": "python",
+      "category": "managed",
+      "symbol": "enrich_lead",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Enr4Ch",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "domain",
+        "leadId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/routers/reports.py",
+      "line": 14,
+      "language": "python",
+      "category": "managed",
+      "symbol": "report_runs",
+      "sdk": "python",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Rpt9Wk",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/routers/reports.py",
+      "line": 20,
+      "language": "python",
+      "category": "managed",
+      "symbol": "open_intake",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "chatflow",
+        "id": "cf_Intake2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/routers/support.py",
+      "line": 22,
+      "language": "python",
+      "category": "managed",
+      "symbol": "ask_sales",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Sales6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/routers/support.py",
+      "line": 28,
+      "language": "python",
+      "category": "managed",
+      "symbol": "ask_helpdesk",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Help4Py",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "helpdesk-agent",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "message"
+      ],
+      "outputKeys": [
+        "content"
+      ]
+    },
+    {
+      "path": "app/routers/webhooks.py",
+      "line": 15,
+      "language": "python",
+      "category": "managed",
+      "symbol": "crm_event",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Aud1Lg",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "actor",
+        "event"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/churn_service.py",
+      "line": 10,
+      "language": "python",
+      "category": "managed",
+      "symbol": "flag_customer",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Chn7Rs",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "customerId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/churn_service.py",
+      "line": 15,
+      "language": "python",
+      "category": "managed",
+      "symbol": "risk_band",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Chn7Rs",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "customerId",
+        "window"
+      ],
+      "outputKeys": [
+        "risk"
+      ]
+    },
+    {
+      "path": "app/services/churn_service.py",
+      "line": 20,
+      "language": "python",
+      "category": "managed",
+      "symbol": "retention_note",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Ret2Cx",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/contract_service.py",
+      "line": 12,
+      "language": "python",
+      "category": "managed",
+      "symbol": "review",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Ctr8Rv",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "contract-review",
+        "pinnedVersion": "3"
+      },
+      "inputKeys": [
+        "documentUrl",
+        "jurisdiction"
+      ],
+      "outputKeys": [
+        "risk",
+        "summary"
+      ]
+    },
+    {
+      "path": "app/services/contract_service.py",
+      "line": 18,
+      "language": "python",
+      "category": "managed",
+      "symbol": "review_all.one",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Ctr8Rv",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "contract-review",
+        "pinnedVersion": "3"
+      },
+      "inputKeys": [
+        "documentUrl",
+        "jurisdiction"
+      ],
+      "outputKeys": [
+        "*"
+      ]
+    },
+    {
+      "path": "app/services/contract_service.py",
+      "line": 24,
+      "language": "python",
+      "category": "managed",
+      "symbol": "review_with_fallback",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Ctr8Rv",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "contract-review",
+        "pinnedVersion": "3"
+      },
+      "inputKeys": [
+        "documentUrl",
+        "jurisdiction"
+      ],
+      "outputKeys": [
+        "*"
+      ]
+    },
+    {
+      "path": "app/services/contract_service.py",
+      "line": 32,
+      "language": "python",
+      "category": "managed",
+      "symbol": "high_risk_clauses",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Ctr8Rv",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "contract-review",
+        "pinnedVersion": "3"
+      },
+      "inputKeys": [
+        "documentUrl",
+        "jurisdiction"
+      ],
+      "outputKeys": [
+        "clauses"
+      ]
+    },
+    {
+      "path": "app/services/contract_service.py",
+      "line": 37,
+      "language": "python",
+      "category": "managed",
+      "symbol": "recent_reviews",
+      "sdk": "python",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Ctr8Rv",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/intake_service.py",
+      "line": 11,
+      "language": "python",
+      "category": "managed",
+      "symbol": "open_web_session",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "chatflow",
+        "id": "cf_Intake2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/intake_service.py",
+      "line": 15,
+      "language": "python",
+      "category": "managed",
+      "symbol": "open_sms_session",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "chatflow",
+        "id": "cf_Intake2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "phone"
+      ],
+      "outputKeys": [
+        "*"
+      ]
+    },
+    {
+      "path": "app/services/invoice_service.py",
+      "line": 11,
+      "language": "python",
+      "category": "managed",
+      "symbol": "extract",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Inv3Xt",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "invoice-extract",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "fileUrl"
+      ],
+      "outputKeys": [
+        "total",
+        "vendor"
+      ]
+    },
+    {
+      "path": "app/services/invoice_service.py",
+      "line": 16,
+      "language": "python",
+      "category": "managed",
+      "symbol": "extract_lines",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Inv3Xt",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "invoice-extract",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "currency",
+        "fileUrl"
+      ],
+      "outputKeys": [
+        "lines"
+      ]
+    },
+    {
+      "path": "app/services/invoice_service.py",
+      "line": 24,
+      "language": "python",
+      "category": "managed",
+      "symbol": "extract_total",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Inv3Xt",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "invoice-extract",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "currency",
+        "fileUrl"
+      ],
+      "outputKeys": [
+        "total"
+      ]
+    },
+    {
+      "path": "app/services/invoice_service.py",
+      "line": 30,
+      "language": "python",
+      "category": "managed",
+      "symbol": "reconcile",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Inv3Xt",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "fileUrl"
+      ],
+      "outputKeys": [
+        "total"
+      ]
+    },
+    {
+      "path": "app/services/lead_service.py",
+      "line": 18,
+      "language": "python",
+      "category": "managed",
+      "symbol": "LeadService.score",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Sc",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "lead-scoring",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "company",
+        "domain"
+      ],
+      "outputKeys": [
+        "score",
+        "tier"
+      ]
+    },
+    {
+      "path": "app/services/lead_service.py",
+      "line": 23,
+      "language": "python",
+      "category": "managed",
+      "symbol": "LeadService.score_with_size",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Sc",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "lead-scoring",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "company",
+        "domain",
+        "employees"
+      ],
+      "outputKeys": [
+        "reasons"
+      ]
+    },
+    {
+      "path": "app/services/lead_service.py",
+      "line": 29,
+      "language": "python",
+      "category": "managed",
+      "symbol": "LeadService.rescore",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Sc",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "lead-scoring",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "*"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/lead_service.py",
+      "line": 33,
+      "language": "python",
+      "category": "managed",
+      "symbol": "LeadService.score_many",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Sc",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "lead-scoring",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "company",
+        "domain"
+      ],
+      "outputKeys": [
+        "*"
+      ]
+    },
+    {
+      "path": "app/services/lead_service.py",
+      "line": 36,
+      "language": "python",
+      "category": "managed",
+      "symbol": "LeadService.score_verbose",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Sc",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "lead-scoring",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "company",
+        "domain",
+        "employees"
+      ],
+      "outputKeys": [
+        "score"
+      ]
+    },
+    {
+      "path": "app/services/lead_service.py",
+      "line": 50,
+      "language": "python",
+      "category": "managed",
+      "symbol": "LeadService.enrich",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Enr4Ch",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "domain"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/onboarding_service.py",
+      "line": 16,
+      "language": "python",
+      "category": "managed",
+      "symbol": "start",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Onb2Rd",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "accountId",
+        "plan"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/onboarding_service.py",
+      "line": 22,
+      "language": "python",
+      "category": "managed",
+      "symbol": "start_trial",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Onb2Rd",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "accountId",
+        "trial"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/onboarding_service.py",
+      "line": 27,
+      "language": "python",
+      "category": "managed",
+      "symbol": "onboarding_statuses",
+      "sdk": "python",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Onb2Rd",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/onboarding_service.py",
+      "line": 32,
+      "language": "python",
+      "category": "dynamic",
+      "symbol": "start_custom",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": null,
+        "unresolved": true,
+        "envVarName": "SWFTE_ONBOARDING_WF",
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "accountId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/onboarding_service.py",
+      "line": 38,
+      "language": "python",
+      "category": "dynamic",
+      "symbol": "send_welcome",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "accountId",
+        "email"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/onboarding_service.py",
+      "line": 44,
+      "language": "python",
+      "category": "dynamic",
+      "symbol": "send_digest",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": null,
+        "unresolved": true,
+        "envVarName": "SWFTE_DIGEST_WF",
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "accountId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 20,
+      "language": "python",
+      "category": "raw-http",
+      "symbol": "score_lead_raw",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Sc",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "company",
+        "domain"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 26,
+      "language": "python",
+      "category": "raw-http",
+      "symbol": "onboard_raw",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Onb2Rd",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "accountId",
+        "plan"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 30,
+      "language": "python",
+      "category": "raw-http",
+      "symbol": "weekly_report_raw",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Rpt9Wk",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "week"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 35,
+      "language": "python",
+      "category": "raw-http",
+      "symbol": "sales_chat_raw",
+      "sdk": "http",
+      "op": "chat",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Sales6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "message"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 41,
+      "language": "python",
+      "category": "raw-http",
+      "symbol": "review_v2_raw",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Ctr8Rv",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": "2"
+      },
+      "inputKeys": [
+        "documentUrl",
+        "jurisdiction"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 45,
+      "language": "python",
+      "category": "raw-http",
+      "symbol": "concierge_raw",
+      "sdk": "http",
+      "op": "chat",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Pub5Py",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "message",
+        "visitorId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 55,
+      "language": "python",
+      "category": "raw-http",
+      "symbol": "faq_widget_raw",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "widget",
+        "id": "wg_Faq8Hp",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "query"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 59,
+      "language": "python",
+      "category": "raw-http",
+      "symbol": "intake_session_raw",
+      "sdk": "http",
+      "op": "chat",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "chatflow",
+        "id": "cf_Intake2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "channel"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 64,
+      "language": "python",
+      "category": "raw-http",
+      "symbol": "churn_raw",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Chn7Rs",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "customerId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 69,
+      "language": "python",
+      "category": "raw-http",
+      "symbol": "report_runs_raw",
+      "sdk": "http",
+      "op": "read-output",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Rpt9Wk",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 73,
+      "language": "python",
+      "category": "raw-http",
+      "symbol": "bill_raw",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Bil6Rn",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "amount",
+        "invoiceId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 78,
+      "language": "python",
+      "category": "dynamic",
+      "symbol": "bill_configured_raw",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "invoiceId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 83,
+      "language": "python",
+      "category": "dynamic",
+      "symbol": "escalate_raw",
+      "sdk": "http",
+      "op": "chat",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": "SWFTE_SUPPORT_AGENT_ID",
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "message"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/raw_gateway.py",
+      "line": 94,
+      "language": "python",
+      "category": "raw-http",
+      "symbol": "audit_raw",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Aud1Lg",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "*"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/report_service.py",
+      "line": 24,
+      "language": "python",
+      "category": "managed",
+      "symbol": "ReportService.weekly",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Rpt9Wk",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "teams",
+        "week"
+      ],
+      "outputKeys": [
+        "highlights",
+        "metrics.revenue"
+      ]
+    },
+    {
+      "path": "app/services/report_service.py",
+      "line": 33,
+      "language": "python",
+      "category": "managed",
+      "symbol": "ReportService.dry_run",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Rpt9Wk",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "testingFlag",
+        "week"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/report_service.py",
+      "line": 38,
+      "language": "python",
+      "category": "managed",
+      "symbol": "ReportService.failures",
+      "sdk": "python",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Rpt9Wk",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/report_service.py",
+      "line": 45,
+      "language": "python",
+      "category": "managed",
+      "symbol": "ReportService.run_and_archive",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Rpt9Wk",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "week"
+      ],
+      "outputKeys": [
+        "*"
+      ]
+    },
+    {
+      "path": "app/services/support_service.py",
+      "line": 17,
+      "language": "python",
+      "category": "managed",
+      "symbol": "SupportService.answer",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Help4Py",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "helpdesk-agent",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "message"
+      ],
+      "outputKeys": [
+        "content"
+      ]
+    },
+    {
+      "path": "app/services/support_service.py",
+      "line": 21,
+      "language": "python",
+      "category": "managed",
+      "symbol": "SupportService.follow_up",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Help4Py",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "helpdesk-agent",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "conversationId",
+        "message"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/support_service.py",
+      "line": 26,
+      "language": "python",
+      "category": "managed",
+      "symbol": "SupportService.pitch",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Sales6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/support_service.py",
+      "line": 30,
+      "language": "python",
+      "category": "managed",
+      "symbol": "SupportService.ops",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Ops3Bt",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/services/support_service.py",
+      "line": 39,
+      "language": "python",
+      "category": "managed",
+      "symbol": "SupportService.pitch_by_constant",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Sales6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/tasks/nightly.py",
+      "line": 15,
+      "language": "python",
+      "category": "managed",
+      "symbol": "run_weekly_report",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Rpt9Wk",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "teams",
+        "week"
+      ],
+      "outputKeys": [
+        "highlights"
+      ]
+    },
+    {
+      "path": "app/tasks/nightly.py",
+      "line": 23,
+      "language": "python",
+      "category": "managed",
+      "symbol": "sync_invoices",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Inv3Xt",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "invoice-extract",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "currency",
+        "fileUrl"
+      ],
+      "outputKeys": [
+        "total"
+      ]
+    },
+    {
+      "path": "app/tasks/nightly.py",
+      "line": 31,
+      "language": "python",
+      "category": "managed",
+      "symbol": "ping_ops",
+      "sdk": "python",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Ops3Bt",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "app/tasks/nightly.py",
+      "line": 39,
+      "language": "python",
+      "category": "dynamic",
+      "symbol": "run_tenant_automations",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "rowId",
+        "tenant"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/tasks/nightly.py",
+      "line": 46,
+      "language": "python",
+      "category": "dynamic",
+      "symbol": "run_for",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "*"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/tasks/scoring.py",
+      "line": 16,
+      "language": "python",
+      "category": "managed",
+      "symbol": "score_lead_task",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Sc",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "lead-scoring",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "company",
+        "domain"
+      ],
+      "outputKeys": [
+        "score"
+      ]
+    },
+    {
+      "path": "app/tasks/scoring.py",
+      "line": 24,
+      "language": "python",
+      "category": "managed",
+      "symbol": "nightly_enrich",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Enr4Ch",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "domain"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/tasks/scoring.py",
+      "line": 31,
+      "language": "python",
+      "category": "managed",
+      "symbol": "refresh",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Sc",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "company",
+        "domain",
+        "leadId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "app/tasks/scoring.py",
+      "line": 38,
+      "language": "python",
+      "category": "raw-http",
+      "symbol": "enrich_raw",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Enr4Ch",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "domain"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "scripts/backfill_scores.py",
+      "line": 15,
+      "language": "python",
+      "category": "managed",
+      "symbol": "main",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Sc",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "company",
+        "domain"
+      ],
+      "outputKeys": [
+        "tier"
+      ]
+    },
+    {
+      "path": "scripts/backfill_scores.py",
+      "line": 26,
+      "language": "python",
+      "category": "managed",
+      "symbol": "<module>",
+      "sdk": "python",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Sc",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "lead-scoring",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "company",
+        "domain"
+      ],
+      "outputKeys": [
+        "score"
+      ]
+    },
+    {
+      "path": "templates/account.html",
+      "line": 10,
+      "language": "html",
+      "category": "dynamic",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "templates/account.html",
+      "line": 15,
+      "language": "html",
+      "category": "dynamic",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "templates/agent_embed.html",
+      "line": 6,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Pub5Py",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "templates/base.html",
+      "line": 13,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Portal7",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "templates/docs.html",
+      "line": 8,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Docs5Py",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "templates/onboarding.html",
+      "line": 9,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Onb4Gd",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "templates/partials/chat_bubble.html",
+      "line": 5,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Ops3Bt",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "templates/portal.html",
+      "line": 6,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Sales6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "templates/portal.html",
+      "line": 14,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Portal7",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "templates/pricing.html",
+      "line": 10,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Sales6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "templates/support.html",
+      "line": 10,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Help4Py",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    }
+  ],
+  "implementations": [
+    {
+      "path": "app/swfte_clients/contract_review.py",
+      "line": 107
+    },
+    {
+      "path": "app/swfte_clients/helpdesk_agent.py",
+      "line": 111
+    },
+    {
+      "path": "app/swfte_clients/invoice_extract.py",
+      "line": 111
+    },
+    {
+      "path": "app/swfte_clients/lead_scoring.py",
+      "line": 112
+    }
+  ],
+  "decoys": [
+    {
+      "path": ".venv/lib/python3.12/site-packages/swfte/client.py",
+      "line": 16,
+      "why": "vendored"
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/swfte/client.py",
+      "line": 26,
+      "why": "vendored"
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/swfte/client.py",
+      "line": 32,
+      "why": "vendored"
+    },
+    {
+      "path": "app/audit.py",
+      "line": 20,
+      "why": "comment"
+    },
+    {
+      "path": "app/generated/workflows_api.py",
+      "line": 22,
+      "why": "generated"
+    },
+    {
+      "path": "app/generated/workflows_api.py",
+      "line": 27,
+      "why": "generated"
+    },
+    {
+      "path": "app/services/lead_service.py",
+      "line": 6,
+      "why": "docstring"
+    },
+    {
+      "path": "app/services/report_service.py",
+      "line": 12,
+      "why": "string-not-call"
+    },
+    {
+      "path": "app/swfte_clients/lead_scoring.py",
+      "line": 29,
+      "why": "string-not-call"
+    },
+    {
+      "path": "docs/integration.md",
+      "line": 11,
+      "why": "markdown"
+    },
+    {
+      "path": "docs/integration.md",
+      "line": 21,
+      "why": "markdown"
+    },
+    {
+      "path": "docs/integration.md",
+      "line": 22,
+      "why": "markdown"
+    },
+    {
+      "path": "docs/integration.md",
+      "line": 28,
+      "why": "markdown"
+    },
+    {
+      "path": "docs/integration.md",
+      "line": 34,
+      "why": "markdown"
+    },
+    {
+      "path": "templates/docs.html",
+      "line": 5,
+      "why": "comment"
+    },
+    {
+      "path": "templates/docs.html",
+      "line": 6,
+      "why": "comment"
+    },
+    {
+      "path": "templates/docs.html",
+      "line": 7,
+      "why": "string-not-call"
+    },
+    {
+      "path": "tests/stubs/swfte/__init__.py",
+      "line": 51,
+      "why": "test-mock"
+    },
+    {
+      "path": "tests/test_raw_and_embeds.py",
+      "line": 18,
+      "why": "test-mock"
+    },
+    {
+      "path": "tests/test_raw_and_embeds.py",
+      "line": 25,
+      "why": "test-mock"
+    },
+    {
+      "path": "tests/test_services.py",
+      "line": 39,
+      "why": "test-mock"
+    },
+    {
+      "path": "tests/test_services.py",
+      "line": 81,
+      "why": "test-mock"
+    },
+    {
+      "path": "tests/test_services.py",
+      "line": 82,
+      "why": "test-mock"
+    }
+  ],
+  "notAnalysed": {},
+  "envVarNames": [
+    "SWFTE_API_KEY",
+    "SWFTE_BASE_URL",
+    "SWFTE_BILLING_WF",
+    "SWFTE_DIGEST_WF",
+    "SWFTE_EMBED_KEY",
+    "SWFTE_ONBOARDING_WF",
+    "SWFTE_PORTAL_AGENT_ID",
+    "SWFTE_SUPPORT_AGENT_ID",
+    "SWFTE_WELCOME_WF",
+    "SWFTE_WORKSPACE_ID"
+  ]
+}

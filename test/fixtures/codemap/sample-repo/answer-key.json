@@ -1,0 +1,46 @@
+{
+  "fixture": "sample-repo",
+  "labelledBy": "opus leaf-1.1.2",
+  "reviewedBy": null,
+  "sites": [
+    {
+      "path": "src/summarise.ts",
+      "line": 5,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "summariseTicket",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Smp1Qa",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "ticket-summary",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "body",
+        "ticketId"
+      ],
+      "outputKeys": [
+        "priority",
+        "summary"
+      ]
+    }
+  ],
+  "implementations": [
+    {
+      "path": "src/swfte/ticket-summary.ts",
+      "line": 115
+    }
+  ],
+  "decoys": [],
+  "notAnalysed": {},
+  "envVarNames": [
+    "SWFTE_API_KEY",
+    "SWFTE_BASE_URL",
+    "SWFTE_WORKSPACE_ID"
+  ]
+}

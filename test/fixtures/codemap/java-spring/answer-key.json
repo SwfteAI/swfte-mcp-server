@@ -1,0 +1,2096 @@
+{
+  "fixture": "java-spring",
+  "labelledBy": "leaf-1.1.3 (claude, hand-labelled from the code)",
+  "reviewedBy": null,
+  "sites": [
+    {
+      "path": "src/main/java/com/acme/portal/PortalApplication.java",
+      "line": 21,
+      "language": "java",
+      "category": "managed",
+      "symbol": "PortalApplication.warmup",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvSup1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/embed/EmbedSnippets.java",
+      "line": 7,
+      "language": "java",
+      "category": "widget",
+      "symbol": "EmbedSnippets.<clinit>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvSup1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/embed/EmbedSnippets.java",
+      "line": 14,
+      "language": "java",
+      "category": "widget",
+      "symbol": "EmbedSnippets.<clinit>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvStat8",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/embed/EmbedSnippets.java",
+      "line": 22,
+      "language": "java",
+      "category": "widget",
+      "symbol": "EmbedSnippets.docsFrame",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvDocs",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/embed/EmbedSnippets.java",
+      "line": 27,
+      "language": "java",
+      "category": "widget",
+      "symbol": "EmbedSnippets.supportWidget",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvSup1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/embed/EmbedSnippets.java",
+      "line": 31,
+      "language": "java",
+      "category": "dynamic",
+      "symbol": "EmbedSnippets.iframeFor",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/events/AuditListener.java",
+      "line": 22,
+      "language": "java",
+      "category": "managed",
+      "symbol": "AuditListener.onOrderPlaced",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvAud9",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "orderId",
+        "total"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteJdkGateway.java",
+      "line": 24,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteJdkGateway.askSupport",
+      "sdk": "http",
+      "op": "chat",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvSup1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "*"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteJdkGateway.java",
+      "line": 33,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteJdkGateway.askPortalHelp",
+      "sdk": "http",
+      "op": "chat",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvPub5",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "*"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteJdkGateway.java",
+      "line": 42,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteJdkGateway.postLedger",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvLed7",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "*"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteJdkGateway.java",
+      "line": 52,
+      "language": "java",
+      "category": "dynamic",
+      "symbol": "SwfteJdkGateway.escalate",
+      "sdk": "http",
+      "op": "chat",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": "SWFTE_ESCALATION_AGENT_ID",
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "*"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteReactiveGateway.java",
+      "line": 29,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteReactiveGateway.submitOrder",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOrd1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "orderId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteReactiveGateway.java",
+      "line": 36,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteReactiveGateway.orderRuns",
+      "sdk": "http",
+      "op": "read-output",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOrd1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteReactiveGateway.java",
+      "line": 41,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteReactiveGateway.flagChurn",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvChn3",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "customerId",
+        "window"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteRestGateway.java",
+      "line": 41,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteRestGateway.submitOrder",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOrd1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "orderId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteRestGateway.java",
+      "line": 46,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteRestGateway.assessRisk",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRisk4",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "customerId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteRestGateway.java",
+      "line": 51,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteRestGateway.reviewOnV4",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvCtr3",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": "4"
+      },
+      "inputKeys": [
+        "documentUrl",
+        "jurisdiction"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteRestGateway.java",
+      "line": 56,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteRestGateway.onboard",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOnb2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "accountId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteRestGateway.java",
+      "line": 61,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteRestGateway.reportRuns",
+      "sdk": "http",
+      "op": "read-output",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRpt6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteRestGateway.java",
+      "line": 66,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteRestGateway.askFaqWidget",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "widget",
+        "id": "wg_JvFaq3",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "query"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteRestGateway.java",
+      "line": 71,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteRestGateway.openIntake",
+      "sdk": "http",
+      "op": "chat",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "chatflow",
+        "id": "cf_JvInt5",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "channel"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteRestGateway.java",
+      "line": 76,
+      "language": "java",
+      "category": "raw-http",
+      "symbol": "SwfteRestGateway.charge",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvBil8",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "invoiceId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/http/SwfteRestGateway.java",
+      "line": 81,
+      "language": "java",
+      "category": "dynamic",
+      "symbol": "SwfteRestGateway.chargeTenant",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "invoiceId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/jobs/NightlyJobs.java",
+      "line": 33,
+      "language": "java",
+      "category": "managed",
+      "symbol": "NightlyJobs.weeklyReport",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRpt6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "week"
+      ],
+      "outputKeys": [
+        "highlights"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/jobs/NightlyJobs.java",
+      "line": 39,
+      "language": "java",
+      "category": "managed",
+      "symbol": "NightlyJobs.hourlyRisk",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRisk4",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "customerId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/jobs/NightlyJobs.java",
+      "line": 44,
+      "language": "java",
+      "category": "managed",
+      "symbol": "NightlyJobs.pingSupport",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvEsc2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/jobs/NightlyJobs.java",
+      "line": 50,
+      "language": "java",
+      "category": "managed",
+      "symbol": "NightlyJobs.syncLedger",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvLed7",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "amount",
+        "batchId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/jobs/NightlyJobs.java",
+      "line": 56,
+      "language": "java",
+      "category": "managed",
+      "symbol": "NightlyJobs.reconcile",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRcn9",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "date"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/jobs/NightlyJobs.java",
+      "line": 67,
+      "language": "java",
+      "category": "dynamic",
+      "symbol": "NightlyJobs.tenantJobs",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "trigger"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/ChatHelper.java",
+      "line": 20,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ChatHelper.send#2",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvSup1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/ChatHelper.java",
+      "line": 25,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ChatHelper.send#3",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvSup1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/ChurnService.java",
+      "line": 19,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ChurnService.flag",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvChn3",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "customerId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/ChurnService.java",
+      "line": 24,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ChurnService.drivers",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvChn3",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "customerId",
+        "window"
+      ],
+      "outputKeys": [
+        "drivers"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/ChurnService.java",
+      "line": 29,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ChurnService.retentionNote",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvRet4",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/ContractService.java",
+      "line": 19,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ContractService.queueReview",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvCtr3",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "documentUrl",
+        "jurisdiction"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/ContractService.java",
+      "line": 24,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ContractService.highRiskClauseCount",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvCtr3",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "documentUrl",
+        "jurisdiction"
+      ],
+      "outputKeys": [
+        "clauses",
+        "risk"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/ContractService.java",
+      "line": 33,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ContractService.validateDraft",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvCtr3",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "documentUrl",
+        "jurisdiction",
+        "testingFlag"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/IntakeService.java",
+      "line": 18,
+      "language": "java",
+      "category": "managed",
+      "symbol": "IntakeService.openWebSession",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "chatflow",
+        "id": "cf_JvInt5",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/IntakeService.java",
+      "line": 23,
+      "language": "java",
+      "category": "managed",
+      "symbol": "IntakeService.openReturnSession",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "chatflow",
+        "id": "cf_JvInt5",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "orderId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/IntakeService.java",
+      "line": 28,
+      "language": "java",
+      "category": "managed",
+      "symbol": "IntakeService.openFaqSession",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "chatflow",
+        "id": "cf_JvFaq6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/KnowledgeService.java",
+      "line": 17,
+      "language": "java",
+      "category": "managed",
+      "symbol": "KnowledgeService.ask",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvDocs",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/KnowledgeService.java",
+      "line": 24,
+      "language": "java",
+      "category": "managed",
+      "symbol": "KnowledgeService.askAnonymous",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvDocs",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/LedgerService.java",
+      "line": 17,
+      "language": "java",
+      "category": "managed",
+      "symbol": "LedgerService.<init>",
+      "sdk": "java",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvLed7",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/LedgerService.java",
+      "line": 21,
+      "language": "java",
+      "category": "managed",
+      "symbol": "LedgerService.post",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvLed7",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "amount",
+        "batchId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/OnboardingService.java",
+      "line": 18,
+      "language": "java",
+      "category": "managed",
+      "symbol": "OnboardingService.start",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOnb2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "accountId",
+        "plan"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/OnboardingService.java",
+      "line": 22,
+      "language": "java",
+      "category": "managed",
+      "symbol": "OnboardingService.startAndWelcome",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOnb2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "accountId",
+        "plan"
+      ],
+      "outputKeys": [
+        "welcomeEmailId"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/OnboardingService.java",
+      "line": 31,
+      "language": "java",
+      "category": "managed",
+      "symbol": "OnboardingService.rehearse",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOnb2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "accountId",
+        "plan",
+        "testingFlag"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/OnboardingService.java",
+      "line": 35,
+      "language": "java",
+      "category": "managed",
+      "symbol": "OnboardingService.runCount",
+      "sdk": "java",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOnb2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/OrderService.java",
+      "line": 29,
+      "language": "java",
+      "category": "managed",
+      "symbol": "OrderService.submit",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOrd1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "orderId",
+        "sku"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/OrderService.java",
+      "line": 34,
+      "language": "java",
+      "category": "managed",
+      "symbol": "OrderService.submitAndTrack",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOrd1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "orderId",
+        "sku"
+      ],
+      "outputKeys": [
+        "trackingNumber"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/OrderService.java",
+      "line": 40,
+      "language": "java",
+      "category": "managed",
+      "symbol": "OrderService.submitPriority",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOrd1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "orderId",
+        "priority"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/OrderService.java",
+      "line": 49,
+      "language": "java",
+      "category": "managed",
+      "symbol": "OrderService.submitWithNotes",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOrd1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "*"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/OrderService.java",
+      "line": 53,
+      "language": "java",
+      "category": "managed",
+      "symbol": "OrderService.recentStatuses",
+      "sdk": "java",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOrd1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/OrderService.java",
+      "line": 59,
+      "language": "java",
+      "category": "managed",
+      "symbol": "OrderService.submitAsync",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOrd1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "orderId"
+      ],
+      "outputKeys": [
+        "*"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/OrderService.java",
+      "line": 64,
+      "language": "java",
+      "category": "managed",
+      "symbol": "OrderService.dryRun",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOrd1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "orderId",
+        "testingFlag"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/OrderService.java",
+      "line": 69,
+      "language": "java",
+      "category": "dynamic",
+      "symbol": "OrderService.submitStored",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "orderId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/ReportService.java",
+      "line": 23,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ReportService.weeklySummary",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRpt6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "week"
+      ],
+      "outputKeys": [
+        "summary"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/ReportService.java",
+      "line": 28,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ReportService.queueRegional",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRpt6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "region",
+        "week"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/ReportService.java",
+      "line": 34,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ReportService.runIds",
+      "sdk": "java",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRpt6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/ReportService.java",
+      "line": 40,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ReportService.weeklyAsync",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRpt6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "week"
+      ],
+      "outputKeys": [
+        "*"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/ReportService.java",
+      "line": 45,
+      "language": "java",
+      "category": "dynamic",
+      "symbol": "ReportService.customReport",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": null,
+        "unresolved": true,
+        "envVarName": "SWFTE_REPORT_WF",
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "week"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/RiskService.java",
+      "line": 21,
+      "language": "java",
+      "category": "managed",
+      "symbol": "RiskService.assess#1",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRisk4",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "customerId"
+      ],
+      "outputKeys": [
+        "score"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/RiskService.java",
+      "line": 26,
+      "language": "java",
+      "category": "managed",
+      "symbol": "RiskService.assess#2",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRisk4",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "customerId",
+        "window"
+      ],
+      "outputKeys": [
+        "band",
+        "score"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/RiskService.java",
+      "line": 33,
+      "language": "java",
+      "category": "managed",
+      "symbol": "RiskService.assessAll",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRisk4",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "customerId"
+      ],
+      "outputKeys": [
+        "*"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/RiskService.java",
+      "line": 39,
+      "language": "java",
+      "category": "managed",
+      "symbol": "RiskService.failedRuns",
+      "sdk": "java",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRisk4",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/SupportService.java",
+      "line": 23,
+      "language": "java",
+      "category": "managed",
+      "symbol": "SupportService.answer",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvSup1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/SupportService.java",
+      "line": 28,
+      "language": "java",
+      "category": "managed",
+      "symbol": "SupportService.answerInThread",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvSup1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/SupportService.java",
+      "line": 35,
+      "language": "java",
+      "category": "managed",
+      "symbol": "SupportService.answerAll",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvSup1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/SupportService.java",
+      "line": 40,
+      "language": "java",
+      "category": "managed",
+      "symbol": "SupportService.escalate",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvEsc2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/SupportService.java",
+      "line": 44,
+      "language": "java",
+      "category": "dynamic",
+      "symbol": "SupportService.escalateConfigured",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/web/BillingController.java",
+      "line": 27,
+      "language": "java",
+      "category": "managed",
+      "symbol": "BillingController.charge",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvBil8",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "amount",
+        "invoiceId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/web/BillingController.java",
+      "line": 32,
+      "language": "java",
+      "category": "managed",
+      "symbol": "BillingController.chargeAndWait",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvBil8",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "invoiceId"
+      ],
+      "outputKeys": [
+        "paid"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/web/BillingController.java",
+      "line": 38,
+      "language": "java",
+      "category": "dynamic",
+      "symbol": "BillingController.chargeTenant",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "invoiceId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/web/ContractController.java",
+      "line": 27,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ContractController.review",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvCtr3",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "documentUrl",
+        "jurisdiction"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/web/ContractController.java",
+      "line": 33,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ContractController.explain",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvDocs",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/web/OrderController.java",
+      "line": 33,
+      "language": "java",
+      "category": "managed",
+      "symbol": "OrderController.create",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOrd1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "orderId",
+        "sku"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/web/OrderController.java",
+      "line": 39,
+      "language": "java",
+      "category": "managed",
+      "symbol": "OrderController.runs",
+      "sdk": "java",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvOrd1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/web/ReportController.java",
+      "line": 22,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ReportController.weekly",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvRpt6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "week"
+      ],
+      "outputKeys": [
+        "*"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/web/ReportController.java",
+      "line": 27,
+      "language": "java",
+      "category": "managed",
+      "symbol": "ReportController.contractRisk",
+      "sdk": "java",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_JvCtr3",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "documentUrl",
+        "jurisdiction"
+      ],
+      "outputKeys": [
+        "risk"
+      ]
+    },
+    {
+      "path": "src/main/java/com/acme/portal/web/SupportController.java",
+      "line": 31,
+      "language": "java",
+      "category": "managed",
+      "symbol": "SupportController.ask",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvSup1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/java/com/acme/portal/web/SupportController.java",
+      "line": 39,
+      "language": "java",
+      "category": "dynamic",
+      "symbol": "SupportController.askConfigured",
+      "sdk": "java",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/resources/templates/account.html",
+      "line": 11,
+      "language": "html",
+      "category": "dynamic",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/resources/templates/account.html",
+      "line": 16,
+      "language": "html",
+      "category": "dynamic",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/resources/templates/agent-embed.html",
+      "line": 10,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvPub5",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/resources/templates/checkout.html",
+      "line": 13,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvSales",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/resources/templates/docs.html",
+      "line": 12,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvDocs",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/resources/templates/fragments/chat.html",
+      "line": 8,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvPortal",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/resources/templates/onboarding.html",
+      "line": 9,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvOnb6",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/resources/templates/portal.html",
+      "line": 11,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvSales",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/resources/templates/portal.html",
+      "line": 14,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvPortal",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/main/resources/templates/support.html",
+      "line": 12,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_JvSup1",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    }
+  ],
+  "implementations": [],
+  "decoys": [
+    {
+      "path": "README.md",
+      "line": 9,
+      "why": "markdown"
+    },
+    {
+      "path": "README.md",
+      "line": 10,
+      "why": "markdown"
+    },
+    {
+      "path": "README.md",
+      "line": 16,
+      "why": "markdown"
+    },
+    {
+      "path": "README.md",
+      "line": 22,
+      "why": "markdown"
+    },
+    {
+      "path": "src/main/java/com/acme/portal/generated/SwfteWorkflowsApi.java",
+      "line": 24,
+      "why": "generated"
+    },
+    {
+      "path": "src/main/java/com/acme/portal/generated/SwfteWorkflowsApi.java",
+      "line": 29,
+      "why": "generated"
+    },
+    {
+      "path": "src/main/java/com/acme/portal/legacy/LegacyBridge.java",
+      "line": 14,
+      "why": "fork"
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/KnowledgeService.java",
+      "line": 22,
+      "why": "comment"
+    },
+    {
+      "path": "src/main/java/com/acme/portal/service/OrderService.java",
+      "line": 17,
+      "why": "docstring"
+    },
+    {
+      "path": "src/main/java/com/acme/portal/support/Links.java",
+      "line": 6,
+      "why": "string-not-call"
+    },
+    {
+      "path": "src/main/java/com/acme/portal/support/Links.java",
+      "line": 7,
+      "why": "string-not-call"
+    },
+    {
+      "path": "src/main/java/com/acme/swftefork/SwfteClient.java",
+      "line": 34,
+      "why": "fork"
+    },
+    {
+      "path": "src/main/resources/templates/docs.html",
+      "line": 9,
+      "why": "comment"
+    },
+    {
+      "path": "src/main/resources/templates/docs.html",
+      "line": 10,
+      "why": "comment"
+    },
+    {
+      "path": "src/main/resources/templates/docs.html",
+      "line": 11,
+      "why": "string-not-call"
+    },
+    {
+      "path": "src/test/java/com/acme/portal/service/OrderServiceTest.java",
+      "line": 25,
+      "why": "test-mock"
+    },
+    {
+      "path": "src/test/java/com/acme/portal/service/OrderServiceTest.java",
+      "line": 28,
+      "why": "test-mock"
+    },
+    {
+      "path": "src/test/java/com/acme/portal/service/OrderServiceTest.java",
+      "line": 36,
+      "why": "test-mock"
+    },
+    {
+      "path": "target/classes/templates/support.html",
+      "line": 12,
+      "why": "vendored"
+    },
+    {
+      "path": "target/stale-sources/com/acme/portal/service/OrderServiceStale.java",
+      "line": 16,
+      "why": "vendored"
+    }
+  ],
+  "notAnalysed": {},
+  "envVarNames": [
+    "SWFTE_API_KEY",
+    "SWFTE_BASE_URL",
+    "SWFTE_BILLING_WF",
+    "SWFTE_ESCALATION_AGENT_ID",
+    "SWFTE_REPORT_WF",
+    "SWFTE_SUPPORT_AGENT_ID",
+    "SWFTE_WORKSPACE_ID"
+  ]
+}
