@@ -161,7 +161,7 @@ Every rule has been shown to fail under a deliberate mutation
 no mutation can kill is reported BROKEN there rather than counted as passing.
 
 A rule that cannot run reports **skip**, and a skip is never a pass. See
-[PUBLISH-GATE.md](./PUBLISH-GATE.md) for the gate, its three verdicts, and the
+[src/preflight/README.md](../src/preflight/README.md) for the gate, its three verdicts, and the
 two overrides.
 
 ### What `swfte_verify` checks

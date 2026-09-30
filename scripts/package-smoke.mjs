@@ -18,16 +18,18 @@ try {
   execFileSync('tar', ['-xzf', join(temporary, receipt.filename), '-C', temporary], { timeout: 30_000 });
   const packed = join(temporary, 'package');
   const metadata = JSON.parse(readFileSync(join(packed, 'package.json'), 'utf8'));
-  assert(existsSync(join(packed, metadata.main)), 'Package main is missing');
+  // No `main`: importing the entry would start a stdio server, so the server bin is the entry.
+  const main = metadata.bin['swfte-mcp-server'];
+  assert(existsSync(join(packed, main)), 'Server bin is missing');
   // Dependency resolution is available, but no source tree exists beside this extracted artifact.
   symlinkSync(join(root, 'node_modules'), join(temporary, 'node_modules'), 'dir');
   execFileSync(process.execPath, ['--import', 'tsx', join(root, 'scripts/protocol-smoke.ts')], {
-    cwd: root, env: { ...process.env, SWFTE_SMOKE_ENTRY: join(packed, metadata.main) }, stdio: 'inherit', timeout: 45_000,
+    cwd: root, env: { ...process.env, SWFTE_SMOKE_ENTRY: join(packed, main) }, stdio: 'inherit', timeout: 45_000,
   });
   // The `swfte` bin and the `npx @swfte/mcp-server swfte …` passthrough both run from the tarball.
   for (const [name, target] of Object.entries(metadata.bin)) assert(existsSync(join(packed, target)), `bin ${name} → ${target} is missing`);
   assert.equal(execFileSync(process.execPath, [join(packed, metadata.bin.swfte), '--version'], { encoding: 'utf8', timeout: 20_000 }).trim(), metadata.version);
-  assert.equal(execFileSync(process.execPath, [join(packed, metadata.main), 'swfte', '--version'], { encoding: 'utf8', timeout: 20_000 }).trim(), metadata.version);
+  assert.equal(execFileSync(process.execPath, [join(packed, main), 'swfte', '--version'], { encoding: 'utf8', timeout: 20_000 }).trim(), metadata.version);
   const empty = mkdtempSync(join(temporary, 'empty-project-'));
   let exit = 0;
   try {

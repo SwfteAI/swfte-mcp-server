@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "description": "Single source of truth for every enumerated option this server advertises that is also an enumerated contract in agents-service. Each entry carries machine-readable provenance so a checker can re-derive the backend set from Java source without executing anything. Tools import these lists from backend-options.ts instead of restating literals, so drift is a one-line fix in one place.",
-  "backendRepo": "/Users/dejanmaksimovic/Projects/Swfte/agents-service",
-  "uiRepo": "/Users/dejanmaksimovic/Projects/Swfte/websites/studio-web-app",
+  "backendRepo": "agents-service",
+  "uiRepo": "websites/studio-web-app",
   "rules": {
     "subset": "Every value advertised by MCP must exist in the backend set. Advertising a value the backend rejects turns a tool call into a 400 the model cannot diagnose.",
     "uiReachability": "Every value the Studio UI exposes to a human must also be reachable from MCP, otherwise the two clients cannot build the same artifact.",
