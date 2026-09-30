@@ -140,6 +140,10 @@ export const codeTools: ToolDefinition[] = [
         .boolean()
         .optional()
         .describe('Delete destDir first — only if a previous swfte_export_src created it (marker file). Off by default so local edits are not silently destroyed.'),
+      force: z
+        .boolean()
+        .optional()
+        .describe('Replace files that already exist in destDir with the server copy (your local edits to them are lost). Off by default: a conflict refuses the whole export.'),
     }),
     execute: async (input, { client, config, localFilesystem }) => {
       assertLocalFilesystem(localFilesystem, 'swfte_export_src');
@@ -165,7 +169,7 @@ export const codeTools: ToolDefinition[] = [
       for (const [name, data] of Object.entries(files)) {
         if (name.endsWith('/') || name === EXPORT_MARKER) continue;
         safeJoin(dest, name); // zip-slip guard: the entry must stay inside dest
-        writer.createBytes(writer.resolve(join(destRel, name)), data);
+        writer.createBytes(writer.resolve(join(destRel, name)), data, input.force);
         written.push(name);
 
         if (name.startsWith('src/steps/') && name.endsWith('.rs') && !name.endsWith('mod.rs')) {
@@ -184,7 +188,7 @@ export const codeTools: ToolDefinition[] = [
         if (err instanceof OverwriteRefusedError) {
           throw new PathConfinementError(
             `Refusing to overwrite existing file(s) in "${input.destDir}": ${err.files.join(', ')}. Nothing was written. ` +
-              'Choose a new destDir, or pass overwrite:true to replace a directory a previous swfte_export_src created.'
+              'Choose a new destDir, pass force:true to replace just those files, or overwrite:true to replace a directory a previous swfte_export_src created.'
           );
         }
         throw err;

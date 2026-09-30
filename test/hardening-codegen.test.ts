@@ -50,7 +50,7 @@ async function scaffold(language: 'typescript' | 'python', contract: Record<stri
   return { result: r, src: readFileSync(join(root, file), 'utf8'), file };
 }
 
-/** True when the marker survives into the Python AST (code or string); comments never do. */
+/** True when the marker appears as an executable identifier in the Python AST. */
 function pyInAst(file: string, marker: string): boolean {
   return execFileSync('python3', [join(prev, 'scripts/py-ast-mentions.py'), file, marker]).toString().trim() === 'True';
 }
@@ -77,9 +77,9 @@ describe('hostile contractHash (R1)', () => {
   });
 
   test('G2: hostile contractHash (LF) yields a Python client that ast.parse accepts with no injected import', async () => {
-    const { src, file } = await scaffold('python', contractWith({ contractHash: 'abc\nimport os; os.environ["PWNED_PY"]="1"' }));
+    const { src, file } = await scaffold('python', contractWith({ contractHash: 'abc\nPWNED_PY = 1\nimport os' }));
     assert.equal(pyInAst(join(root, file), 'PWNED_PY'), false);
-    assert.ok(!/^import os; os\.environ/m.test(src));
+    assert.ok(!/^PWNED_PY = 1/m.test(src));
   });
 
   test('G2: a hostile hash is not recorded as the contract hash either; a real hex digest still is', async () => {
