@@ -124,7 +124,7 @@ export type Access = 'read' | 'write';
 const WRITE_DENY_DIRS = new Set(['.git', '.github', '.husky', '.vscode', '.claude', '.cursor']);
 /** Directories holding credentials or repository internals: never uploaded, never read. */
 const READ_DENY_DIRS = new Set(['.git', '.ssh', '.aws', '.gnupg']);
-const WRITE_DENY_FILES = new Set(['.mcp.json', '.npmrc']);
+const WRITE_DENY_FILES = new Set(['.mcp.json', '.npmrc', 'package.json']);
 const READ_DENY_FILES = new Set(['.npmrc', '.netrc', '.pypirc']);
 /** Template env files carry names, not values, so they stay readable and writable. */
 const ENV_TEMPLATE = /^\.env\.(example|sample|template|dist)$/i;

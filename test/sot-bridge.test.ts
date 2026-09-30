@@ -598,20 +598,24 @@ describe('swfte_embed_widget', () => {
     embed: html === null ? null : { html },
   });
 
+  const widgetEntry = () => route('GET', /^\/v2\/catalog\/widget\/wd_1$/, { body: summary('widget', 'wd_1', 'Support widget', 'observed') });
+
   test('writes the embed markup into a confined file', async () => {
+    widgetEntry();
     route('GET', /^\/v2\/catalog\/widget\/wd_1\/contract$/, { body: widgetContract('<script src="https://cdn.swfte.com/w.js" data-widget="wd_1"></script>') });
-    const res = await run('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: 'public/support.html' });
+    const res = await run('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: 'public/support.html', confirm: true });
     assert.equal(res.embeddable, true);
     assert.equal(res.written[0].path, 'public/support.html');
     assert.match(readFileSync(join(tmp, 'public/support.html'), 'utf8'), /data-widget="wd_1"/);
   });
 
   test('refuses to overwrite an existing page without force, and targets outside cwd', async () => {
+    widgetEntry();
     route('GET', /^\/v2\/catalog\/widget\/wd_1\/contract$/, { body: widgetContract('<div id="w"></div>') });
     writeFileSync(join(tmp, 'index.html'), '<html>mine</html>');
-    await assert.rejects(run('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: 'index.html' }), /Refusing to overwrite/);
+    await assert.rejects(run('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: 'index.html', confirm: true }), /Refusing to overwrite/);
     assert.equal(readFileSync(join(tmp, 'index.html'), 'utf8'), '<html>mine</html>');
-    await assert.rejects(run('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: '../outside.html' }), /outside the working directory/);
+    await assert.rejects(run('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: '../outside.html', confirm: true }), /outside the working directory/);
   });
 
   test('no embed is reported; a secret in markup is refused', async () => {

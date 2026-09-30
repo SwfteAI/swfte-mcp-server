@@ -244,7 +244,7 @@ const isTrue = (v: string | undefined): boolean => TRUE_VALUES.has((v ?? '').toL
  * fetch would send them as Basic auth and quote them in error text that lands
  * in CI logs (BT-N8). The message never repeats the URL.
  */
-export function cleanBaseUrl(raw: string): string {
+export function cleanBaseUrl(raw: string, allowInsecure = false): string {
   const v = raw.trim().replace(/\/+$/, '');
   let u: URL;
   try {
@@ -254,6 +254,12 @@ export function cleanBaseUrl(raw: string): string {
   }
   if (u.username || u.password) {
     throw new ConfigError('SWFTE_BASE_URL must not contain credentials (user:password@host). Remove them; the credential belongs in SWFTE_API_KEY.');
+  }
+  const loopback = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(u.hostname.toLowerCase());
+  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && (loopback || allowInsecure))) {
+    throw new ConfigError(
+      'SWFTE_BASE_URL must be https (plain http is accepted only for localhost/127.0.0.1). Your credential is sent to this host on every request; set SWFTE_ALLOW_INSECURE_BASE_URL=1 only if you really mean it.'
+    );
   }
   return v;
 }
@@ -306,7 +312,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   return {
     credential: secret,
     credentialKind: detected,
-    baseUrl: cleanBaseUrl(env.SWFTE_BASE_URL ?? 'https://api.swfte.com/agents'),
+    baseUrl: cleanBaseUrl(env.SWFTE_BASE_URL ?? 'https://api.swfte.com/agents', isTrue(env.SWFTE_ALLOW_INSECURE_BASE_URL)),
     workspaceId: env.SWFTE_WORKSPACE_ID?.trim() || undefined,
     userAgent: `swfte-mcp-server/${env.SWFTE_MCP_VERSION ?? PACKAGE_VERSION} (+https://www.swfte.com)`,
     debug: isTrue(env.SWFTE_DEBUG),

@@ -29,6 +29,44 @@ const LOCAL_ONLY =
   'It reads swfte.json and the generated files in the project, so it needs the server running locally (stdio) ' +
   'inside the repository. From a hosted server, run the same check in the repo instead: `npx -p @swfte/mcp-server swfte verify` / `swfte sync`.';
 
+/** Hosts a widget's script/iframe may load from. */
+const EMBED_SRC_HOSTS = ['swfte.com', 'swfte.ai'];
+const hostAllowed = (h: string) => EMBED_SRC_HOSTS.some((d) => h === d || h.endsWith('.' + d));
+
+/** Widget markup is a script on the user's site: only the caller's own workspace or a verified public entry may supply it. */
+export function assertWidgetProvenance(
+  entry: { scope?: string; workspaceId?: string | null; evidence?: { level?: string } } | null,
+  callerWorkspaceId?: string
+): void {
+  if (!entry) throw new Error('Refusing to embed: could not establish who published this widget (catalog entry unavailable).');
+  if (entry.scope === 'public') {
+    if (entry.evidence?.level !== 'verified') {
+      throw new Error(`Refusing to embed a public widget from another workspace that is not verified (evidence: ${entry.evidence?.level ?? 'unknown'}). Its markup would run as a script on your site.`);
+    }
+    return;
+  }
+  if (callerWorkspaceId && entry.workspaceId && entry.workspaceId !== callerWorkspaceId) {
+    throw new Error('Refusing to embed a widget that belongs to a different workspace and is not a verified public entry.');
+  }
+}
+
+/** Every <script src>/<iframe src> in the markup must point at a Swfte origin (https, no userinfo). */
+export function assertEmbedSourceOrigins(html: string): void {
+  const re = /<(script|iframe)\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
+  for (const m of html.matchAll(re)) {
+    const raw = (m[2] ?? m[3] ?? m[4] ?? '').trim();
+    let u: URL | null = null;
+    try {
+      u = new URL(raw.startsWith('//') ? 'https:' + raw : raw);
+    } catch {
+      u = null;
+    }
+    if (!u || u.protocol !== 'https:' || u.username || u.password || !hostAllowed(u.hostname.toLowerCase())) {
+      throw new Error(`Refusing to embed: <${m[1]!.toLowerCase()} src="${raw.slice(0, 80)}"> is not an https Swfte origin (${EMBED_SRC_HOSTS.join(', ')}).`);
+    }
+  }
+}
+
 export const scaffoldTools: ToolDefinition[] = [
   {
     name: 'swfte_scaffold_client',
@@ -223,8 +261,10 @@ export const scaffoldTools: ToolDefinition[] = [
         };
       }
       writer.assertNoSecrets('embed markup', html);
-      const markup = `<!-- Swfte embed: ${r.ref.replace(/--/g, '-')} (contract ${contractHash(contract)}) -->\n${html.trim()}\n`;
       const entry = await getEntry(client, r).catch(() => null);
+      assertWidgetProvenance(entry, config.workspaceId);
+      assertEmbedSourceOrigins(html);
+      const markup = `<!-- Swfte embed: ${r.ref.replace(/--/g, '-')} (contract ${contractHash(contract)}) -->\n${html.trim()}\n`;
       const origin = {
         untrustedContent: CATALOG_UNTRUSTED_ADVISORY,
         publishedBy: entry ? presentProvenance(entry) : null,
