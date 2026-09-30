@@ -13,7 +13,7 @@
  * no overwrite without `force`, no secret on disk.
  */
 import { z } from 'zod';
-import { CatalogRefArg, contractHash, getContract, getEntry, parseCatalogRef } from '../catalog.js';
+import { CATALOG_UNTRUSTED_ADVISORY, CatalogRefArg, contractHash, getContract, getEntry, parseCatalogRef, presentProvenance } from '../catalog.js';
 import { agentEmbedHtml, EMBED_KEY_PATTERN, issueEmbedKey, publicAgentChatPath } from '../embed.js';
 import { bakeArtifact, syncProject, verifyProject } from '../bake.js';
 import { assertLocalFilesystem, ConfinedWriter, INLINE_NOTE } from '../fsguard.js';
@@ -160,6 +160,10 @@ export const scaffoldTools: ToolDefinition[] = [
       catalogRef: CatalogRefArg,
       targetFile: z.string().optional().describe('File to write the snippet to, relative to the project root (e.g. "public/support.html").'),
       force: z.boolean().optional(),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe('Widgets only: the widget markup is written by its publisher (possibly another workspace) and becomes a script on your site. Without confirm:true it is returned for review and nothing is written.'),
       embedKey: z.string().optional().describe('Agents: an existing publishable embed key (swfte_pk_…) for this agent.'),
       allowedOrigins: z
         .array(z.string())
@@ -219,7 +223,29 @@ export const scaffoldTools: ToolDefinition[] = [
         };
       }
       writer.assertNoSecrets('embed markup', html);
-      return write(`<!-- Swfte embed: ${r.ref.replace(/--/g, '-')} (contract ${contractHash(contract)}) -->\n${html.trim()}\n`, {});
+      const markup = `<!-- Swfte embed: ${r.ref.replace(/--/g, '-')} (contract ${contractHash(contract)}) -->\n${html.trim()}\n`;
+      const entry = await getEntry(client, r).catch(() => null);
+      const origin = {
+        untrustedContent: CATALOG_UNTRUSTED_ADVISORY,
+        publishedBy: entry ? presentProvenance(entry) : null,
+      };
+      if (!input.confirm) {
+        // Third-party markup becomes a script on the user's site: a human reads it first.
+        return {
+          catalogRef: r.ref,
+          embeddable: true,
+          html: markup,
+          written: [],
+          requiresConfirmation: true,
+          ...origin,
+          message:
+            'Nothing was written. This markup was published by the widget author and would run on your page. ' +
+            'Review it (and who published it), then call again with confirm:true' +
+            (input.targetFile ? '' : ' and a targetFile') +
+            ' to write it.',
+        };
+      }
+      return write(markup, origin);
     },
   },
 ];

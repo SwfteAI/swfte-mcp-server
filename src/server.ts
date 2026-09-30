@@ -50,8 +50,9 @@ export interface BuildServerOptions {
 
 /** Apply the `SWFTE_TOOLS` group filter. An empty set means "advertise everything". */
 export function selectTools(tools: ToolDefinition[], config: ServerConfig): ToolDefinition[] {
-  if (config.enabledGroups.size === 0) return tools;
-  return tools.filter((t) => !t.group || config.enabledGroups.has(t.group));
+  const permitted = tools.filter((t) => !t.requiresFlag || config[t.requiresFlag]);
+  if (config.enabledGroups.size === 0) return permitted;
+  return permitted.filter((t) => !t.group || config.enabledGroups.has(t.group));
 }
 
 export function buildServer(opts: BuildServerOptions = {}): Server {

@@ -193,6 +193,7 @@ export async function createCheckoutSession(req: CheckoutSessionRequest): Promis
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-App-Runtime-Token': token },
     body: JSON.stringify(req),
+    redirect: 'manual',
   });
   const text = await res.text();
   if (!res.ok) throw new Error(\`Checkout session failed: \${res.status} \${text.slice(0, 300)}\`);
@@ -265,7 +266,8 @@ export const wireTools: ToolDefinition[] = [
             ]
           : []),
       ];
-      const envResult = writer.mergeEnv(writer.resolve(envFile), real, { force: input.force, header: 'Swfte analytics (swfte_wire_analytics)' });
+      // The one place an env file is written: names fixed here, publishable keys only (see the swfte_pk_ check above).
+      const envResult = writer.mergeEnv(writer.resolve(envFile, { allowEnvFile: true }), real, { force: input.force, header: 'Swfte analytics (swfte_wire_analytics)' });
       writer.mergeEnv(
         writer.resolve('.env.example'),
         real.map((e) => ({ key: e.key, value: '', comment: e.comment })),

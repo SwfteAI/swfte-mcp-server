@@ -116,13 +116,62 @@ export function confinementRoot(cwd: string = process.cwd()): string {
   return root;
 }
 
+/* ── deny-list: places a prompt-injected model must not be able to reach ───── */
+
+export type Access = 'read' | 'write';
+
+/** Directories whose contents run code or steer an agent: writing there is persistence, not a project edit. */
+const WRITE_DENY_DIRS = new Set(['.git', '.github', '.husky', '.vscode', '.claude', '.cursor']);
+/** Directories holding credentials or repository internals: never uploaded, never read. */
+const READ_DENY_DIRS = new Set(['.git', '.ssh', '.aws', '.gnupg']);
+const WRITE_DENY_FILES = new Set(['.mcp.json', '.npmrc']);
+const READ_DENY_FILES = new Set(['.npmrc', '.netrc', '.pypirc']);
+/** Template env files carry names, not values, so they stay readable and writable. */
+const ENV_TEMPLATE = /^\.env\.(example|sample|template|dist)$/i;
+const isEnvFile = (base: string) => base.startsWith('.env') && !ENV_TEMPLATE.test(base);
+/** id_rsa, id_ed25519, id_rsa.pub — an "id_" name with no other extension. */
+const isSshKeyName = (base: string) => /^id_[^.]*(\.pub)?$/.test(base);
+
+/**
+ * Why `rel` (a path relative to the project root) is off limits for `access`, or
+ * null. Comparison is case-insensitive (macOS and Windows filesystems are) and
+ * applies at any depth. `allowEnvFile` lifts only the `.env*` write rule, for
+ * the one tool that merges publishable keys into an env file it names itself.
+ */
+export function denyReason(rel: string, access: Access, opts: { allowEnvFile?: boolean } = {}): string | null {
+  const parts = rel.split(/[\\/]+/).filter((s) => s && s !== '.').map((s) => s.toLowerCase());
+  if (!parts.length) return null;
+  const base = parts[parts.length - 1]!;
+  const denyDirs = access === 'read' ? READ_DENY_DIRS : WRITE_DENY_DIRS;
+  const hitDir = parts.find((seg) => denyDirs.has(seg));
+  if (hitDir) {
+    return access === 'read'
+      ? `${hitDir}/ holds repository internals or credentials`
+      : `${hitDir}/ holds hooks, CI and agent configuration; writing there would persist code outside the project's own files`;
+  }
+  if (isEnvFile(base) && !(access === 'write' && opts.allowEnvFile)) return 'env files hold secrets (.env.example is allowed)';
+  if ((access === 'write' ? WRITE_DENY_FILES : READ_DENY_FILES).has(base)) return `${base} holds credentials or tool configuration`;
+  if (access === 'read' && (base.endsWith('.pem') || isSshKeyName(base))) return 'private-key material is never read';
+  return null;
+}
+
+function assertNotDenied(p: string, rel: string, access: Access, opts?: { allowEnvFile?: boolean }): void {
+  const why = denyReason(rel, access, opts);
+  if (why) {
+    throw new PathConfinementError(
+      `Refusing to ${access === 'read' ? 'read' : 'write'} "${p}": ${why}. Swfte tools keep secrets, git internals and agent/CI configuration out of reach of a model.`
+    );
+  }
+}
+
 /**
  * Resolve `p` under the working directory or throw. Relative paths resolve
  * against the root; an absolute path is accepted only when it already lies
  * inside it. The returned path is absolute and its real location is inside
- * the root too.
+ * the root too. With `access`, the deny-list (secrets, .git, CI and agent
+ * config) is applied to both the given and the real location.
  */
-export function confinePath(p: string, cwd?: string): string {
+export function confinePath(p: string, cwd?: string, access?: Access): string {
   if (typeof p !== 'string' || !p.trim()) throw new PathConfinementError('Path is empty.');
   if (p.includes('\0')) throw new PathConfinementError('Path contains a NUL byte.');
   const root = confinementRoot(cwd);
@@ -138,12 +187,16 @@ export function confinePath(p: string, cwd?: string): string {
   if (isSpecial(real) || !isInside(realRoot, real)) {
     throw new PathConfinementError(`Refusing path "${p}": a symlink along it leads outside the working directory.`);
   }
+  if (access) {
+    assertNotDenied(p, relative(root, abs), access);
+    assertNotDenied(p, relative(realRoot, real), access);
+  }
   return abs;
 }
 
 /** Confine `p` and require it to be an existing regular file (not a device, FIFO or directory). */
 export function confineReadableFile(p: string, cwd?: string): string {
-  const abs = confinePath(p, cwd);
+  const abs = confinePath(p, cwd, 'read');
   let st;
   try {
     st = statSync(abs);
@@ -156,7 +209,7 @@ export function confineReadableFile(p: string, cwd?: string): string {
 
 /** Confine `p` and require it to be an existing real directory (not a symlink to one). */
 export function confineDirectory(p: string, cwd?: string): string {
-  const abs = confinePath(p, cwd);
+  const abs = confinePath(p, cwd, 'read');
   let st;
   try {
     st = lstatSync(abs);
@@ -191,7 +244,7 @@ export interface PlannedWrite {
   content?: string;
 }
 
-type Op = { abs: string; content: string; action: PlannedWrite['action'] };
+type Op = { abs: string; content: string; action: PlannedWrite['action']; /** Raw bytes for a binary file; `content` is then a latin1 view used only for the secret scan. */ bytes?: Uint8Array };
 
 export class ConfinedWriter {
   readonly root: string;
@@ -215,7 +268,7 @@ export class ConfinedWriter {
    * resolve against the root; an absolute path is accepted only when it already
    * lies inside it.
    */
-  resolve(p: string): string {
+  resolve(p: string, opts: { allowEnvFile?: boolean } = {}): string {
     if (typeof p !== 'string' || !p.trim()) throw new PathConfinementError('Path is empty.');
     if (p.includes('\0')) throw new PathConfinementError('Path contains a NUL byte.');
     if (this.inline && isAbsolute(p) && !isInside(this.root, p)) {
@@ -232,6 +285,7 @@ export class ConfinedWriter {
       throw new PathConfinementError(`Refusing path "${p}": a symlink along it leads outside the working directory.`);
     }
     if (!this.inline) this.assertNoSymlink(abs, p);
+    assertNotDenied(p, relative(this.root, abs), 'write', opts);
     return abs;
   }
 
@@ -297,6 +351,25 @@ export class ConfinedWriter {
       return;
     }
     this.ops.set(abs, { abs, content, action: 'create' });
+  }
+
+  /**
+   * Plan a new binary-safe file (an unzipped entry). Same rules as create():
+   * an existing file with different bytes is a conflict unless `force`.
+   */
+  createBytes(abs: string, bytes: Uint8Array, force = false): void {
+    const state = this.checkTarget(abs);
+    const content = Buffer.from(bytes).toString('latin1');
+    if (state === 'file') {
+      if (Buffer.from(bytes).equals(readFileSync(abs))) return void this.ops.set(abs, { abs, content, bytes, action: 'unchanged' });
+      if (!force) {
+        this.conflicts.push(this.rel(abs));
+        return;
+      }
+      this.ops.set(abs, { abs, content, bytes, action: 'overwrite' });
+      return;
+    }
+    this.ops.set(abs, { abs, content, bytes, action: 'create' });
   }
 
   /**
@@ -409,7 +482,8 @@ export class ConfinedWriter {
         // O_NOFOLLOW: the final component is opened only if it is not a symlink.
         const fd = openSync(op.abs, FS.O_WRONLY | FS.O_CREAT | FS.O_TRUNC | (FS.O_NOFOLLOW ?? 0), 0o644);
         try {
-          writeSync(fd, op.content, null, 'utf8');
+          if (op.bytes) writeSync(fd, op.bytes);
+          else writeSync(fd, op.content, null, 'utf8');
         } finally {
           closeSync(fd);
         }
@@ -428,6 +502,12 @@ export class OverwriteRefusedError extends Error {
     );
     this.name = 'OverwriteRefusedError';
   }
+}
+
+/** One stderr line for an uncaught error: stack included, every credential scrubbed. */
+export function fatalLine(label: string, err: unknown, env: NodeJS.ProcessEnv = process.env): string {
+  const text = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  return `[${label}] fatal: ${redactSecrets(text, [env.SWFTE_PAT, env.SWFTE_API_KEY])}\n`;
 }
 
 /** Whether `.gitignore` in the root appears to ignore a given env file. Best effort, for a warning only. */

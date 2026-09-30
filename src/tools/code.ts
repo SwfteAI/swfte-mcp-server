@@ -1,8 +1,8 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
-import { join, dirname, relative, resolve, sep } from 'node:path';
-import { assertLocalFilesystem, confineDirectory, confinementRoot, confinePath, PathConfinementError } from '../fsguard.js';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { join, relative, resolve, sep } from 'node:path';
+import { assertLocalFilesystem, ConfinedWriter, confineDirectory, confinementRoot, confinePath, denyReason, OverwriteRefusedError, PathConfinementError } from '../fsguard.js';
 import { z } from 'zod';
-import { unzipSync, zipSync } from 'fflate';
+import { unzipSync, zipSync, type Unzipped } from 'fflate';
 import type { ToolDefinition } from './_types.js';
 
 const EXEC = '/v2/workflows/execution';
@@ -22,10 +22,41 @@ function safeJoin(root: string, entry: string): string {
   return target;
 }
 
+/** Upper bounds on what one export may unpack: entry count, any single file, and the total. */
+export const EXPORT_LIMITS = { maxEntries: 5_000, maxFileBytes: 64 * 1024 * 1024, maxTotalBytes: 256 * 1024 * 1024 };
+
+/**
+ * Unzip server bytes, refusing a zip bomb: the sizes the archive declares are checked
+ * before any entry is inflated, and the inflated sizes are checked again afterwards.
+ */
+export function unzipCapped(bytes: Uint8Array, limits: typeof EXPORT_LIMITS = EXPORT_LIMITS): Unzipped {
+  let entries = 0;
+  let total = 0;
+  const tooBig = (what: string): never => {
+    throw new Error(`Refusing to unpack the export: ${what} exceeds the safety limit (${limits.maxEntries} files, ${limits.maxFileBytes} bytes per file, ${limits.maxTotalBytes} bytes total).`);
+  };
+  const out = unzipSync(bytes, {
+    filter: (f) => {
+      entries += 1;
+      total += f.originalSize;
+      if (entries > limits.maxEntries) tooBig('the number of files');
+      if (f.originalSize > limits.maxFileBytes) tooBig(`"${f.name}"`);
+      if (total > limits.maxTotalBytes) tooBig('the unpacked size');
+      return true;
+    },
+  });
+  let actual = 0;
+  for (const [name, data] of Object.entries(out)) {
+    actual += data.length;
+    if (data.length > limits.maxFileBytes || actual > limits.maxTotalBytes) tooBig(`"${name}"`);
+  }
+  return out;
+}
+
 function walk(dir: string, root = dir, acc: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
-    // Never ship build output, VCS metadata or env files back to the server.
-    if (name === 'target' || name === '.git' || name === 'node_modules' || name.startsWith('.env') || name === EXPORT_MARKER) continue;
+    // Never ship build output, VCS metadata, env files or key material back to the server.
+    if (name === 'target' || name === 'node_modules' || name === EXPORT_MARKER || denyReason(name, 'read')) continue;
     const full = join(dir, name);
     // lstat, not stat: a symlink is never followed, so it cannot pull in a file
     // from outside the workspace.
@@ -110,10 +141,10 @@ export const codeTools: ToolDefinition[] = [
         .optional()
         .describe('Delete destDir first — only if a previous swfte_export_src created it (marker file). Off by default so local edits are not silently destroyed.'),
     }),
-    execute: async (input, { client, localFilesystem }) => {
+    execute: async (input, { client, config, localFilesystem }) => {
       assertLocalFilesystem(localFilesystem, 'swfte_export_src');
       // Validate the destination before downloading anything.
-      confinePath(input.destDir);
+      confinePath(input.destDir, undefined, 'write');
       const { bytes, headers } = await client.getBinary(
         `${EXEC}/${encodeURIComponent(input.workflowId)}/download-src`,
         { timeoutMs: 180_000 }
@@ -121,16 +152,20 @@ export const codeTools: ToolDefinition[] = [
 
       const dest = prepareExportDest(input.destDir, input.overwrite);
 
-      const files = unzipSync(bytes);
+      const files = unzipCapped(bytes);
       const written: string[] = [];
       const steps: Array<{ file: string; stepId?: string; stepType?: string; userRegions: string[] }> = [];
 
+      // Every entry goes through the same writer as scaffold and wire: planned first,
+      // committed only if the whole plan is clean. A file already there is a conflict
+      // (never silently replaced), a symlink anywhere on the path is refused (never
+      // written through), and the deny-list and secret scan apply.
+      const writer = new ConfinedWriter({ forbidden: [config?.credential ?? ''] });
+      const destRel = relative(writer.root, dest);
       for (const [name, data] of Object.entries(files)) {
         if (name.endsWith('/') || name === EXPORT_MARKER) continue;
-        // Re-confined per entry: a symlink already inside dest must not carry a write out of it.
-        const target = confinePath(safeJoin(dest, name));
-        mkdirSync(dirname(target), { recursive: true });
-        writeFileSync(target, data);
+        safeJoin(dest, name); // zip-slip guard: the entry must stay inside dest
+        writer.createBytes(writer.resolve(join(destRel, name)), data);
         written.push(name);
 
         if (name.startsWith('src/steps/') && name.endsWith('.rs') && !name.endsWith('mod.rs')) {
@@ -138,11 +173,22 @@ export const codeTools: ToolDefinition[] = [
           if (parsed.stepId) steps.push({ file: name, ...parsed });
         }
       }
-
-      writeFileSync(
-        join(dest, EXPORT_MARKER),
-        JSON.stringify({ writtenBy: 'swfte_export_src', workflowId: input.workflowId }, null, 2) + '\n'
+      writer.create(
+        writer.resolve(join(destRel, EXPORT_MARKER)),
+        JSON.stringify({ writtenBy: 'swfte_export_src', workflowId: input.workflowId }, null, 2) + '\n',
+        true
       );
+      try {
+        writer.commit();
+      } catch (err) {
+        if (err instanceof OverwriteRefusedError) {
+          throw new PathConfinementError(
+            `Refusing to overwrite existing file(s) in "${input.destDir}": ${err.files.join(', ')}. Nothing was written. ` +
+              'Choose a new destDir, or pass overwrite:true to replace a directory a previous swfte_export_src created.'
+          );
+        }
+        throw err;
+      }
 
       return {
         workflowId: input.workflowId,

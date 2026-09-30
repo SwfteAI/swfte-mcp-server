@@ -2,6 +2,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 
 import { buildServer } from './server.js';
 import { loadConfig } from './config.js';
+import { fatalLine } from './fsguard.js';
 
 async function main() {
   let config;
@@ -30,12 +31,12 @@ if (process.argv[2] === 'swfte') {
   import('./cli.js')
     .then((cli) => cli.main(process.argv.slice(3)))
     .catch((err) => {
-      process.stderr.write(`[swfte] fatal: ${err instanceof Error ? err.stack : String(err)}\n`);
+      process.stderr.write(fatalLine('swfte', err));
       process.exitCode = 1;
     });
 } else {
   main().catch((err) => {
-    process.stderr.write(`[swfte-mcp] fatal: ${err instanceof Error ? err.stack : String(err)}\n`);
+    process.stderr.write(fatalLine('swfte-mcp', err));
     process.exit(1);
   });
 }

@@ -119,6 +119,9 @@ function defaultExtract(page: any): unknown[] {
   return page?.content ?? page?.items ?? page?.data ?? page?.agents ?? page?.workflows ?? [];
 }
 
+/** Redirects are never followed: fetch would replay X-API-Key / X-Workspace-ID to another origin. */
+const isRedirect = (status: number): boolean => status >= 300 && status < 400;
+
 export class OperationDeadlineError extends Error {
   constructor() { super('Operation time budget exhausted; an in-flight mutation may have committed. Inspect returned IDs before retrying.'); }
 }
@@ -198,7 +201,7 @@ export class SwfteClient {
     let res: Response;
     let text: string;
     try {
-      res = await fetch(url, { method: opts.method, headers, body, signal: controller.signal });
+      res = await fetch(url, { method: opts.method, headers, body, signal: controller.signal, redirect: 'manual' });
       text = await res.text();
     } finally {
       clearTimeout(timer);
@@ -208,7 +211,7 @@ export class SwfteClient {
       process.stderr.write(`[swfte-mcp] ← ${res.status} ${opts.method} ${opts.path}\n`);
     }
 
-    const ok = res.ok || (opts.expectStatuses?.includes(res.status) ?? false);
+    const ok = (res.ok || (opts.expectStatuses?.includes(res.status) ?? false)) && !isRedirect(res.status);
     if (!ok) throw this.toApiError(res, text, opts);
 
     // A 202 Accepted for an async provision routinely carries an EMPTY body.
@@ -265,8 +268,9 @@ export class SwfteClient {
       envelope.code ?? nested.code ?? (typeof envelope.error === 'string' ? envelope.error : '') ?? ''
     ) || `HTTP_${res.status}`;
 
-    const message =
-      String(envelope.message ?? nested.message ?? envelope.reason ?? '') ||
+    const message = isRedirect(res.status)
+      ? `${res.status} redirect on ${opts.method} ${opts.path} was not followed (credentials are only ever sent to the configured base URL). Check SWFTE_BASE_URL.`
+      : String(envelope.message ?? nested.message ?? envelope.reason ?? '') ||
       `${res.status} ${res.statusText} on ${opts.method} ${opts.path}`;
 
     return new SwfteApiError({
@@ -311,8 +315,8 @@ export class SwfteClient {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestBudget(opts.timeoutMs ?? 180_000));
     try {
-      const res = await fetch(url, { method: 'GET', headers, signal: controller.signal });
-      if (!res.ok) {
+      const res = await fetch(url, { method: 'GET', headers, signal: controller.signal, redirect: 'manual' });
+      if (!res.ok || isRedirect(res.status)) {
         const text = await res.text();
         throw this.toApiError(res, text, { method: 'GET', path });
       }
@@ -351,13 +355,13 @@ export class SwfteClient {
     let res: Response;
     let text: string;
     try {
-      res = await fetch(url, { method: 'POST', headers, body: form, signal: controller.signal });
+      res = await fetch(url, { method: 'POST', headers, body: form, signal: controller.signal, redirect: 'manual' });
       text = await res.text();
     } finally {
       clearTimeout(timer);
     }
 
-    if (!res.ok) throw this.toApiError(res, text, { method: 'POST', path });
+    if (!res.ok || isRedirect(res.status)) throw this.toApiError(res, text, { method: 'POST', path });
     return (text ? JSON.parse(text) : undefined) as T;
   }
 

@@ -19,6 +19,7 @@
  */
 
 import { telemetryEnabled } from './telemetry.js';
+import { PACKAGE_VERSION } from './version.js';
 
 /** Which credential family the configured secret belongs to. */
 export type CredentialKind = 'pat' | 'api-key';
@@ -171,6 +172,13 @@ export interface ServerConfig {
    * able to spin up paid capacity on its own. Preview always works.
    */
   allowDeploy: boolean;
+  /**
+   * Whether `swfte_relay_runs_gate_decide` is registered at all. Defaults to false:
+   * a gate is a human's approval of an action the agent itself wants to take, and
+   * a PAT carries the user's full authority, so the agent must not be able to
+   * approve its own paused run unless the operator turns this on.
+   */
+  allowGateDecisions: boolean;
   /** Default ceiling (ms) for tools that poll a long-running job to terminal. */
   defaultWaitMs: number;
   /**
@@ -300,10 +308,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     credentialKind: detected,
     baseUrl: cleanBaseUrl(env.SWFTE_BASE_URL ?? 'https://api.swfte.com/agents'),
     workspaceId: env.SWFTE_WORKSPACE_ID?.trim() || undefined,
-    userAgent: `swfte-mcp-server/${env.SWFTE_MCP_VERSION ?? '0.2.0'} (+https://www.swfte.com)`,
+    userAgent: `swfte-mcp-server/${env.SWFTE_MCP_VERSION ?? PACKAGE_VERSION} (+https://www.swfte.com)`,
     debug: isTrue(env.SWFTE_DEBUG),
     enabledGroups: parseGroups(env.SWFTE_TOOLS),
     allowDeploy: isTrue(env.SWFTE_ALLOW_DEPLOY),
+    allowGateDecisions: isTrue(env.SWFTE_ALLOW_GATE_DECISIONS),
     defaultWaitMs: parseWaitMs(env.SWFTE_DEFAULT_WAIT_MS),
     telemetry: telemetryEnabled(env),
   };
