@@ -468,6 +468,13 @@ export class ConfinedWriter {
       throw new OverwriteRefusedError(this.conflicts);
     }
     for (const op of this.ops.values()) this.assertNoSecrets(this.rel(op.abs), op.content);
+    // Refuse late ordinary-file collisions before the first planned write.
+    if (!this.inline) {
+      const appeared = [...this.ops.values()]
+        .filter(op => op.action === 'create' && this.checkTarget(op.abs) !== 'missing')
+        .map(op => this.rel(op.abs));
+      if (appeared.length) throw new OverwriteRefusedError(appeared);
+    }
     const out: PlannedWrite[] = [];
     for (const op of this.ops.values()) {
       if (this.inline) {
@@ -480,7 +487,17 @@ export class ConfinedWriter {
         mkdirSync(dirname(op.abs), { recursive: true });
         this.assertNoSymlink(op.abs);
         // O_NOFOLLOW: the final component is opened only if it is not a symlink.
-        const fd = openSync(op.abs, FS.O_WRONLY | FS.O_CREAT | FS.O_TRUNC | (FS.O_NOFOLLOW ?? 0), 0o644);
+        // Exclusive create also covers a file appearing after the precheck.
+        const flags = FS.O_WRONLY | (FS.O_NOFOLLOW ?? 0)
+          | (op.action === 'create' ? FS.O_CREAT | FS.O_EXCL : FS.O_TRUNC);
+        let fd: number;
+        try { fd = openSync(op.abs, flags, 0o644); }
+        catch (error) {
+          if (op.action === 'create' && (error as NodeJS.ErrnoException).code === 'EEXIST') {
+            throw new OverwriteRefusedError([this.rel(op.abs)], out.every(write => write.action === 'unchanged'));
+          }
+          throw error;
+        }
         try {
           if (op.bytes) writeSync(fd, op.bytes);
           else writeSync(fd, op.content, null, 'utf8');
@@ -495,9 +512,10 @@ export class ConfinedWriter {
 }
 
 export class OverwriteRefusedError extends Error {
-  constructor(readonly files: string[]) {
+  constructor(readonly files: string[], nothingWritten = true) {
     super(
-      `Refusing to overwrite existing file(s): ${files.join(', ')}. Nothing was written. ` +
+      `Refusing to overwrite existing file(s): ${files.join(', ')}. ` +
+        (nothingWritten ? 'Nothing was written. ' : 'Earlier writes in this plan may already have completed. ') +
         'Pass force:true to replace them, or choose a different targetDir.'
     );
     this.name = 'OverwriteRefusedError';
