@@ -28,6 +28,8 @@ import { auditTools } from './audit.js';
 import { costControlTools } from './cost-control.js';
 import { analyticsTools } from './analytics.js';
 import { experimentTools } from './experiments.js';
+import { releaseTools } from './releases.js';
+import { reviewTools } from './review.js';
 import { connectTools } from './connect.js';
 import { deploymentTools } from './deployments.js';
 import { agentMailTools } from './agent-mail.js';
@@ -71,6 +73,7 @@ export const allTools: ToolDefinition[] = [
   ...tag('core', hubTools),
   // Compliance control plane (CONTRACT rev 7): assess, scan code, evidence records.
   ...tag('core', complianceTools),
+  ...tag('core', reviewTools),
   // Learning loop (brief 08): report an outcome / propose a rule to the human review queue.
   ...tag('learning', learningTools),
   ...tag('apps', appWizardTools),
@@ -94,6 +97,7 @@ export const allTools: ToolDefinition[] = [
   ...tag('cost', costControlTools),
   ...tag('analytics', analyticsTools),
   ...tag('experiments', experimentTools),
+  ...tag('experiments', releaseTools),
   ...tag('connect', connectTools),
   ...tag('deployments', deploymentTools),
   ...tag('agent-mail', agentMailTools),

@@ -43,6 +43,9 @@ export const ACTION_CAPABILITIES = [
   'app.payments.enable',
   'connect.start',
   'analytics.enable',
+  'release.start',
+  'release.ramp',
+  'release.complete',
 ] as const;
 export type ActionCapability = (typeof ACTION_CAPABILITIES)[number];
 

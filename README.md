@@ -512,6 +512,28 @@ More, with what each one does underneath: [`docs/RECIPES.md`](./docs/RECIPES.md)
 
 ## Development
 
+Review and release tools use the existing workspace REST APIs. `swfte_review_room`
+reads `/v2/review/{actionId}?hash=...`; it records no human room view, scenario
+run or mark. `swfte_proof_bundle` reads `/v2/proof-bundles/{kind}/{id}?hash=...`
+for workflow, agent, chatflow, model, application, widget and Studio changes.
+Historical evidence and an unavailable confidence runtime remain explicitly absent.
+
+Release status and reports retain the server's sample counts, sequential results
+and allocation withholding. Pause and rollback use the existing controls with
+both exact content and plan hashes. `swfte_release_propose_ramp` only creates an
+inherited approval request (`release.complete` for COMPLETE, otherwise
+`release.ramp`); it cannot change traffic. Its response must match the requested
+release, hashes, stage, weight and pending human approval state. MCP provides no
+Slack installation, message, callback or decision tool. Linked Slack humans use
+the signed callback and inherited actions service; MCP cannot supply that identity.
+
+The focused contract tests use local client fixtures and do not establish a live
+Slack installation or actual backend integration:
+
+```bash
+node --import tsx --test test/review-release.test.ts test/slack-review-release.test.ts
+```
+
 ```bash
 npm install
 npm run typecheck
