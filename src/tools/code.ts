@@ -4,6 +4,15 @@ import { assertLocalFilesystem, ConfinedWriter, confineDirectory, confinementRoo
 import { z } from 'zod';
 import { unzipSync, zipSync, type Unzipped } from 'fflate';
 import type { ToolDefinition } from './_types.js';
+import { SwfteApiError } from '../client.js';
+
+const TRANSLATION_NEXT_STEP = 'Keep this workflow hosted and invoke it through its contract, or simplify the listed nodes before exporting source.';
+
+function translationRefusal(error: unknown): Record<string, unknown> | null {
+  if (!(error instanceof SwfteApiError) || error.status !== 422 || !Array.isArray(error.envelope.refusals)) return null;
+  return { refused: true, code: 'TRANSLATION_REFUSED', refusals: error.envelope.refusals,
+    warnings: error.envelope.warnings ?? [], nextStep: TRANSLATION_NEXT_STEP };
+}
 
 const EXEC = '/v2/workflows/execution';
 
@@ -128,13 +137,15 @@ export const codeTools: ToolDefinition[] = [
     title: 'Download the generated code workspace',
     group: 'workflows',
     description:
-      'Download an execution workflow as a real, editable Cargo workspace and unzip it locally: ' +
+      'Download an execution workflow, or an exactly translatable canvas workflow, as a real, editable Cargo workspace and unzip it locally: ' +
       'Cargo.toml, build.rs, src/graph.rs, src/steps/*.rs, swfte-blueprint.json, docker-compose.yml. ' +
       'Each step file carries blueprint-step-id / blueprint-step-type headers and marked user regions ' +
       'that survive re-emit — edit inside those, then push back with swfte_sync_src. Returns the file ' +
       'tree plus the per-step headers so you know what you are looking at without reading every file.',
     inputSchema: z.object({
       workflowId: z.string(),
+      source: z.enum(['execution', 'canvas', 'auto']).default('auto')
+        .describe('auto tries execution first and canvas only after a 404. Canvas translation refuses unsupported semantics with the complete node list and writes nothing.'),
       destDir: z.string().describe('Subdirectory of the project to unzip into. Created if missing. Local (stdio) server only.'),
       overwrite: z
         .boolean()
@@ -149,10 +160,25 @@ export const codeTools: ToolDefinition[] = [
       assertLocalFilesystem(localFilesystem, 'swfte_export_src');
       // Validate the destination before downloading anything.
       confinePath(input.destDir, undefined, 'write');
-      const { bytes, headers } = await client.getBinary(
-        `${EXEC}/${encodeURIComponent(input.workflowId)}/download-src`,
-        { timeoutMs: 180_000 }
-      );
+      const executionPath = `${EXEC}/${encodeURIComponent(input.workflowId)}/download-src`;
+      const canvasPath = `/v2/workflows/${encodeURIComponent(input.workflowId)}/export-src`;
+      let download: Awaited<ReturnType<typeof client.getBinary>>;
+      const source = input.source ?? 'auto';
+      try {
+        if (source === 'canvas') download = await client.getBinary(canvasPath, { timeoutMs: 180_000 });
+        else {
+          try { download = await client.getBinary(executionPath, { timeoutMs: 180_000 }); }
+          catch (error) {
+            if (source !== 'auto' || !(error instanceof SwfteApiError) || error.status !== 404) throw error;
+            download = await client.getBinary(canvasPath, { timeoutMs: 180_000 });
+          }
+        }
+      } catch (error) {
+        const refusal = translationRefusal(error);
+        if (refusal) return refusal;
+        throw error;
+      }
+      const { bytes, headers } = download;
 
       const dest = prepareExportDest(input.destDir, input.overwrite);
 
@@ -201,6 +227,8 @@ export const codeTools: ToolDefinition[] = [
         // moved under me" — the two look identical in a diff otherwise.
         blueprintSha: headers['x-swfte-blueprint-sha'] || null,
         emitterVersion: headers['x-swfte-emitter-version'] || null,
+        translatorVersion: headers['x-swfte-translator-version'] || null,
+        sourceContentHash: headers['x-swfte-source-content-hash'] || null,
         fileCount: written.length,
         files: written.sort(),
         steps,
@@ -208,6 +236,21 @@ export const codeTools: ToolDefinition[] = [
           'Edit inside the marked user regions, then swfte_sync_src to push back. It dry-runs first ' +
           'and shows the BlueprintDiff before applying.',
       };
+    },
+  },
+
+  {
+    name: 'swfte_translate_check',
+    title: 'Check whether a canvas workflow can be exported as source',
+    group: 'workflows',
+    description: 'Read-only translation check. Returns every unsupported node and semantic mismatch; never creates an execution workflow or writes files.',
+    readOnly: true,
+    inputSchema: z.object({ workflowId: z.string().min(1) }),
+    execute: async (input, { client }) => {
+      const report = await client.request<Record<string, unknown>>({ method: 'POST',
+        path: `/v2/workflows/${encodeURIComponent(input.workflowId)}/translate-to-execution`,
+        query: { dryRun: true }, retries: 0 });
+      return report.translatable === false ? { ...report, nextStep: TRANSLATION_NEXT_STEP } : report;
     },
   },
 
