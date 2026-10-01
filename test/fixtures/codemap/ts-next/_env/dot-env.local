@@ -1,0 +1,3 @@
+# local overrides
+SWFTE_API_KEY=__CANARY_envlocal__
+SWFTE_SUPPORT_AGENT_ID=ag_Supp9x

@@ -1,0 +1,1371 @@
+{
+  "fixture": "ts-next",
+  "labelledBy": "opus leaf-1.1.2",
+  "reviewedBy": null,
+  "sites": [
+    {
+      "path": "public/agent-embed.html",
+      "line": 19,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Pub8Nq",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "public/embed.html",
+      "line": 11,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Docs2W",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "public/support-frame.html",
+      "line": 13,
+      "language": "html",
+      "category": "widget",
+      "symbol": "<module>",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Supp9x",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "scripts/agent-smoke.mjs",
+      "line": 5,
+      "language": "javascript",
+      "category": "raw-http",
+      "symbol": "smoke",
+      "sdk": "http",
+      "op": "chat",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Supp9x",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "message"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "scripts/backfill.ts",
+      "line": 22,
+      "language": "typescript",
+      "category": "raw-http",
+      "symbol": "main",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_8K2mQ4",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "sources",
+        "topic"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "scripts/replay-invoice.ts",
+      "line": 9,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "replay",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Inv7Tr2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "invoice-triage",
+        "pinnedVersion": "2"
+      },
+      "inputKeys": [
+        "*"
+      ],
+      "outputKeys": [
+        "confidence",
+        "decision"
+      ]
+    },
+    {
+      "path": "scripts/report.cjs",
+      "line": 8,
+      "language": "javascript",
+      "category": "managed",
+      "symbol": "weeklyTriageReport",
+      "sdk": "node",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Inv7Tr2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "scripts/seed-agents.mjs",
+      "line": 7,
+      "language": "javascript",
+      "category": "managed",
+      "symbol": "<module>",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Supp9x",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "scripts/seed-agents.mjs",
+      "line": 12,
+      "language": "javascript",
+      "category": "dynamic",
+      "symbol": "<module>",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "scripts/warm-cache.ts",
+      "line": 7,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "<module>",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Seo3Pz",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "depth",
+        "url"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/app/actions/invoices.ts",
+      "line": 11,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "triageInvoice",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Inv7Tr2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "invoice-triage",
+        "pinnedVersion": "2"
+      },
+      "inputKeys": [
+        "invoiceUrl",
+        "vendor"
+      ],
+      "outputKeys": [
+        "confidence"
+      ]
+    },
+    {
+      "path": "src/app/actions/support.ts",
+      "line": 13,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "escalate",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Supp9x",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "support-agent",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "conversationId",
+        "message"
+      ],
+      "outputKeys": [
+        "conversationId"
+      ]
+    },
+    {
+      "path": "src/app/admin/drafts/page.tsx",
+      "line": 14,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "DraftsPage",
+      "sdk": "node",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_8K2mQ4",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/app/api/edge/translate/route.ts",
+      "line": 9,
+      "language": "typescript",
+      "category": "raw-http",
+      "symbol": "POST",
+      "sdk": "http",
+      "op": "chat",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Pub8Nq",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "message",
+        "visitorId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/app/api/embed/route.ts",
+      "line": 4,
+      "language": "typescript",
+      "category": "widget",
+      "symbol": "GET",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Docs2W",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/app/api/invoices/[id]/route.ts",
+      "line": 7,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "GET",
+      "sdk": "node",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Inv7Tr2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/app/api/invoices/route.ts",
+      "line": 8,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "POST",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Inv7Tr2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "invoice-triage",
+        "pinnedVersion": "2"
+      },
+      "inputKeys": [
+        "invoiceUrl",
+        "vendor"
+      ],
+      "outputKeys": [
+        "decision",
+        "lines"
+      ]
+    },
+    {
+      "path": "src/app/api/leads/route.ts",
+      "line": 7,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "POST",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Q",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "*"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/app/api/publish/route.ts",
+      "line": 21,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "POST",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_8K2mQ4",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "content-pipeline",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "sources",
+        "topic"
+      ],
+      "outputKeys": [
+        "articles"
+      ]
+    },
+    {
+      "path": "src/app/api/seo/route.ts",
+      "line": 9,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "GET",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Seo3Pz",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "url"
+      ],
+      "outputKeys": [
+        "issues",
+        "score"
+      ]
+    },
+    {
+      "path": "src/app/api/support/route.ts",
+      "line": 12,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "POST",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Supp9x",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "support-agent",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "conversationId",
+        "message"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/app/docs/page.tsx",
+      "line": 12,
+      "language": "typescript",
+      "category": "widget",
+      "symbol": "DocsPage",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Docs2W",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/app/layout.tsx",
+      "line": 15,
+      "language": "typescript",
+      "category": "widget",
+      "symbol": "RootLayout",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Supp9x",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/app/settings/page.tsx",
+      "line": 5,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "SettingsPage",
+      "sdk": "node",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "chatflow",
+        "id": "cf_Onb7Rz",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/components/HelpBubble.tsx",
+      "line": 7,
+      "language": "typescript",
+      "category": "widget",
+      "symbol": "HelpBubble",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Docs2W",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/components/SearchPalette.tsx",
+      "line": 9,
+      "language": "typescript",
+      "category": "widget",
+      "symbol": "SearchPalette",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Docs2W",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/components/TenantChat.tsx",
+      "line": 7,
+      "language": "typescript",
+      "category": "dynamic",
+      "symbol": "TenantChat",
+      "sdk": "widget-embed",
+      "op": "embed",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": "NEXT_PUBLIC_SWFTE_AGENT_ID",
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/chatflow-raw.ts",
+      "line": 5,
+      "language": "typescript",
+      "category": "raw-http",
+      "symbol": "openKioskSession",
+      "sdk": "http",
+      "op": "chat",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "chatflow",
+        "id": "cf_Onb7Rz",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "channel",
+        "metadata"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/escalations.ts",
+      "line": 8,
+      "language": "typescript",
+      "category": "dynamic",
+      "symbol": "escalateToAgent",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": "SWFTE_SUPPORT_AGENT_ID",
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/http/lead-hook.ts",
+      "line": 6,
+      "language": "typescript",
+      "category": "raw-http",
+      "symbol": "relayCrmContact",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Q",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "*"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/http/public-agent.ts",
+      "line": 7,
+      "language": "typescript",
+      "category": "dynamic",
+      "symbol": "publicChat",
+      "sdk": "http",
+      "op": "chat",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "message",
+        "visitorId"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/invoices/batch.ts",
+      "line": 7,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "triageAll",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Inv7Tr2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "invoice-triage",
+        "pinnedVersion": "2"
+      },
+      "inputKeys": [
+        "invoiceUrl",
+        "vendor"
+      ],
+      "outputKeys": [
+        "decision"
+      ]
+    },
+    {
+      "path": "src/lib/invoices/review.ts",
+      "line": 11,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "linesForReview",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Inv7Tr2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "invoice-triage",
+        "pinnedVersion": "2"
+      },
+      "inputKeys": [
+        "currency",
+        "invoiceUrl",
+        "vendor"
+      ],
+      "outputKeys": [
+        "lines"
+      ]
+    },
+    {
+      "path": "src/lib/jobs/nightly-digest.ts",
+      "line": 15,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "runNightlyDigest",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_8K2mQ4",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "*"
+      ],
+      "outputKeys": [
+        "*"
+      ]
+    },
+    {
+      "path": "src/lib/jobs/nightly-digest.ts",
+      "line": 22,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "runNightlySeoAudit",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Seo3Pz",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "depth",
+        "url"
+      ],
+      "outputKeys": [
+        "issues"
+      ]
+    },
+    {
+      "path": "src/lib/leads.ts",
+      "line": 13,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "enrichLead",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Q",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "company",
+        "email"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/leads.ts",
+      "line": 19,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "enrichAndWait",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Q",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "email"
+      ],
+      "outputKeys": [
+        "firmographics.size",
+        "score"
+      ]
+    },
+    {
+      "path": "src/lib/leads.ts",
+      "line": 29,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "enrichBoth",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Q",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "email"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/leads.ts",
+      "line": 31,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "enrichBoth",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Q",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "company",
+        "email"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/leads.ts",
+      "line": 40,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "LeadService.rescore",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Q",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "leadId",
+        "testingFlag"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/leads.ts",
+      "line": 45,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "LeadService.history",
+      "sdk": "node",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Q",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/onboarding.ts",
+      "line": 5,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "startOnboarding",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "chatflow",
+        "id": "cf_Onb7Rz",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/onboarding.ts",
+      "line": 11,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "openOnboardingSessions",
+      "sdk": "node",
+      "op": "read-output",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "chatflow",
+        "id": "cf_Onb7Rz",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/onboarding.ts",
+      "line": 17,
+      "language": "typescript",
+      "category": "dynamic",
+      "symbol": "resumeFlow",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "chatflow",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/sales.ts",
+      "line": 6,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "askSales",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Sales3K",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/sales.ts",
+      "line": 12,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "followUp",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Sales3K",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/sales.ts",
+      "line": 21,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "ping",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Sales3K",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/sales.ts",
+      "line": 30,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "askSalesEu",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Sales3K",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/sales.ts",
+      "line": 37,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "salesBot.reply",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Sales3K",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/seo.ts",
+      "line": 5,
+      "language": "typescript",
+      "category": "raw-http",
+      "symbol": "auditOnPublish",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Seo3Pz",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "depth",
+        "url"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/seo.ts",
+      "line": 21,
+      "language": "typescript",
+      "category": "raw-http",
+      "symbol": "regressionAudit",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Seo3Pz",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": "2"
+      },
+      "inputKeys": [
+        "url"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/services/triage-service.ts",
+      "line": 13,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "TriageService.run",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Inv7Tr2",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "invoice-triage",
+        "pinnedVersion": "2"
+      },
+      "inputKeys": [
+        "invoiceUrl",
+        "vendor"
+      ],
+      "outputKeys": [
+        "*"
+      ]
+    },
+    {
+      "path": "src/lib/support.ts",
+      "line": 6,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "answer",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": "ag_Supp9x",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": "support-agent",
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "message"
+      ],
+      "outputKeys": [
+        "content"
+      ]
+    },
+    {
+      "path": "src/lib/tenant-bots.ts",
+      "line": 8,
+      "language": "typescript",
+      "category": "dynamic",
+      "symbol": "tenantReply",
+      "sdk": "node",
+      "op": "chat",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "agent",
+        "id": null,
+        "unresolved": true,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [],
+      "outputKeys": []
+    },
+    {
+      "path": "src/lib/widgets.ts",
+      "line": 7,
+      "language": "typescript",
+      "category": "raw-http",
+      "symbol": "askHelpWidget",
+      "sdk": "http",
+      "op": "run",
+      "managed": "raw-http",
+      "artifact": {
+        "kind": "widget",
+        "id": "wg_Help4M",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "question",
+        "visitor"
+      ],
+      "outputKeys": []
+    },
+    {
+      "path": "src/pages/api/legacy-lead.ts",
+      "line": 13,
+      "language": "typescript",
+      "category": "managed",
+      "symbol": "default",
+      "sdk": "node",
+      "op": "run",
+      "managed": "typed-client",
+      "artifact": {
+        "kind": "workflow",
+        "id": "wf_Lead5Q",
+        "unresolved": false,
+        "envVarName": null,
+        "alias": null,
+        "pinnedVersion": null
+      },
+      "inputKeys": [
+        "email"
+      ],
+      "outputKeys": []
+    }
+  ],
+  "implementations": [
+    {
+      "path": "src/swfte/content-pipeline.ts",
+      "line": 117
+    },
+    {
+      "path": "src/swfte/invoice-triage.ts",
+      "line": 123
+    },
+    {
+      "path": "src/swfte/support-agent.ts",
+      "line": 123
+    }
+  ],
+  "decoys": [
+    {
+      "path": "dist/server/chunk-4.js",
+      "line": 6,
+      "why": "vendored"
+    },
+    {
+      "path": "dist/server/chunk-4.js",
+      "line": 10,
+      "why": "vendored"
+    },
+    {
+      "path": "docs/INTEGRATION.md",
+      "line": 8,
+      "why": "markdown"
+    },
+    {
+      "path": "docs/INTEGRATION.md",
+      "line": 15,
+      "why": "markdown"
+    },
+    {
+      "path": "docs/INTEGRATION.md",
+      "line": 21,
+      "why": "markdown"
+    },
+    {
+      "path": "node_modules/@swfte/sdk/dist/index.js",
+      "line": 8,
+      "why": "vendored"
+    },
+    {
+      "path": "node_modules/@swfte/sdk/dist/index.js",
+      "line": 24,
+      "why": "vendored"
+    },
+    {
+      "path": "src/__tests__/publish.test.ts",
+      "line": 16,
+      "why": "test-mock"
+    },
+    {
+      "path": "src/__tests__/publish.test.ts",
+      "line": 23,
+      "why": "test-mock"
+    },
+    {
+      "path": "src/generated/openapi/workflows-api.ts",
+      "line": 13,
+      "why": "generated"
+    },
+    {
+      "path": "src/generated/openapi/workflows-api.ts",
+      "line": 22,
+      "why": "generated"
+    },
+    {
+      "path": "src/lib/help-text.ts",
+      "line": 4,
+      "why": "string-not-call"
+    },
+    {
+      "path": "src/lib/help-text.ts",
+      "line": 7,
+      "why": "string-not-call"
+    },
+    {
+      "path": "src/lib/help-text.ts",
+      "line": 10,
+      "why": "comment"
+    },
+    {
+      "path": "src/lib/help-text.ts",
+      "line": 11,
+      "why": "string-not-call"
+    },
+    {
+      "path": "src/lib/leads.test.ts",
+      "line": 8,
+      "why": "test-mock"
+    },
+    {
+      "path": "src/lib/legacy-fork.ts",
+      "line": 8,
+      "why": "fork"
+    },
+    {
+      "path": "src/lib/legacy-fork.ts",
+      "line": 13,
+      "why": "fork"
+    },
+    {
+      "path": "src/lib/slug.ts",
+      "line": 5,
+      "why": "docstring"
+    },
+    {
+      "path": "types/swfte-sdk.d.ts",
+      "line": 60,
+      "why": "dts"
+    },
+    {
+      "path": "types/swfte-sdk.d.ts",
+      "line": 69,
+      "why": "dts"
+    }
+  ],
+  "notAnalysed": {
+    "go": 1,
+    "php": 1,
+    "ruby": 1
+  },
+  "envVarNames": [
+    "NEXT_PUBLIC_SWFTE_AGENT_ID",
+    "SWFTE_API_KEY",
+    "SWFTE_BASE_URL",
+    "SWFTE_EMBED_KEY",
+    "SWFTE_SUPPORT_AGENT_ID",
+    "SWFTE_WORKSPACE_ID"
+  ]
+}

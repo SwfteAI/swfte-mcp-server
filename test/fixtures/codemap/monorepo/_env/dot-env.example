@@ -1,0 +1,8 @@
+# Shared by packages/web, packages/admin, py/worker and jvm/billing.
+SWFTE_API_KEY=
+SWFTE_BASE_URL=https://api.swfte.com/agents
+SWFTE_WORKSPACE_ID=
+SWFTE_CONTENT_WORKFLOW_ID=
+SWFTE_BACKFILL_WORKFLOW_ID=
+SWFTE_DUNNING_WORKFLOW_ID=
+SWFTE_EMBED_KEY=

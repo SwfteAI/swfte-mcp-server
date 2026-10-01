@@ -1,0 +1,13 @@
+{
+  "name": "@acme/web",
+  "version": "2.3.0",
+  "private": true,
+  "scripts": { "dev": "next dev", "build": "next build" },
+  "dependencies": {
+    "@swfte/chat-widget": "^1.4.0",
+    "@swfte/sdk": "^1.1.1",
+    "axios": "^1.7.7",
+    "next": "15.1.6",
+    "react": "19.0.0"
+  }
+}

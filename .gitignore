@@ -12,3 +12,12 @@ coverage/
 # useful locally, not worth versioning, and one careless `git add .` away from
 # committing whatever a future run decides to record.
 .e2e/
+
+# Code-map fixture corpus: vendored dirs, build output and .env files are deliberate decoys and
+# canary placeholders (docs/codemap/FIXTURES.md), so they are committed on purpose.
+!test/fixtures/codemap/**/node_modules/
+!test/fixtures/codemap/**/dist/
+!test/fixtures/codemap/**/.env
+!test/fixtures/codemap/**/.env.local
+# Local scan cache and offline queue (never committed).
+.swfte/codemap/

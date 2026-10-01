@@ -1,0 +1,205 @@
+{
+  "description": "Leak canaries for the code-map fixtures. A committed file holds only the placeholder __CANARY_<id>__; the leak probe assembles each value (reverse every part when reversedPerPart, then concatenate) into /tmp copies at run time. Paths are relative to test/fixtures/codemap.",
+  "canaries": [
+    {
+      "id": "literal",
+      "kind": "literal",
+      "placeholder": "__CANARY_literal__",
+      "plantedAt": [
+        {
+          "path": "ts-next/src/lib/sales.ts",
+          "line": 21
+        }
+      ],
+      "reversedPerPart": false,
+      "parts": [
+        "cm-canary-",
+        "literal-7f3a"
+      ]
+    },
+    {
+      "id": "comment",
+      "kind": "comment",
+      "placeholder": "__CANARY_comment__",
+      "plantedAt": [
+        {
+          "path": "ts-next/src/app/api/invoices/route.ts",
+          "line": 8
+        }
+      ],
+      "reversedPerPart": false,
+      "parts": [
+        "cm-canary-",
+        "comment-2b9d"
+      ]
+    },
+    {
+      "id": "docstring",
+      "kind": "docstring",
+      "placeholder": "__CANARY_docstring__",
+      "plantedAt": [
+        {
+          "path": "ts-next/src/lib/leads.ts",
+          "line": 11
+        }
+      ],
+      "reversedPerPart": false,
+      "parts": [
+        "cm-canary-",
+        "docstring-5e1c"
+      ]
+    },
+    {
+      "id": "body",
+      "kind": "body",
+      "placeholder": "__CANARY_body__",
+      "plantedAt": [
+        {
+          "path": "ts-next/src/lib/support.ts",
+          "line": 5
+        }
+      ],
+      "reversedPerPart": false,
+      "parts": [
+        "cm-canary-",
+        "body-8a4f"
+      ]
+    },
+    {
+      "id": "env",
+      "kind": "env",
+      "placeholder": "__CANARY_env__",
+      "plantedAt": [
+        {
+          "path": "ts-next/_env/dot-env",
+          "line": 1
+        }
+      ],
+      "reversedPerPart": false,
+      "parts": [
+        "cm-canary-",
+        "env-3c7e"
+      ]
+    },
+    {
+      "id": "envlocal",
+      "kind": "envlocal",
+      "placeholder": "__CANARY_envlocal__",
+      "plantedAt": [
+        {
+          "path": "ts-next/_env/dot-env.local",
+          "line": 2
+        }
+      ],
+      "reversedPerPart": false,
+      "parts": [
+        "cm-canary-",
+        "envlocal-6d2b"
+      ]
+    },
+    {
+      "id": "default",
+      "kind": "default",
+      "placeholder": "__CANARY_default__",
+      "plantedAt": [
+        {
+          "path": "ts-next/src/lib/swfte.ts",
+          "line": 6
+        }
+      ],
+      "reversedPerPart": false,
+      "parts": [
+        "cm-canary-",
+        "default-9f1a"
+      ]
+    },
+    {
+      "id": "header",
+      "kind": "header",
+      "placeholder": "__CANARY_header__",
+      "plantedAt": [
+        {
+          "path": "ts-next/src/lib/seo.ts",
+          "line": 10
+        }
+      ],
+      "reversedPerPart": false,
+      "parts": [
+        "cm-canary-",
+        "header-4b8c"
+      ]
+    },
+    {
+      "id": "aws",
+      "kind": "aws",
+      "placeholder": "__CANARY_aws__",
+      "plantedAt": [
+        {
+          "path": "ts-next/scripts/backfill.ts",
+          "line": 9
+        },
+        {
+          "path": "monorepo/py/worker/acme_worker/tasks.py",
+          "line": 13
+        }
+      ],
+      "reversedPerPart": true,
+      "parts": [
+        "ANACMCAIKA",
+        "X2ZQA3F7YR"
+      ]
+    },
+    {
+      "id": "github",
+      "kind": "github",
+      "placeholder": "__CANARY_github__",
+      "plantedAt": [
+        {
+          "path": "ts-next/scripts/agent-smoke.mjs",
+          "line": 2
+        }
+      ],
+      "reversedPerPart": true,
+      "parts": [
+        "htiGa3f7yranaCmc_phg",
+        "100000eulaVerutxiFbu"
+      ]
+    },
+    {
+      "id": "stripe",
+      "kind": "stripe",
+      "placeholder": "__CANARY_stripe__",
+      "plantedAt": [
+        {
+          "path": "ts-next/src/lib/invoices/batch.ts",
+          "line": 15
+        }
+      ],
+      "reversedPerPart": true,
+      "parts": [
+        "anaCmc_evil_ks",
+        "10txiFepirtSa3f7yr"
+      ]
+    },
+    {
+      "id": "swfte",
+      "kind": "swfte",
+      "placeholder": "__CANARY_swfte__",
+      "plantedAt": [
+        {
+          "path": "ts-next/scripts/warm-cache.ts",
+          "line": 5
+        },
+        {
+          "path": "monorepo/packages/admin/src/services/audit.ts",
+          "line": 4
+        }
+      ],
+      "reversedPerPart": true,
+      "parts": [
+        "a3f7yranaCmc-etfws-ks",
+        "100eulaVerutxiFetfwS"
+      ]
+    }
+  ]
+}

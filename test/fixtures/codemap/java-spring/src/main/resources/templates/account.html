@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Account</title>
+  <script src="https://unpkg.com/@swfte/chat-widget@1.4.0/dist/swfte-chat.umd.js"></script>
+</head>
+<body>
+<h1>Your account</h1>
+<script th:inline="javascript">
+  new SwfteChatWidget({
+    agentId: /*[[${supportAgentId}]]*/ 'ag_JvProto',
+    type: 'bubble'
+  }).mount();
+</script>
+<iframe th:src="@{https://app.swfte.com/chat/{id}(id=${supportAgentId})}" title="Support" hidden></iframe>
+</body>
+</html>

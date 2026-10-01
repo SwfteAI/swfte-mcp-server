@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: acme-portal
+swfte:
+  api-key: ${SWFTE_API_KEY:}
+  workspace-id: ${SWFTE_WORKSPACE_ID:}
+  base-url: ${SWFTE_BASE_URL:https://api.swfte.com/agents}
+  ids:
+    billing-workflow: ${SWFTE_BILLING_WF:}
+    escalation-agent: ${SWFTE_ESCALATION_AGENT_ID:}
+  agents:
+    support: ${SWFTE_SUPPORT_AGENT_ID:}

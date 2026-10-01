@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "baseUrl": "https://api.swfte.com/agents",
+  "workspaceId": "ws_acme01",
+  "artifacts": [
+    {
+      "catalogRef": "workflow:wf_8K2mQ4",
+      "alias": "content-pipeline",
+      "language": "typescript",
+      "framework": "express",
+      "outDir": "src/swfte",
+      "contractHash": "bc4a2cb1c8a9622b9209f64ee32b9dcd9abb62db902b9a87d9e171d502c24792",
+      "pinnedVersion": "4",
+      "files": [
+        "src/swfte/content-pipeline.ts"
+      ]
+    }
+  ]
+}

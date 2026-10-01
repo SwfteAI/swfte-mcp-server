@@ -1,0 +1,12 @@
+{
+  "name": "@acme/admin",
+  "version": "1.8.2",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node dist/server.js", "build": "tsc -p ." },
+  "dependencies": {
+    "@swfte/chat-widget": "^1.4.0",
+    "@swfte/sdk": "^1.1.1",
+    "express": "^4.21.2"
+  }
+}

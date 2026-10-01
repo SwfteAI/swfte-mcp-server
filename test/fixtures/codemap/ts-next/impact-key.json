@@ -1,0 +1,717 @@
+{
+  "artifactRef": "workflow:wf_8K2mQ4",
+  "fixture": "ts-next",
+  "labelledBy": "opus leaf-1.1.2",
+  "reviewedBy": null,
+  "liveVersion": "3",
+  "versionHashes": {
+    "2": "3339d30ef32e7fe641c7175f068f54ae2b03bc2a6713957a5f532ef31b97af7e",
+    "3": "874bedbbe106b7aeb432fd72bc399c558f7afd95ba01c1e5ecda9f8fe7bb2202",
+    "4": "bc4a2cb1c8a9622b9209f64ee32b9dcd9abb62db902b9a87d9e171d502c24792"
+  },
+  "contractHashes": {
+    "v2": "3339d30ef32e7fe641c7175f068f54ae2b03bc2a6713957a5f532ef31b97af7e",
+    "v3": "874bedbbe106b7aeb432fd72bc399c558f7afd95ba01c1e5ecda9f8fe7bb2202",
+    "v4": "bc4a2cb1c8a9622b9209f64ee32b9dcd9abb62db902b9a87d9e171d502c24792",
+    "v3-prompt": "874bedbbe106b7aeb432fd72bc399c558f7afd95ba01c1e5ecda9f8fe7bb2202",
+    "v4-audience": "d7f0eaae5dd3961d41d91a576be72def8bfc14153dea78ec7c8f9ee36c4de278",
+    "v4-no-articles": "b9b284a4b2bedd9a0489b410021134d20f15f6b05e43cd5a4a4599323d2870c0",
+    "v4-sources-string": "83f9c57d2011a1999dac4c1324be44cc0435110dc0cac43e07face8f208a4400",
+    "v4-tone": "a3bbf97aad91fa12a82832ebd6013bb2c972858d15697159490b7784e775c756",
+    "v4-wordcount": "459b167e228d16bd5960a9975ee6f4982b6b31610b9cf3266918db4a4b8449ee"
+  },
+  "rules": [
+    "Live-tracking (D9): the unpinned typed client generated against the v3 hash, every SDK site, raw HTTP to /invoke. They run the live version, \"3\", so they are judged only when from = \"3\".",
+    "raw-http, unresolved and [\"*\"] sites are cannotCheck in every case, including cases with no breaking change; never safe.",
+    "No ts-next site of this workflow is runtime-pinned, so pinned is empty in every case. The pinned sites are in monorepo (web pins \"3\", admin pins \"4\").",
+    "breaking reasons are \"<KIND> <path>\" in SchemaDiff kind order."
+  ],
+  "contracts": {
+    "v2": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "topic": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sources",
+          "topic"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "articles": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "v3": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "topic": {
+            "type": "string"
+          },
+          "maxWords": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sources",
+          "topic"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "articles": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "v4": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxWords": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sources",
+          "topics"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "articles": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "v3-prompt": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "topic": {
+            "type": "string"
+          },
+          "maxWords": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sources",
+          "topic"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "articles": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "v4-audience": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "topic": {
+            "type": "string"
+          },
+          "maxWords": {
+            "type": "integer"
+          },
+          "audience": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sources",
+          "topic",
+          "audience"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "articles": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "v4-no-articles": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "topic": {
+            "type": "string"
+          },
+          "maxWords": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sources",
+          "topic"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "v4-sources-string": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "string"
+          },
+          "topic": {
+            "type": "string"
+          },
+          "maxWords": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sources",
+          "topic"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "articles": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "v4-tone": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "topic": {
+            "type": "string"
+          },
+          "maxWords": {
+            "type": "integer"
+          },
+          "tone": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sources",
+          "topic"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "articles": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "v4-wordcount": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "topic": {
+            "type": "string"
+          },
+          "maxWords": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sources",
+          "topic"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "articles": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "wordCount": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "rename-input",
+      "from": "3",
+      "to": "4",
+      "fromContract": "v3",
+      "toContract": "v4",
+      "breakingChanges": [
+        {
+          "kind": "REQUIRED_INPUT_ADDED",
+          "side": "input",
+          "path": "topics"
+        },
+        {
+          "kind": "REQUIRED_INPUT_REMOVED",
+          "side": "input",
+          "path": "topic"
+        }
+      ],
+      "expect": {
+        "breaking": [
+          {
+            "path": "src/app/api/publish/route.ts",
+            "line": 21,
+            "reasons": [
+              "REQUIRED_INPUT_ADDED topics",
+              "REQUIRED_INPUT_REMOVED topic"
+            ]
+          }
+        ],
+        "safe": [
+          {
+            "path": "src/app/admin/drafts/page.tsx",
+            "line": 14
+          }
+        ],
+        "cannotCheck": [
+          {
+            "path": "scripts/backfill.ts",
+            "line": 22,
+            "reason": "raw-http"
+          },
+          {
+            "path": "src/lib/jobs/nightly-digest.ts",
+            "line": 15,
+            "reason": "keys-unknown"
+          }
+        ],
+        "pinned": []
+      },
+      "why": "A runs (op run) so REQUIRED_INPUT_ADDED topics breaks it, and it sends topic. C only reads history (op read-output, no keys). v4 also changes an internal prompt, which is not in the contract."
+    },
+    {
+      "name": "add-required-input",
+      "from": "3",
+      "to": "4",
+      "fromContract": "v3",
+      "toContract": "v4-audience",
+      "breakingChanges": [
+        {
+          "kind": "REQUIRED_INPUT_ADDED",
+          "side": "input",
+          "path": "audience"
+        }
+      ],
+      "expect": {
+        "breaking": [
+          {
+            "path": "src/app/api/publish/route.ts",
+            "line": 21,
+            "reasons": [
+              "REQUIRED_INPUT_ADDED audience"
+            ]
+          }
+        ],
+        "safe": [
+          {
+            "path": "src/app/admin/drafts/page.tsx",
+            "line": 14
+          }
+        ],
+        "cannotCheck": [
+          {
+            "path": "scripts/backfill.ts",
+            "line": 22,
+            "reason": "raw-http"
+          },
+          {
+            "path": "src/lib/jobs/nightly-digest.ts",
+            "line": 15,
+            "reason": "keys-unknown"
+          }
+        ],
+        "pinned": []
+      },
+      "why": "REQUIRED_INPUT_ADDED breaks every live run/chat/stream/embed site; C is read-output."
+    },
+    {
+      "name": "remove-output-read-by-one-site",
+      "from": "3",
+      "to": "4",
+      "fromContract": "v3",
+      "toContract": "v4-no-articles",
+      "breakingChanges": [
+        {
+          "kind": "OUTPUT_REMOVED",
+          "side": "output",
+          "path": "articles"
+        }
+      ],
+      "expect": {
+        "breaking": [
+          {
+            "path": "src/app/api/publish/route.ts",
+            "line": 21,
+            "reasons": [
+              "OUTPUT_REMOVED articles"
+            ]
+          }
+        ],
+        "safe": [
+          {
+            "path": "src/app/admin/drafts/page.tsx",
+            "line": 14
+          }
+        ],
+        "cannotCheck": [
+          {
+            "path": "scripts/backfill.ts",
+            "line": 22,
+            "reason": "raw-http"
+          },
+          {
+            "path": "src/lib/jobs/nightly-digest.ts",
+            "line": 15,
+            "reason": "keys-unknown"
+          }
+        ],
+        "pinned": []
+      },
+      "why": "Only A reads output articles; C reads no output key."
+    },
+    {
+      "name": "type-change",
+      "from": "3",
+      "to": "4",
+      "fromContract": "v3",
+      "toContract": "v4-sources-string",
+      "breakingChanges": [
+        {
+          "kind": "INPUT_TYPE_CHANGED",
+          "side": "input",
+          "path": "sources"
+        }
+      ],
+      "expect": {
+        "breaking": [
+          {
+            "path": "src/app/api/publish/route.ts",
+            "line": 21,
+            "reasons": [
+              "INPUT_TYPE_CHANGED sources"
+            ]
+          }
+        ],
+        "safe": [
+          {
+            "path": "src/app/admin/drafts/page.tsx",
+            "line": 14
+          }
+        ],
+        "cannotCheck": [
+          {
+            "path": "scripts/backfill.ts",
+            "line": 22,
+            "reason": "raw-http"
+          },
+          {
+            "path": "src/lib/jobs/nightly-digest.ts",
+            "line": 15,
+            "reason": "keys-unknown"
+          }
+        ],
+        "pinned": []
+      },
+      "why": "sources changes from array<string> to string; A sends sources, C sends nothing."
+    },
+    {
+      "name": "add-optional-input",
+      "from": "3",
+      "to": "4",
+      "fromContract": "v3",
+      "toContract": "v4-tone",
+      "breakingChanges": [],
+      "expect": {
+        "breaking": [],
+        "safe": [
+          {
+            "path": "src/app/api/publish/route.ts",
+            "line": 21
+          },
+          {
+            "path": "src/app/admin/drafts/page.tsx",
+            "line": 14
+          }
+        ],
+        "cannotCheck": [
+          {
+            "path": "scripts/backfill.ts",
+            "line": 22,
+            "reason": "raw-http"
+          },
+          {
+            "path": "src/lib/jobs/nightly-digest.ts",
+            "line": 15,
+            "reason": "keys-unknown"
+          }
+        ],
+        "pinned": []
+      },
+      "why": "An optional input (tone) breaks nothing. Raw-http and [\"*\"] sites stay cannotCheck, never safe."
+    },
+    {
+      "name": "add-output",
+      "from": "3",
+      "to": "4",
+      "fromContract": "v3",
+      "toContract": "v4-wordcount",
+      "breakingChanges": [],
+      "expect": {
+        "breaking": [],
+        "safe": [
+          {
+            "path": "src/app/api/publish/route.ts",
+            "line": 21
+          },
+          {
+            "path": "src/app/admin/drafts/page.tsx",
+            "line": 14
+          }
+        ],
+        "cannotCheck": [
+          {
+            "path": "scripts/backfill.ts",
+            "line": 22,
+            "reason": "raw-http"
+          },
+          {
+            "path": "src/lib/jobs/nightly-digest.ts",
+            "line": 15,
+            "reason": "keys-unknown"
+          }
+        ],
+        "pinned": []
+      },
+      "why": "An added output (wordCount) breaks nothing."
+    },
+    {
+      "name": "internal-prompt-change",
+      "from": "3",
+      "to": "4",
+      "fromContract": "v3",
+      "toContract": "v3-prompt",
+      "breakingChanges": [],
+      "expect": {
+        "breaking": [],
+        "safe": [
+          {
+            "path": "src/app/api/publish/route.ts",
+            "line": 21
+          },
+          {
+            "path": "src/app/admin/drafts/page.tsx",
+            "line": 14
+          }
+        ],
+        "cannotCheck": [
+          {
+            "path": "scripts/backfill.ts",
+            "line": 22,
+            "reason": "raw-http"
+          },
+          {
+            "path": "src/lib/jobs/nightly-digest.ts",
+            "line": 15,
+            "reason": "keys-unknown"
+          }
+        ],
+        "pinned": []
+      },
+      "why": "The contract is byte-identical (same contract hash); only an internal prompt changed. Raw-http and [\"*\"] sites stay cannotCheck."
+    },
+    {
+      "name": "pinned-elsewhere",
+      "from": "2",
+      "to": "4",
+      "fromContract": "v2",
+      "toContract": "v4",
+      "breakingChanges": [
+        {
+          "kind": "REQUIRED_INPUT_ADDED",
+          "side": "input",
+          "path": "topics"
+        },
+        {
+          "kind": "REQUIRED_INPUT_REMOVED",
+          "side": "input",
+          "path": "topic"
+        }
+      ],
+      "expect": {
+        "breaking": [],
+        "safe": [],
+        "cannotCheck": [],
+        "pinned": []
+      },
+      "why": "No ts-next site runs version 2: the typed client was generated against the v3 hash, and the SDK and raw /invoke sites follow the live version \"3\". D9: sites of another version are untouched (otherVersions), so every set is empty even though v2->v4 is breaking."
+    }
+  ]
+}

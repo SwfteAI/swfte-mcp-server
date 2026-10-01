@@ -1,0 +1,7 @@
+{# Included by pages that want the ops bot instead of the portal assistant. #}
+<script src="https://cdn.jsdelivr.net/npm/@swfte/chat-widget@1.4.0/dist/swfte-chat.umd.js"></script>
+<script>
+  window.addEventListener("load", function () {
+    new SwfteChatWidget({ agentId: 'ag_Ops3Bt', type: 'bubble', theme: '{{ theme|default("auto") }}' }).mount();
+  });
+</script>

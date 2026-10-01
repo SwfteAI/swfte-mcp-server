@@ -1,0 +1,12 @@
+# Committed as _env/dot-env.example (CONTRACT D10); the scanner's test config maps it onto the .env.example rule.
+# Copy to .env and fill in. Never commit real values.
+SWFTE_API_KEY=
+SWFTE_BASE_URL=https://api.swfte.com/agents
+SWFTE_WORKSPACE_ID=
+SWFTE_ONBOARDING_WF=
+SWFTE_WELCOME_WF=
+SWFTE_BILLING_WF=
+SWFTE_DIGEST_WF=
+SWFTE_SUPPORT_AGENT_ID=
+SWFTE_PORTAL_AGENT_ID=
+SWFTE_EMBED_KEY=

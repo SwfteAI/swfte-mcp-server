@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Account{% endblock %}
+{% block content %}
+<h1>Your account</h1>
+{% include "partials/chat_bubble.html" %}
+{% endblock %}
+{% block chat %}
+<script src="https://unpkg.com/@swfte/chat-widget@1.4.0/dist/swfte-chat.umd.js"></script>
+<script>
+  new SwfteChatWidget({
+    agentId: "{{ support_agent }}",
+    type: "bubble",
+  }).mount();
+</script>
+<iframe src="https://app.swfte.com/chat/{{ portal_agent }}" title="Portal assistant" hidden></iframe>
+{% endblock %}

@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "baseUrl": "https://api.swfte.com/agents",
+  "workspaceId": "ws_acme01",
+  "artifacts": []
+}

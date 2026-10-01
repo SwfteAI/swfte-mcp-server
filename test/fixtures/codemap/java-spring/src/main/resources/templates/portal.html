@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Customer portal</title>
+</head>
+<body>
+<h1>Your orders</h1>
+<div th:replace="~{fragments/chat :: bubble}"></div>
+<section th:if="${showSales}">
+  <iframe src="https://app.swfte.com/chat/ag_JvSales" title="Talk to sales" width="420" height="640"></iframe>
+</section>
+<section th:unless="${showSales}">
+  <iframe
+      src="https://app.swfte.com/chat/ag_JvPortal"
+      title="Portal assistant"
+      width="420"
+      height="640"></iframe>
+</section>
+</body>
+</html>

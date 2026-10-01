@@ -1,0 +1,126 @@
+{
+  "fixture": "decoys",
+  "labelledBy": "opus leaf-1.1.2",
+  "reviewedBy": null,
+  "sites": [],
+  "implementations": [],
+  "decoys": [
+    {
+      "path": "README.md",
+      "line": 8,
+      "why": "markdown"
+    },
+    {
+      "path": "README.md",
+      "line": 13,
+      "why": "markdown"
+    },
+    {
+      "path": "README.md",
+      "line": 17,
+      "why": "markdown"
+    },
+    {
+      "path": "dist/bundle.js",
+      "line": 3,
+      "why": "vendored"
+    },
+    {
+      "path": "dist/bundle.js",
+      "line": 4,
+      "why": "vendored"
+    },
+    {
+      "path": "node_modules/@swfte/sdk/dist/index.js",
+      "line": 6,
+      "why": "vendored"
+    },
+    {
+      "path": "node_modules/@swfte/sdk/dist/index.js",
+      "line": 10,
+      "why": "vendored"
+    },
+    {
+      "path": "src/__tests__/client.test.ts",
+      "line": 6,
+      "why": "test-mock"
+    },
+    {
+      "path": "src/__tests__/client.test.ts",
+      "line": 7,
+      "why": "test-mock"
+    },
+    {
+      "path": "src/fork.ts",
+      "line": 7,
+      "why": "fork"
+    },
+    {
+      "path": "src/fork.ts",
+      "line": 11,
+      "why": "fork"
+    },
+    {
+      "path": "src/generated/swfte_api.ts",
+      "line": 4,
+      "why": "generated"
+    },
+    {
+      "path": "src/generated/swfte_api.ts",
+      "line": 8,
+      "why": "generated"
+    },
+    {
+      "path": "src/generated/swfte_api.ts",
+      "line": 12,
+      "why": "generated"
+    },
+    {
+      "path": "src/notes.ts",
+      "line": 3,
+      "why": "docstring"
+    },
+    {
+      "path": "src/notes.ts",
+      "line": 7,
+      "why": "comment"
+    },
+    {
+      "path": "src/notes.ts",
+      "line": 9,
+      "why": "comment"
+    },
+    {
+      "path": "src/notes.ts",
+      "line": 13,
+      "why": "comment"
+    },
+    {
+      "path": "src/notes.ts",
+      "line": 14,
+      "why": "string-not-call"
+    },
+    {
+      "path": "src/notes.ts",
+      "line": 16,
+      "why": "string-not-call"
+    },
+    {
+      "path": "tests/test_client.py",
+      "line": 6,
+      "why": "test-mock"
+    },
+    {
+      "path": "types/swfte.d.ts",
+      "line": 6,
+      "why": "dts"
+    },
+    {
+      "path": "types/swfte.d.ts",
+      "line": 9,
+      "why": "dts"
+    }
+  ],
+  "notAnalysed": {},
+  "envVarNames": []
+}

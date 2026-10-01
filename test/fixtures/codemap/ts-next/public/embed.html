@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Acme docs assistant (standalone)</title>
+    <script src="https://unpkg.com/@swfte/chat-widget@1.4.0/dist/swfte-chat.umd.js"></script>
+  </head>
+  <body>
+    <div id="chat-container"></div>
+    <script>
+      const widget = new SwfteChatWidget({
+        agentId: 'ag_Docs2W',
+        type: 'embedded',
+        container: '#chat-container',
+        height: '100vh',
+      });
+      widget.mount();
+    </script>
+  </body>
+</html>
