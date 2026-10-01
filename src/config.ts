@@ -76,7 +76,7 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is 239 tools, which measurably degrades a model's ability
+ * The full surface is 243 tools, which measurably degrades a model's ability
  * to pick the right one (test/tools.test.ts "the budget comment carries the measured counts" keeps
  * these two numbers true). This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
@@ -145,7 +145,7 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   // shares adopt's Art. 25 question flow and licence-binding reading, and a
   // step of the pick-up → adopt → deliver → hand over path that a group filter
   // can hide is a step that gets skipped.
-  // Measured now: 239 registered, 105 advertised against the ceiling of 105 —
+  // Measured now: 243 registered, 105 advertised against the ceiling of 105 —
   //   core 41, workflows 16, agents 10, chatflows 12, deployments 7,
   //   datasets 6, modules 6, connect 4, untagged 3.
   // `journeys` and `relay` are deliberately absent, and that is a decision to

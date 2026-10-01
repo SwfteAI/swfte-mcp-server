@@ -11,7 +11,7 @@ on 2026-10-01. Use the local build to inspect these development changes; this wo
 Codex reads MCP servers from `[mcp_servers.<name>]` tables in `~/.codex/config.toml` (or a project's
 `.codex/config.toml`). Use one of the two entries below, not both.
 
-### Published package (recommended)
+### Published package (released features)
 
 ```toml
 [mcp_servers.swfte]
@@ -86,7 +86,8 @@ sends:
   of the same call keeps the trace id and gets a new span id.
 - `X-Swfte-Mcp-Session`: one id per MCP server session (one per Codex process for the stdio server).
 - `X-Swfte-Mcp-Client`: the host, from the MCP `initialize` handshake, reduced to `claude-code`, `codex`,
-  `cursor` or `other`. A name beginning with `codex` is sent as `codex`; an unrecognized host remains
+  `cursor` or `other`. For example, `codex-mcp-client` is sent as `codex`; any name beginning with
+  `codex` is reduced the same way. An unrecognized host remains
   `other`. The raw client name is never sent.
 - `X-Swfte-Mcp-Tool`: the tool name, e.g. `swfte_whoami`.
 
@@ -172,7 +173,7 @@ For an explicitly authorized task that needs repository edits, use an explicit s
 output as documented in [official noninteractive mode](https://developers.openai.com/codex/noninteractive):
 
 ```sh
-codex exec --json --sandbox workspace-write "Inspect the configured Swfte MCP tools and report the available learning gates."
+codex exec --json --sandbox workspace-write "Inspect the configured Swfte MCP tools and write a local report of the available learning gates."
 ```
 
 The example is a manual invocation. It installs no schedule, enables no Lab or Nexus ingestion, and

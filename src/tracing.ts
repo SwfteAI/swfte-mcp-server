@@ -9,8 +9,8 @@
  *     to a closed set so an unknown host's raw name never travels) and `X-Swfte-Mcp-Tool`.
  * Outside a call context nothing is added, so direct uses of `SwfteClient` behave exactly as before.
  *
- * The context also counts the backend attempts the call made and records the trace id the backend
- * echoed in `X-Swfte-Trace-Id`, which becomes the result's `_meta` entry and its text trailer.
+ * The context also counts backend attempts and records a matching `X-Swfte-Trace-Id` echo. Results
+ * always use the minted call identity in their `_meta` entry and text trailer.
  *
  * Calls that never reach the backend are still steps: a call that made no request posts one
  * {@link LocalStep}, and an attempt that could not reach the backend is kept in a bounded
@@ -51,7 +51,7 @@ export interface CallContext {
   readonly argShape: Record<string, ArgType>;
   /** Backend HTTP attempts made inside this call (every attempt, including retries). */
   requests: number;
-  /** The trace id the backend echoed in `X-Swfte-Trace-Id`, when it echoed a well-formed one. */
+  /** The backend echo when it matches this call's minted identity. */
   echoedTraceId?: string;
 }
 
@@ -169,7 +169,7 @@ type ToolResult = { content?: unknown; _meta?: unknown; [k: string]: unknown };
 
 /**
  * Stamp a tool result with its trace: `_meta[TRACE_META_KEY]` and, as the LAST text content item, the
- * one-line trailer. Existing content is left exactly as it was.
+ * one-line trailer. Ordinary content is preserved; previous pure trace trailers are replaced.
  */
 export function withTrace<R extends ToolResult>(result: R, traceId: string): R {
   const content = Array.isArray(result.content) ? result.content.filter((item: unknown) => {
