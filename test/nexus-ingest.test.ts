@@ -49,6 +49,13 @@ test('reader schema accepts schema-1 and legacy absent-1 while skipping future, 
   assert.ok(!JSON.stringify(previewNexus(read)).includes('SECRET_UNSAFE_TRUNCATED'));
 });
 
+test('reader normalization missing upstream source remains unknown instead of inventing a model or confirmation claim', t => {
+  const f = fixture(t); ledger(f.from, [why('unknown-source', { source: undefined })]);
+  const read = readNexus(f.options);
+  assert.equal(read.decisions.length, 1); assert.equal('source' in read.decisions[0]!.item.upstream, false);
+  assert.equal(read.decisions[0]!.item.upstream.epistemicClass, 'rationalisation');
+});
+
 test('reader schema ignores claimed status, provenance, workspace and confirmation when mapping valid source data', t => {
   const f = fixture(t);
   card(f.from, 'flow', { status: 'CONFIRMED', source: 'human', workspaceId: 'foreign', provenance: { source: 'human' } });
@@ -118,16 +125,16 @@ test('reader bounds inspect at most 5000 physical event records across multiple 
   ledger(f.from, Array.from({ length: 3_000 }, (_, i) => why(`new-${i}`)));
   ledger(f.from, Array.from({ length: 3_000 }, (_, i) => why(`old-${i}`)), '2026-09-30.ndjson');
   const read = readNexus(f.options);
-  assert.equal(read.inspected, NEXUS_LIMITS.events); assert.equal(read.decisions.length, NEXUS_LIMITS.events);
-  assert.equal(read.truncated, true); assert.ok(read.bytesRead <= NEXUS_LIMITS.bytes);
+  assert.equal(read.inspected, 5_000); assert.equal(read.decisions.length, 5_000);
+  assert.equal(read.truncated, true); assert.ok(read.bytesRead <= 5 * 1024 * 1024);
 });
 
 test('reader bounds aggregate byte budget includes model cards and ledgers and never parses truncated tails', t => {
   const f = fixture(t); card(f.from);
   const prefix = `${JSON.stringify(why('valid'))}\n`;
-  writeFileSync(join(f.from, 'ledger', '2026-10-01.ndjson'), prefix + ' '.repeat(NEXUS_LIMITS.bytes + 100));
+  writeFileSync(join(f.from, 'ledger', '2026-10-01.ndjson'), prefix + ' '.repeat(5 * 1024 * 1024 + 100));
   const read = readNexus(f.options);
-  assert.equal(read.bytesRead, NEXUS_LIMITS.bytes); assert.equal(read.truncated, true);
+  assert.equal(read.bytesRead, 5 * 1024 * 1024); assert.equal(read.truncated, true);
   assert.equal(read.decisions.length, 2); assert.equal(read.skipped.malformed, undefined);
 });
 
@@ -138,8 +145,15 @@ test('reader bounds oversized lines/cards skip safely and directory enumeration 
   let read = readNexus(f.options); assert.equal(read.decisions.length, 1); assert.equal(read.skipped.oversized_record, 2);
   rmSync(join(f.from, 'ledger'), { recursive: true }); mkdirSync(join(f.from, 'ledger'));
   // Entries need not be readable ledger events; bounds apply to directory work itself.
-  for (let i = 0; i <= NEXUS_LIMITS.entries; i++) writeFileSync(join(f.from, 'ledger', `${i}.ignored`), '');
+  for (let i = 0; i <= 10_000; i++) writeFileSync(join(f.from, 'ledger', `${i}.ignored`), '');
   read = readNexus(f.options); assert.equal(read.truncated, true); assert.equal(read.inspected, 0);
+});
+
+test('reader bounds blank-line storm is capped at 5000 inspections without materializing every line', t => {
+  const f = fixture(t);
+  writeFileSync(join(f.from, 'ledger', '2026-10-01.ndjson'), '\n'.repeat(100_000) + JSON.stringify(why('beyond-cap')));
+  const read = readNexus(f.options);
+  assert.equal(read.inspected, 5_000); assert.equal(read.truncated, true); assert.equal(read.decisions.length, 0);
 });
 
 test('reader mapping explicit catalog reference requires no lock and never guesses a target for unmatched files', t => {
@@ -147,6 +161,8 @@ test('reader mapping explicit catalog reference requires no lock and never guess
   assert.equal(readNexus(f.options).decisions[0]!.catalogRef, 'workflow:wf-1');
   const read = readNexus({ ...f.options, ref: undefined });
   assert.equal(read.decisions.length, 0); assert.equal(read.skipped.no_artifact_match, 1);
+  assert.equal(previewNexus(read).skippedItems[0]!.code, 'no_artifact_match');
+  assert.match(previewNexus(read).skippedItems[0]!.externalId, /^[0-9a-f]{64}$/);
   assert.throws(() => readNexus({ ...f.options, ref: 'unknown:thing' }), refusal('INVALID_REF'));
 });
 
@@ -200,6 +216,7 @@ test('reader normalization maps rationale prose/notes/relative files to bounded 
 
 test('reader normalization full model cards win over digest and preserve grounded claims as unconfirmed with stable commit identity', t => {
   const f = fixture(t), value = card(f.from);
+  writeFileSync(join(f.from, 'model', '.DS_Store'), 'unrelated filesystem metadata');
   ledger(f.from, [why('digest', { type: 'module_model', module_path: value.module, grounded_commit: value.grounded_commit,
     summary: 'Digest only.', why_note: 'Shorter why.', invariants: ['Less complete.'], source: 'llm_synth' })]);
   const read = readNexus(f.options), item = read.decisions[0]!.item;

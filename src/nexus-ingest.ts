@@ -20,6 +20,7 @@ export const NEXUS_LIMITS = {
 } as const;
 export const IMPORT_ITEM_LIMIT = 50;
 export const IMPORT_BODY_LIMIT = 262_144;
+export const PREVIEW_ITEM_LIMIT = 50;
 
 export interface DecisionImportItem {
   sourceType: 'why' | 'model_card';
@@ -31,7 +32,7 @@ export interface DecisionImportItem {
   constraints?: Array<{ text: string; grounded: boolean; confirmed: false }>;
   appliesTo: Array<{ scope: 'artifact'; kind: string; ref: string }>;
   upstream: {
-    source: 'llm' | 'llm_mined' | 'human_confirmed' | 'llm_synth';
+    source?: 'llm' | 'llm_mined' | 'human_confirmed' | 'llm_synth';
     epistemicClass: 'rationalisation';
     repo: string;
     ref: string;
@@ -50,6 +51,7 @@ export interface NexusReadResult {
   inspected: number;
   bytesRead: number;
   skipped: Partial<Record<SkipCode, number>>;
+  skippedItems: Array<{ externalId: string; sourceType: 'why' | 'model_card'; code: SkipCode }>;
   truncated: boolean;
 }
 export interface NexusReadOptions {
@@ -148,7 +150,7 @@ export function sourceHasSecret(text: string, credential?: string): boolean {
   }
   return false;
 }
-function recordHasSecret(value: unknown, credential?: string): boolean {
+export function recordHasSecret(value: unknown, credential?: string): boolean {
   const pending: unknown[] = [value];
   while (pending.length) {
     const item = pending.pop();
@@ -209,8 +211,8 @@ function children(root: string, path: string, budget: Budget): string[] {
   let dir;
   try { dir = opendirSync(confinedChild(root, path, true)); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw error;
+    if (error instanceof NexusIngestError) throw error;
+    return fail('READ_FAILED', 'A Nexus data directory could not be read.');
   }
   const found: string[] = [];
   try {
@@ -222,6 +224,9 @@ function children(root: string, path: string, budget: Budget): string[] {
     }
     budget.truncated = true;
     return found.sort();
+  } catch (error) {
+    if (error instanceof NexusIngestError) throw error;
+    return fail('READ_FAILED', 'A Nexus data directory could not be read.');
   } finally { dir.closeSync(); }
 }
 function existsDirectory(root: string, path: string): boolean {
@@ -239,7 +244,9 @@ function readBounded(root: string, path: string, budget: Budget, maxBytes: numbe
     const before = lstatSync(safe);
     fd = openSync(safe, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     const st = fstatSync(fd);
-    if (!st.isFile() || st.dev !== before.dev || st.ino !== before.ino) {
+    const after = lstatSync(safe), currentReal = realpathSync(safe);
+    if (!st.isFile() || st.dev !== before.dev || st.ino !== before.ino || st.dev !== after.dev || st.ino !== after.ino
+      || currentReal !== safe || !isInside(root, currentReal)) {
       return fail('PATH_REFUSED', 'A Nexus data file changed during validation.');
     }
     const amount = Math.min(st.size, maxBytes, NEXUS_LIMITS.bytes - budget.bytes);
@@ -310,7 +317,7 @@ function sourceRecord(raw: Record<string, unknown>, cardRepo?: string): Source |
   const type = card ? 'model_card' : raw.type;
   if (type !== 'rationale' && type !== 'module_model' && type !== 'model_card') return 'unsupported_type';
   if (!card && (typeof raw.event_id !== 'string' || !raw.event_id || raw.event_id.length > 200
-    || typeof raw.session_id !== 'string' || typeof raw.ts !== 'string')) return 'invalid_shape';
+    || !utf8Text(raw.event_id) || typeof raw.session_id !== 'string' || typeof raw.ts !== 'string')) return 'invalid_shape';
   const repo = repoName(raw.repo) ?? (raw.repo == null ? cardRepo ?? '' : undefined);
   if (repo === undefined || (card && raw.repo != null && repo !== cardRepo)) return 'invalid_shape';
   const files = raw.files;
@@ -330,9 +337,9 @@ function sourceRecord(raw: Record<string, unknown>, cardRepo?: string): Source |
   paths = paths.slice(0, NEXUS_LIMITS.files);
   // Joined upstream_files must also remain <=4096 UTF-8 bytes in the server's finalized notes.
   while (Buffer.byteLength(paths.join(', '), 'utf8') > NEXUS_LIMITS.textBytes) paths.pop();
-  const source = isWhy ? raw.source ?? 'llm' : 'llm_synth';
-  if (!['llm', 'llm_mined', 'human_confirmed', 'llm_synth'].includes(String(source))) return 'invalid_shape';
-  const invariants = card && object(raw.security) ? raw.security.invariants : raw.invariants;
+  const source = card ? 'llm_synth' : raw.source;
+  if (source != null && !['llm', 'llm_mined', 'human_confirmed', 'llm_synth'].includes(String(source))) return 'invalid_shape';
+  const invariants = isWhy ? undefined : card && object(raw.security) ? raw.security.invariants : raw.invariants;
   if (card && raw.security != null && !object(raw.security)) return 'invalid_shape';
   if (invariants != null && !Array.isArray(invariants)) return 'invalid_shape';
   const constraints: NonNullable<DecisionImportItem['constraints']> = [];
@@ -346,7 +353,7 @@ function sourceRecord(raw: Record<string, unknown>, cardRepo?: string): Source |
     sourceType: isWhy ? 'why' : 'model_card',
     title: Array.from(isWhy ? summary.split(/(?<=[.!?])\s/)[0]! : summary).slice(0, 120).join(''), statement,
     consequences: utf8Text(raw.risk_note), notes, constraints,
-    upstream: { source: source as DecisionImportItem['upstream']['source'], epistemicClass: 'rationalisation',
+    upstream: { ...(source == null ? {} : { source: source as NonNullable<DecisionImportItem['upstream']['source']> }), epistemicClass: 'rationalisation',
       repo, ref: isWhy ? utf8Text(raw.event_id)! : module!, model: utf8Text(raw.model),
       groundedCommit: commit, at: utf8Text(card ? raw.updated : raw.ts), ...(paths.length ? { files: paths } : {}) },
   };
@@ -358,6 +365,7 @@ export function readNexus(options: NexusReadOptions = {}): NexusReadResult {
   const cwd = options.cwd ?? process.cwd();
   const budget: Budget = { bytes: 0, inspected: 0, entries: 0, truncated: false };
   const skipped: NexusReadResult['skipped'] = {}, decisions: MappedDecision[] = [];
+  const skippedItems: NexusReadResult['skippedItems'] = [];
   const skip = (code: SkipCode) => { skipped[code] = (skipped[code] ?? 0) + 1; };
   const explicit = options.ref === undefined ? undefined : decisionCatalogRef(options.ref);
   const filter = options.repo === undefined ? undefined : repoName(options.repo);
@@ -376,10 +384,11 @@ export function readNexus(options: NexusReadOptions = {}): NexusReadResult {
     if (recordHasSecret(parsed, options.credential)) { skip('secret_detected'); return; }
     const source = sourceRecord(parsed, cardRepo);
     if (typeof source === 'string') { skip(source); return; }
-    if (filter !== undefined && source.repo !== filter) { skip('repo_mismatch'); return; }
-    const target = explicit ? { ref: explicit } : mapping(source.paths, artifacts);
-    if (!target.ref) { skip(target.code ?? 'no_artifact_match'); return; }
     const externalId = createHash('sha256').update(JSON.stringify([source.repo, source.sourceType, source.identity])).digest('hex');
+    const skipSource = (code: SkipCode) => { skip(code); skippedItems.push({ externalId, sourceType: source.sourceType, code }); };
+    if (filter !== undefined && source.repo !== filter) { skipSource('repo_mismatch'); return; }
+    const target = explicit ? { ref: explicit } : mapping(source.paths, artifacts);
+    if (!target.ref) { skipSource(target.code ?? 'no_artifact_match'); return; }
     const key = `${target.ref.ref}|${externalId}`;
     if (seen.has(key)) { skip('duplicate_local'); return; }
     seen.add(key);
@@ -398,6 +407,10 @@ export function readNexus(options: NexusReadOptions = {}): NexusReadResult {
     if (stopped()) { budget.truncated = true; break; }
     const rid = repoName(relative(model, repoDir));
     if (!rid || (filter !== undefined && rid !== filter)) continue;
+    try {
+      const st = lstatSync(repoDir);
+      if (!st.isDirectory() && !st.isSymbolicLink()) continue; // e.g. a regular .DS_Store is not a repo store
+    } catch { return fail('READ_FAILED', 'A Nexus model directory could not be read.'); }
     for (const path of children(root, repoDir, budget)) {
       if (stopped()) { budget.truncated = true; break; }
       if (!path.endsWith('.json') || path.endsWith('/index.json') || path.endsWith('/_repo.json')) continue;
@@ -410,14 +423,18 @@ export function readNexus(options: NexusReadOptions = {}): NexusReadResult {
     if (stopped()) { budget.truncated = true; break; }
     if (!path.endsWith('.ndjson')) continue;
     const read = readBounded(root, path, budget, NEXUS_LIMITS.bytes);
-    const lines = read.text.split('\n');
-    if (!read.complete) lines.pop(); // a byte-truncated tail is never parsed as a complete event
-    for (const line of lines) {
+    let position = 0;
+    while (position < read.text.length) {
       if (budget.inspected >= NEXUS_LIMITS.events) { budget.truncated = true; break; }
-      if (line.trim()) consume(line);
+      const newline = read.text.indexOf('\n', position);
+      if (newline < 0 && !read.complete) break; // never parse a byte-truncated tail
+      const end = newline < 0 ? read.text.length : newline;
+      // Includes blank/poisoned lines in the inspection bound; no million-element split array.
+      consume(read.text.slice(position, end));
+      position = end + 1;
     }
   }
-  return { decisions, inspected: budget.inspected, bytesRead: budget.bytes, skipped, truncated: budget.truncated };
+  return { decisions, inspected: budget.inspected, bytesRead: budget.bytes, skipped, skippedItems, truncated: budget.truncated };
 }
 
 export interface ImportBatch { catalogRef: string; path: string; body: { apply: true; items: DecisionImportItem[] } }
@@ -455,7 +472,9 @@ export function importBatches(decisions: MappedDecision[]): ImportBatch[] {
 export function previewNexus(read: NexusReadResult) {
   return { dryRun: true, inspected: read.inspected, bytesRead: read.bytesRead, proposed: read.decisions.length,
     skipped: read.skipped, truncated: read.truncated,
-    candidates: read.decisions.map(({ catalogRef, item }) => ({ catalogRef, externalId: item.externalId,
+    skippedItems: read.skippedItems.slice(0, PREVIEW_ITEM_LIMIT), skippedItemsOmitted: Math.max(0, read.skippedItems.length - PREVIEW_ITEM_LIMIT),
+    candidatesOmitted: Math.max(0, read.decisions.length - PREVIEW_ITEM_LIMIT),
+    candidates: read.decisions.slice(0, PREVIEW_ITEM_LIMIT).map(({ catalogRef, item }) => ({ catalogRef, externalId: item.externalId,
       sourceType: item.sourceType, status: 'PROPOSED' as const, constraints: item.constraints?.length ?? 0 })),
     note: 'Local preview only; no HTTP calls. Text is untrusted rationalisation. Explicit apply imports private PROPOSED decisions; confirmation requires a workspace member in Studio.' };
 }
