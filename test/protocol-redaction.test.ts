@@ -127,18 +127,32 @@ test('stdioToolErrorsPreserveSafeEnvelopeWithoutConfiguredCredential', async (t)
 });
 
 test('hostedToolErrorsRedactResolvedCredentialAndIncomingBearer', async (t) => {
-  for (const bearer of ['oauth-opaque-incoming-fixture', knownCredential]) {
-    const resolved = 'resolved-opaque-hosted-fixture';
+  const cases = [
+    { bearer: 'oauth-opaque-incoming-fixture', resolved: 'resolved-opaque-hosted-fixture' },
+    { bearer: knownCredential, resolved: 'resolved-opaque-hosted-fixture' },
+    { bearer: 'oauth-length-three-client-fixture', resolved: 'r5X' },
+    { bearer: 'oauth-single-character-client-fixture', resolved: '~' },
+  ];
+  for (const { bearer, resolved } of cases) {
     const placeholder = 'construction-placeholder-fixture';
     let resolutions = 0, executions = 0;
     const { client, wire } = await protocol(t, { config: config(placeholder),
       resolveClient: (info) => { resolutions++; assert.equal(info?.token, bearer); return new SwfteClient(config(resolved)); },
       tools: [tool(async () => { executions++; throw apiFailure(resolved, bearer, placeholder); })],
     }, auth(bearer));
-    const body = JSON.parse(await toolError(client));
+    const text = await toolError(client);
+    noSecrets(text, resolved, bearer, placeholder);
+    const body = JSON.parse(text);
     safeEnvelope(body);
+    assert.equal(body.detail.nested['credential [redacted]'], 'safe keyed detail');
     noSecrets(body, resolved, bearer, placeholder);
     noSecrets(wire, resolved, bearer, placeholder);
+    noSecrets(wire.map((bytes) => JSON.parse(bytes)), resolved, bearer, placeholder);
+    for (const bytes of wire) {
+      for (const secret of [resolved, bearer, placeholder]) {
+        assert.equal(Buffer.from(bytes, 'utf8').includes(Buffer.from(secret, 'utf8')), false, 'synthetic credential bytes crossed the SDK transport');
+      }
+    }
     assert.equal(resolutions, 1);
     assert.equal(executions, 1);
   }
