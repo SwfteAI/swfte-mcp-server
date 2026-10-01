@@ -1,0 +1,54 @@
+{
+  "catalogRef" : "agent:agent_1",
+  "invoke" : {
+    "method" : "POST",
+    "path" : "/v1/agents/agent_1/chat/{userId}",
+    "auth" : "api_key",
+    "async" : false,
+    "statusPath" : null
+  },
+  "inputSchema" : {
+    "additionalProperties" : true,
+    "properties" : {
+      "conversationId" : {
+        "description" : "Continue an earlier conversation; omit to start one.",
+        "type" : "string"
+      },
+      "message" : {
+        "description" : "The user's message.",
+        "type" : "string"
+      }
+    },
+    "required" : [ "message" ],
+    "type" : "object"
+  },
+  "outputSchema" : {
+    "additionalProperties" : true,
+    "properties" : {
+      "content" : {
+        "description" : "The agent's reply (canonical key).",
+        "type" : "string"
+      },
+      "conversationId" : {
+        "description" : "Pass back as conversationId to continue the conversation.",
+        "type" : "string"
+      },
+      "response" : {
+        "description" : "Legacy alias of content; read content ?? response.",
+        "type" : "string"
+      }
+    },
+    "required" : [ "content" ],
+    "type" : "object"
+  },
+  "snippets" : {
+    "curl" : "# Chat with agent Sample agent\n# Requires curl 7.76+ and jq. Export SWFTE_API_KEY first.\nBASE_URL=\"https://api.example.test/agents\"\nUSER_ID=\"demo-user\"  # any stable id for your end user; conversations are kept per userId\ncurl -sS --fail-with-body -X POST \"$BASE_URL/v1/agents/agent_1/chat/${USER_ID}\" \\\n  -H \"Authorization: Bearer $SWFTE_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"message\":\"Hello\"}' | jq -r '.[\"content\"] // .[\"response\"]'\n",
+    "typescript" : "// Chat with agent Sample agent\n// Node 18+ (global fetch). Run with: npx tsx swfte-call.ts  (export SWFTE_API_KEY first)\nconst BASE_URL = \"https://api.example.test/agents\";\nconst headers: Record<string, string> = {\n  Authorization: `Bearer ${process.env.SWFTE_API_KEY}`,\n  \"Content-Type\": \"application/json\",\n};\n\nasync function main() {\n  const userId = \"demo-user\"; // any stable id for your end user; conversations are kept per userId\n  const res = await fetch(`${BASE_URL}/v1/agents/agent_1/chat/${encodeURIComponent(userId)}`, {\n    method: \"POST\",\n    headers,\n    body: JSON.stringify({\n      \"message\": \"Hello\"\n    }),\n  });\n  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);\n  const data = await res.json();\n  console.log(data[\"content\"] ?? data[\"response\"]);\n}\n\nmain().catch((err) => {\n  console.error(err);\n  process.exit(1);\n});\n",
+    "python" : "# Chat with agent Sample agent\n# pip install requests  (export SWFTE_API_KEY first)\nimport os\n\nimport requests\n\nBASE_URL = \"https://api.example.test/agents\"\nAPI_KEY = os.environ[\"SWFTE_API_KEY\"]\nHEADERS = {\"Authorization\": f\"Bearer {API_KEY}\", \"Content-Type\": \"application/json\"}\n\nuser_id = \"demo-user\"  # any stable id for your end user; conversations are kept per userId\nres = requests.post(f\"{BASE_URL}/v1/agents/agent_1/chat/{user_id}\", headers=HEADERS, json={\"message\": \"Hello\"}, timeout=120)\nres.raise_for_status()\ndata = res.json()\nprint(data.get(\"content\") or data.get(\"response\"))\n",
+    "mcp" : "# Give Claude Code the Swfte MCP server (it reads the key from your environment):\nclaude mcp add swfte -e SWFTE_API_KEY=\"$SWFTE_API_KEY\" -e SWFTE_BASE_URL=\"https://api.example.test/agents\" -- npx -y @swfte/mcp-server\n\n# Then, in your project, ask Claude:\n#   Use swfte_get_context on agent:agent_1, then swfte_scaffold_client to generate a typed client for it in this repo and pin it in swfte.json.\n"
+  },
+  "embed" : null,
+  "contractHash" : "f94bb6ceea0d10732d4fe538cd2b3189c24778c774344ef0e8e2fce48ea8c9d3",
+  "version" : "2026-09-20T10:00:00Z",
+  "invokeUnavailableReason" : null
+}

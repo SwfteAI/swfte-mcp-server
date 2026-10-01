@@ -1,0 +1,63 @@
+{
+  "catalogRef" : "model:gpt-4o-mini",
+  "invoke" : {
+    "method" : "POST",
+    "path" : "/v1/chat/completions",
+    "auth" : "api_key",
+    "async" : false,
+    "statusPath" : null
+  },
+  "inputSchema" : {
+    "additionalProperties" : true,
+    "properties" : {
+      "max_tokens" : {
+        "type" : "integer"
+      },
+      "messages" : {
+        "items" : {
+          "properties" : {
+            "content" : {
+              "type" : "string"
+            },
+            "role" : {
+              "enum" : [ "system", "user", "assistant" ],
+              "type" : "string"
+            }
+          },
+          "required" : [ "role", "content" ],
+          "type" : "object"
+        },
+        "type" : "array"
+      },
+      "model" : {
+        "const" : "gpt-4o-mini",
+        "type" : "string"
+      },
+      "temperature" : {
+        "type" : "number"
+      }
+    },
+    "required" : [ "model", "messages" ],
+    "type" : "object"
+  },
+  "outputSchema" : {
+    "additionalProperties" : true,
+    "description" : "OpenAI chat.completion object; the reply is choices[0].message.content.",
+    "properties" : {
+      "choices" : {
+        "type" : "array"
+      }
+    },
+    "type" : "object"
+  },
+  "snippets" : {
+    "curl" : "# Chat with model gpt-4o-mini through the OpenAI-compatible endpoint\n# Requires curl 7.76+ and jq. Export SWFTE_API_KEY first.\nBASE_URL=\"https://api.example.test/agents\"\ncurl -sS --fail-with-body -X POST \"$BASE_URL/v1/chat/completions\" \\\n  -H \"Authorization: Bearer $SWFTE_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"messages\":[{\"content\":\"Hello\",\"role\":\"user\"}],\"model\":\"gpt-4o-mini\"}' | jq -r '.[\"choices\"][0][\"message\"][\"content\"]'\n",
+    "typescript" : "// Chat with model gpt-4o-mini through the OpenAI-compatible endpoint\n// Node 18+ (global fetch). Run with: npx tsx swfte-call.ts  (export SWFTE_API_KEY first)\nconst BASE_URL = \"https://api.example.test/agents\";\nconst headers: Record<string, string> = {\n  Authorization: `Bearer ${process.env.SWFTE_API_KEY}`,\n  \"Content-Type\": \"application/json\",\n};\n\nasync function main() {\n  const res = await fetch(`${BASE_URL}/v1/chat/completions`, {\n    method: \"POST\",\n    headers,\n    body: JSON.stringify({\n      \"model\": \"gpt-4o-mini\",\n      \"messages\": [\n        {\n          \"role\": \"user\",\n          \"content\": \"Hello\"\n        }\n      ]\n    }),\n  });\n  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);\n  const data = await res.json();\n  console.log(data[\"choices\"]?.[0]?.[\"message\"]?.[\"content\"]);\n}\n\nmain().catch((err) => {\n  console.error(err);\n  process.exit(1);\n});\n",
+    "python" : "# Chat with model gpt-4o-mini through the OpenAI-compatible endpoint\n# pip install requests  (export SWFTE_API_KEY first)\nimport os\n\nimport requests\n\nBASE_URL = \"https://api.example.test/agents\"\nAPI_KEY = os.environ[\"SWFTE_API_KEY\"]\nHEADERS = {\"Authorization\": f\"Bearer {API_KEY}\", \"Content-Type\": \"application/json\"}\n\nres = requests.post(f\"{BASE_URL}/v1/chat/completions\", headers=HEADERS, json={\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}]}, timeout=120)\nres.raise_for_status()\ndata = res.json()\nprint(data[\"choices\"][0][\"message\"][\"content\"])\n",
+    "mcp" : "# Give Claude Code the Swfte MCP server (it reads the key from your environment):\nclaude mcp add swfte -e SWFTE_API_KEY=\"$SWFTE_API_KEY\" -e SWFTE_BASE_URL=\"https://api.example.test/agents\" -- npx -y @swfte/mcp-server\n\n# Then, in your project, ask Claude:\n#   Use swfte_get_context on model:gpt-4o-mini, then swfte_scaffold_client to generate a typed client for it in this repo and pin it in swfte.json.\n"
+  },
+  "embed" : null,
+  "contractHash" : "86188ac057e7652b060f0df5ccb82a388a5173f141f8f5504d7b9156db9ba98f",
+  "version" : "2026-09-19T10:00:00Z",
+  "invokeUnavailableReason" : null
+}

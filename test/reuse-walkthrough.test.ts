@@ -130,11 +130,15 @@ test('reuse observed candidate is inspected and scaffolded only with a fitting c
   let h = harness(t, { level: 'observed' }), result = await walkthrough(h);
   assert.equal(result.search.recommendation.action, 'INSPECT_BEFORE_REUSE'); assert.equal(result.path, 'REUSE');
   assert.ok(result.context.contract.invoke); assert.ok(result.scaffold.files.length); assertNoBuild(h.wire);
-  const unsuitable = structuredClone(workflowGolden());
-  unsuitable.inputSchema = { type: 'object', properties: { amount: { type: 'number' } }, required: ['amount'] };
-  h = harness(t, { level: 'observed', contract: unsuitable }); result = await walkthrough(h);
-  assert.equal(result.search.recommendation.action, 'INSPECT_BEFORE_REUSE'); assert.equal(result.path, 'BUILD');
-  assert.equal(generation(h.wire).length, 1); assert.equal(result.scaffold, undefined); assert.equal(h.unexpected.length, 0);
+  for (const inputSchema of [
+    { type: 'object', properties: { amount: { type: 'number' } }, required: ['amount'] },
+    { type: 'object', properties: { amount: { type: 'number' }, customerEmail: { type: 'string' } }, required: ['amount'] },
+  ]) {
+    const unsuitable = structuredClone(workflowGolden()); unsuitable.inputSchema = inputSchema;
+    h = harness(t, { level: 'observed', contract: unsuitable }); result = await walkthrough(h);
+    assert.equal(result.search.recommendation.action, 'INSPECT_BEFORE_REUSE'); assert.equal(result.path, 'BUILD');
+    assert.equal(generation(h.wire).length, 1); assert.equal(result.scaffold, undefined); assert.equal(h.unexpected.length, 0);
+  }
 });
 
 test('reuse empty search calls the real workflow build exactly once', async t => {

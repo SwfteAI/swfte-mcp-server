@@ -58,6 +58,9 @@ function compilePython(source: string) {
 test('derive all catalog kinds have captured backend source provenance and immutable fingerprints', () => {
   const { provenance, cases } = capturedFixtures();
   assert.equal(provenance.format, 1); assert.equal(provenance.mode, 'driver-captured-real-backend-records');
+  assert.equal(cases.length, 15); assert.equal(cases.filter(row => row.variant === 'provider-everyKind').length, 12);
+  assert.deepEqual(cases.filter(row => row.variant !== 'provider-everyKind').map(row => row.variant).sort(),
+    ['image-model', 'pinned-workflow', 'public-agent']);
   assert.match(provenance.backendCommit, /^[0-9a-f]{40}$/);
   assert.match(provenance.derivedGoldenSha256, HASH);
   for (const source of ['SotCatalogContractProvider.java', 'CatalogContract.java', 'ContractSnippets.java',
@@ -131,6 +134,9 @@ test('derive Python parses real callable backend fixtures and committed snippet'
 
 test('derive unavailable kinds stay unavailable through registered scaffold without writes', async t => {
   const cases = capturedFixtures().cases.filter(row => !row.contract.invoke && (CATALOG_KINDS as readonly string[]).includes(row.kind));
+  assert.deepEqual(cases.map(row => row.catalogRef).sort(), ['agent:ag_pub', 'application:application_1',
+    'chatflow:chatflow_1', 'mcp-server:mcp-server_1', 'model:model_1', 'model:sdxl',
+    'module:module_1', 'solution:solution_1', 'workflow:wf_pub']);
   assert.ok(cases.some(row => row.variant === 'public-agent')); assert.ok(cases.some(row => row.variant === 'image-model'));
   assert.ok(cases.some(row => row.kind === 'model' && row.catalogRef === 'model:model_1'));
   const previous = globalThis.fetch; t.after(() => { globalThis.fetch = previous; });
@@ -157,6 +163,13 @@ test('derive generated clients preserve backend auth version async and schema se
   for (const row of capturedFixtures().cases.filter(row => row.contract.invoke)) {
     const spec = specFor(row), source = renderTypeScriptClient(spec), python = renderPythonClient(spec);
     const info = clientInfo(spec, 'typescript'), invoke = row.contract.invoke!;
+    const expectedPath = row.variant === 'pinned-workflow' ? '/v2/workflows/wf_1/versions/1.0.0/invoke'
+      : ({ workflow: '/v2/workflows/wf_1/invoke', agent: '/v1/agents/agent_1/chat/{userId}',
+        widget: '/v1/widgets/widget_1/public/invoke', model: '/v1/chat/completions' } as Record<string, string>)[row.kind];
+    assert.equal(invoke.method, 'POST'); assert.equal(invoke.path, expectedPath);
+    assert.equal(invoke.auth, row.kind === 'widget' ? 'public' : 'api_key');
+    assert.equal(invoke.async, row.kind === 'workflow');
+    assert.equal(invoke.statusPath, row.kind === 'workflow' ? '/v2/workflows/executions/{executionId}/status' : null);
     assert.ok(source.includes(JSON.stringify(invoke.path))); assert.ok(python.includes(JSON.stringify(invoke.path)));
     assert.ok(source.includes(`auth: ${JSON.stringify(invoke.auth)}`));
     assert.ok(python.includes(`INVOKE_AUTH = ${JSON.stringify(invoke.auth)}`));
@@ -179,6 +192,7 @@ test('derive generated clients preserve backend auth version async and schema se
       };
       await exports[info.fn]!(bodyFor(row), { apiKey, workspaceId: 'ws-fixture', fetch, pollIntervalMs: 0, timeoutMs: 1000 });
       assert.equal(requests[0]!.method, 'POST'); assert.deepEqual(requests[0]!.body, bodyFor(row));
+      assert.equal(new URL(requests[0]!.url).pathname, `/agents${expectedPath!.replace('{userId}', 'swfte-client')}`);
       assert.ok(requests.every(request => new URL(request.url).origin === 'https://api.example.test'));
       if (invoke.auth === 'public') {
         assert.ok(requests.every(request => !request.headers.Authorization && !request.headers['X-API-Key'] && !request.headers['X-Workspace-ID']));
