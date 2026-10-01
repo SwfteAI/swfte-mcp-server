@@ -143,10 +143,16 @@ test('reader bounds oversized lines/cards skip safely and directory enumeration 
   ledger(f.from, [why('too-large', { rationale: 'safe '.repeat(NEXUS_LIMITS.lineBytes) }), why('valid')]);
   card(f.from, 'huge', { summary: 'safe '.repeat(NEXUS_LIMITS.cardBytes) });
   let read = readNexus(f.options); assert.equal(read.decisions.length, 1); assert.equal(read.skipped.oversized_record, 2);
-  rmSync(join(f.from, 'ledger'), { recursive: true }); mkdirSync(join(f.from, 'ledger'));
-  // Entries need not be readable ledger events; bounds apply to directory work itself.
-  for (let i = 0; i <= 10_000; i++) writeFileSync(join(f.from, 'ledger', `${i}.ignored`), '');
-  read = readNexus(f.options); assert.equal(read.truncated, true); assert.equal(read.inspected, 0);
+  // Keep the directory control separate from oversized records, which can also
+  // mark a run truncated. Ignored entries charge only the enumeration budget.
+  const directory = fixture(t);
+  for (let i = 0; i < 100; i++) writeFileSync(join(directory.from, 'ledger', `${i}.ignored`), '');
+  read = readNexus(directory.options);
+  assert.equal(read.truncated, false); assert.equal(read.inspected, 0); assert.equal(read.bytesRead, 0);
+  for (let i = 100; i <= 10_000; i++) writeFileSync(join(directory.from, 'ledger', `${i}.ignored`), '');
+  read = readNexus(directory.options);
+  assert.equal(read.truncated, true); assert.equal(read.inspected, 0); assert.equal(read.bytesRead, 0);
+  assert.equal(read.decisions.length, 0);
 });
 
 test('reader bounds blank-line storm is capped at 5000 inspections without materializing every line', t => {
