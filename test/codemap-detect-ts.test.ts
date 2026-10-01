@@ -380,3 +380,30 @@ describe('corpus', () => {
     assert.ok(out.envVarNames.includes('SWFTE_API_KEY') && out.envVarNames.includes('NEXT_PUBLIC_SWFTE_AGENT_ID'));
   });
 });
+
+describe('raw HTTP URL authority', () => {
+  for (const url of [
+    'https://evil.example/x/api.swfte.com/v2/workflows/wf_x/invoke',
+    'https://evil.example/x//api.swfte.com/v2/workflows/wf_x/invoke',
+    'https://evil.example/v2/workflows/wf_x/invoke?next=https://api.swfte.com/',
+    'https://evil.example/v2/workflows/wf_x/invoke#//api.swfte.com/',
+    'https://api.swfte.com@evil.example/v2/workflows/wf_x/invoke',
+    'https://api.swfte.com.evil.example/v2/workflows/wf_x/invoke',
+    'api.swfte.com/v2/workflows/wf_x/invoke',
+  ]) {
+    test(`rejects foreign/relative authority: ${url}`, () => {
+      assert.equal(run(`export const f = () => fetch(${JSON.stringify(url)}, { method: 'POST' });`).sites.length, 0);
+    });
+  }
+  for (const host of ['https://api.swfte.com', 'HTTPS://api.swfte.com', '//api.swfte.com', 'https://api.swfte.com:8443']) {
+    test(`keeps a real authority: ${host}`, () => {
+      const r = run(`export const f = () => fetch('${host}/v2/workflows/wf_x/invoke', { method: 'POST' });`);
+      assert.equal(r.sites.length, 1);
+      assert.equal(r.sites[0]!.artifact.id, 'wf_x');
+    });
+  }
+  test('an unknown authority suffix and an env base used as userinfo remain unknown', () => {
+    assert.equal(run('export const f = (suffix: string) => fetch(`https://api.swfte.com${suffix}/v2/workflows/wf_x/invoke`);').sites.length, 0);
+    assert.equal(run('export const f = () => fetch(`${process.env.SWFTE_BASE_URL}@evil.example/v2/workflows/wf_x/invoke`);').sites.length, 0);
+  });
+});
