@@ -111,7 +111,11 @@ test('hosted book resources and prompts gate every caller and forward the opaque
   const templates = await invoke('resources/templates/list', 'allowed');
   const offTemplates = await invoke('resources/templates/list', 'denied');
   assert.equal(templates.resourceTemplates.length - offTemplates.resourceTemplates.length, 3);
-  assert.equal((await invoke('prompts/list', 'allowed')).prompts.length, 6);
+  const enabledPrompts = (await invoke('prompts/list', 'allowed')).prompts;
+  assert.equal(enabledPrompts.length, 8);
+  for (const name of ['build_from_recipe', 'diagnose_failure', 'reuse-recipe', 'fix-my-workflow']) {
+    assert.ok(enabledPrompts.some((prompt: { name: string }) => prompt.name === name), `missing prompt ${name}`);
+  }
   assert.equal((await invoke('prompts/list', 'denied')).prompts.length, 4);
   const resource = await invoke('resources/read', 'allowed', { uri: `swfte://recipes/${id}` });
   assert.equal(JSON.parse(resource.contents[0].text).dataOnly, true);

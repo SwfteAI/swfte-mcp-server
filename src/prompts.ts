@@ -147,11 +147,18 @@ const LEARNING_RAIL = [
   'Publishing, live credentials and deployment require the explicit promotion and human approval paths. Reported outcomes and proposed rules only enter human review.',
 ].join('\n');
 
-export const LEARNING_PROMPTS:PromptDef[] = [
+const GROUNDED_LEARNING_PROMPTS:PromptDef[] = [
   {name:'reuse-recipe',title:'Reuse a grounded recipe',description:'Fetch the backend top three and current proof before preparing a sandbox adaptation.',
     arguments:[{name:'query',description:'What the sandbox workflow must do.',required:true}],render:() => LEARNING_RAIL},
   {name:'fix-my-workflow',title:'Find a grounded sandbox fix',description:'Read the authenticated execution signature and fetch a replayed playbook that fixes it.',
     arguments:[{name:'executionId',description:'The failing execution in this workspace.',required:true}],render:() => LEARNING_RAIL},
+];
+
+/** Original brief names remain aliases of the same grounded implementations and argument contracts. */
+export const LEARNING_PROMPTS:PromptDef[] = [
+  ...GROUNDED_LEARNING_PROMPTS,
+  ...GROUNDED_LEARNING_PROMPTS.map(prompt => ({...prompt,
+    name:prompt.name === 'reuse-recipe' ? 'build_from_recipe' : 'diagnose_failure'})),
 ];
 
 export async function getLearningPrompt(name:string,args:Record<string,string|undefined>,ctx:{client:SwfteClient;config:ServerConfig}) {
@@ -160,7 +167,7 @@ export async function getLearningPrompt(name:string,args:Record<string,string|un
   try {
     await requireLearning(ctx.client,ctx.config);
     let data:unknown;
-    if (name === 'reuse-recipe') {
+    if (name === 'reuse-recipe' || name === 'build_from_recipe') {
       const query = args.query?.trim();
       if (!query || query.length > 2000) throw new LearningBookNotFoundError();
       const hits = await fetchRecipePage(ctx.client,ctx.config,{query,limit:3});
@@ -172,7 +179,7 @@ export async function getLearningPrompt(name:string,args:Record<string,string|un
       if (!executionId || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(executionId)) throw new LearningBookNotFoundError();
       const status = await ctx.client.request<Record<string,unknown>>({method:'GET',path:`/v2/learning/executions/${encodeURIComponent(executionId)}/failure`,retries:0});
       const signature = status?.executionId === executionId ? status.errorSignature : null;
-      if (typeof signature !== 'string' || signature.length === 0 || signature.length > 128) throw new LearningBookNotFoundError();
+      if (typeof signature !== 'string' || !/^[A-Za-z0-9_.:/-]{1,128}$/.test(signature)) throw new LearningBookNotFoundError();
       const playbook = await fetchDiagnosis(ctx.client,ctx.config,signature);
       data = {executionId,errorSignature:signature,playbook,evidenceSource:'authenticated-backend'};
     }
