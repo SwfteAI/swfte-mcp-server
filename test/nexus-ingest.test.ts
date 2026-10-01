@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NEXUS_LIMITS, NexusIngestError, previewNexus, readNexus, safeRepoPath, sourceHasSecret } from '../src/nexus-ingest.js';
@@ -107,7 +107,7 @@ test('reader confinement ledger/card child symlink escapes and nonregular files 
   rmSync(join(f.from, 'ledger', 'escape.ndjson'));
   mkdirSync(join(f.from, 'model')); symlinkSync(outside, join(f.from, 'model', 'repo-a'), 'dir');
   assert.throws(() => readNexus(f.options), refusal('PATH_REFUSED'));
-  rmSync(join(f.from, 'model', 'repo-a')); mkdirSync(join(f.from, 'model', 'repo-a'));
+  unlinkSync(join(f.from, 'model', 'repo-a')); mkdirSync(join(f.from, 'model', 'repo-a'));
   symlinkSync(file, join(f.from, 'model', 'repo-a', 'escape.json'));
   assert.throws(() => readNexus(f.options), refusal('PATH_REFUSED'));
   rmSync(join(f.from, 'model', 'repo-a', 'escape.json')); mkdirSync(join(f.from, 'ledger', 'directory.ndjson'));
