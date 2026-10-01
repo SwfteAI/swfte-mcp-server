@@ -131,8 +131,28 @@ export interface DimensionVerdict<T> {
   escalateWhen: string | null;
 }
 
+/** Optional persisted decision. The classifier does not populate it. */
+export interface CompositionDecision {
+  schemaVersion: 1;
+  status: 'PROPOSED' | 'CONFIRMED' | 'SUPERSEDED' | 'REJECTED';
+  title: string;
+  statement?: string | null;
+  consequences?: string | null;
+  notes?: Record<string, string> | null;
+  constraints?: Array<{ text: string; grounded: boolean; confirmed: boolean }> | null;
+  appliesTo?: Array<{ scope: 'artifact' | 'kind' | 'workspace' | 'tag'; kind?: string | null;
+    ref?: string | null; tag?: string | null; note?: string | null }> | null;
+  supersededBy?: string | null;
+  supersededAt?: string | null;
+  rejectedAlternatives?: Array<{ option: string; reason?: string | null;
+    source: 'classifier' | 'human' | 'nexus' }> | null;
+  provenance?: { source: 'classifier' | 'human' | 'nexus-why' | 'nexus-model-card';
+    ref?: string | null; sourceHash?: string | null; at?: string | null; by?: string | null } | null;
+}
+
 export interface CompositionRecommendation {
   schemaVersion: 1;
+  decision?: CompositionDecision;
   executionApproach: DimensionVerdict<ExecutionApproach>;
   deliverySurface: DimensionVerdict<DeliverySurface> & {
     /** The artifact kind a human actually opens. Null for pure automation. */
