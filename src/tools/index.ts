@@ -45,6 +45,7 @@ import { hubTools } from './hub.js';
 import { complianceTools } from './compliance.js';
 // Learning loop (brief 08): review-queue tools; the recipe book appends to the same module.
 import { learningTools } from './learning.js';
+import { recipeTools } from './recipes.js';
 
 /**
  * Tag a whole module's tools with a group, so `SWFTE_TOOLS` can trim them
@@ -73,6 +74,7 @@ export const allTools: ToolDefinition[] = [
   ...tag('core', complianceTools),
   // Learning loop (brief 08): report an outcome / propose a rule to the human review queue.
   ...tag('learning', learningTools),
+  ...tag('learning', recipeTools),
   ...tag('apps', appWizardTools),
   ...tag('custom-nodes', customNodeWizardTools),
 

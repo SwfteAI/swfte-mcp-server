@@ -28,6 +28,8 @@ import {
   TRACE_ID_RE,
   TRACE_META_KEY,
   TRACE_TRAILER_PREFIX,
+  TRACE_TRAILER_RE,
+  SPAN_ID_RE,
   TRACEPARENT_HEADER,
   UNREACHED_QUEUE_MAX,
   type LocalStep,
@@ -107,7 +109,7 @@ const TRACEPARENT_RE = /^00-([0-9a-f]{32})-([0-9a-f]{16})-01$/;
 /** The (trace, span) pair of a traceparent this module formatted. */
 export function parseTraceparent(value: string | undefined): { traceId: string; spanId: string } | undefined {
   const m = value ? TRACEPARENT_RE.exec(value) : null;
-  return m ? { traceId: m[1]!, spanId: m[2]! } : undefined;
+  return m && TRACE_ID_RE.test(m[1]!) && SPAN_ID_RE.test(m[2]!) ? { traceId: m[1]!, spanId: m[2]! } : undefined;
 }
 
 /** What `X-Swfte-Mcp-Tool` accepts on the backend; anything else is sent as `unknown`. */
@@ -147,17 +149,16 @@ export function traceHeaders(ctx: CallContext): Record<string, string> {
 }
 
 /**
- * Record the echoed `X-Swfte-Trace-Id`. Only a well-formed id is kept. The first echo wins, except that
- * an echo equal to the call's own trace id (the backend adopted our traceparent) always wins.
+ * Record an echo only when it matches this tool's identity. A valid foreign echo is a correlation
+ * mismatch; accepting it would let a proxy or backend mix unrelated calls in the reported join.
  */
 export function recordEcho(ctx: CallContext, echoed: string | null | undefined): void {
-  if (!echoed || !TRACE_ID_RE.test(echoed)) return;
-  if (ctx.echoedTraceId === undefined || echoed === ctx.traceId) ctx.echoedTraceId = echoed;
+  if (echoed === ctx.traceId && TRACE_ID_RE.test(echoed)) ctx.echoedTraceId = echoed;
 }
 
-/** The id a result reports: the backend's echo when there was one, else the minted id. */
+/** An echo confirms correlation, never authorizes evidence or substitutes a different trace. */
 export function resultTraceId(ctx: CallContext): string {
-  return ctx.echoedTraceId ?? ctx.traceId;
+  return ctx.traceId;
 }
 
 export function traceTrailer(traceId: string): string {
@@ -171,7 +172,11 @@ type ToolResult = { content?: unknown; _meta?: unknown; [k: string]: unknown };
  * one-line trailer. Existing content is left exactly as it was.
  */
 export function withTrace<R extends ToolResult>(result: R, traceId: string): R {
-  const content = Array.isArray(result.content) ? result.content : [];
+  const content = Array.isArray(result.content) ? result.content.filter((item: unknown) => {
+    if (!item || typeof item !== 'object') return true;
+    const value = item as Record<string, unknown>;
+    return !(value.type === 'text' && typeof value.text === 'string' && TRACE_TRAILER_RE.test(value.text));
+  }) : [];
   const meta = result._meta && typeof result._meta === 'object' ? (result._meta as Record<string, unknown>) : {};
   return {
     ...result,
@@ -233,6 +238,8 @@ export interface PendingStep {
   step: LocalStep;
   sessionId: string;
   client: McpClientName;
+  /** Origin workspace hint; the configured credential remains the authenticated authority. */
+  workspaceId?: string;
 }
 
 /**
@@ -274,7 +281,8 @@ export class LocalStepQueue {
     const batch: PendingStep[] = [];
     const rest: PendingStep[] = [];
     for (const e of this.items) {
-      if (batch.length < limit && e.sessionId === head.sessionId && e.client === head.client) batch.push(e);
+      if (batch.length < limit && e.sessionId === head.sessionId && e.client === head.client
+          && e.workspaceId === head.workspaceId) batch.push(e);
       else rest.push(e);
     }
     this.items = rest;

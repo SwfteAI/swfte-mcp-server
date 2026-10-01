@@ -156,7 +156,12 @@ export class SwfteClient {
     return Math.max(1, Math.min(timeoutMs, this.remainingMs()));
   }
 
-  constructor(private readonly config: ServerConfig) {}
+  private readonly config: ServerConfig;
+
+  constructor(config: ServerConfig) {
+    // A hosted caller cannot change the identity underneath queued trace metadata.
+    this.config = Object.freeze({ ...config, enabledGroups: new Set(config.enabledGroups) });
+  }
 
   get baseUrl(): string {
     return this.config.baseUrl;
@@ -215,12 +220,13 @@ export class SwfteClient {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestBudget(opts.timeoutMs ?? 60_000));
+    const startedAt = Date.now();
 
     let res: Response;
     let text: string;
     try {
       res = await this.send(url, { method: opts.method, headers, body }, controller);
-      text = await res.text();
+      text = await this.consumeBody(() => res.text(), controller, headers, startedAt);
     } finally {
       clearTimeout(timer);
     }
@@ -310,7 +316,7 @@ export class SwfteClient {
     } catch (err) {
       // Our own abort is a timeout: the request may well have reached the backend, so it is not
       // UNREACHED. Anything else (refused, reset, DNS) never produced an answer.
-      if (!controller.signal.aborted) this.queueUnreached(call, init.headers, startedAt);
+      this.queueUnreached(call, init.headers, startedAt, controller.signal.aborted);
       throw err;
     }
     recordEcho(call, res.headers.get(TRACE_ECHO_HEADER));
@@ -318,19 +324,30 @@ export class SwfteClient {
     return res;
   }
 
-  private queueUnreached(call: CallContext, headers: Record<string, string>, startedAt: number): void {
+  private async consumeBody<T>(read: () => Promise<T>, controller: AbortController,
+    headers: Record<string, string>, startedAt: number): Promise<T> {
+    try { return await read(); } catch (err) {
+      const call = currentCall();
+      if (call) this.queueUnreached(call, headers, startedAt, controller.signal.aborted, true);
+      throw err;
+    }
+  }
+
+  private queueUnreached(call: CallContext, headers: Record<string, string>, startedAt: number, timedOut: boolean,
+    responseReceived = false): void {
     if (!this.learningEnabled) return;
     const ids = parseTraceparent(headers[TRACEPARENT_HEADER]);
     if (!ids) return;
     this.localSteps.push({
       sessionId: call.sessionId,
       client: call.client,
+      workspaceId: headers['X-Workspace-ID'] ?? this.config.workspaceId,
       step: {
         traceId: ids.traceId,
         spanId: ids.spanId,
         tool: call.tool,
-        resultClass: 'UNREACHED',
-        errorSignature: 'net:unreachable',
+        resultClass: timedOut ? 'CLIENT_TIMEOUT' : responseReceived ? 'ERROR' : 'UNREACHED',
+        errorSignature: timedOut ? 'net:client_timeout' : responseReceived ? 'net:response_incomplete' : 'net:unreachable',
         argShape: call.argShape,
         ms: Math.max(0, Date.now() - startedAt),
         occurredAtMs: startedAt,
@@ -345,7 +362,8 @@ export class SwfteClient {
   recordLocalStep(entry: PendingStep): void {
     try {
       if (!this.learningEnabled) return;
-      this.localSteps.push(entry);
+      this.localSteps.push({ ...entry, workspaceId: entry.workspaceId ?? this.config.workspaceId,
+        step: { ...entry.step, ...(entry.step.argShape ? { argShape: { ...entry.step.argShape } } : {}) } });
       this.drainLocalSteps();
     } catch {
       // A step never fails a tool.
@@ -382,13 +400,15 @@ export class SwfteClient {
           method: 'POST',
           path: LOCAL_STEPS_PATH,
           body: { steps: batch.map((e) => e.step) },
+          workspaceId: head.workspaceId,
           headers: { [MCP_SESSION_HEADER]: head.sessionId, [MCP_CLIENT_HEADER]: head.client },
           retries: 0,
           timeoutMs: LOCAL_STEPS_TIMEOUT_MS,
         });
       } catch (err) {
-        // The backend answered and refused (flag off, not a PAT, invalid): resending cannot help, drop it.
-        if (err instanceof SwfteApiError) continue;
+        // Permanent refusal (flag off, wrong credential, invalid) cannot benefit from retry. Transient
+        // failures retain the exact trace/span for a later contact, with no inline/recursive retry.
+        if (err instanceof SwfteApiError && !RETRYABLE_STATUSES.has(err.status)) continue;
         this.localSteps.unshift(batch);
         return false;
       }
@@ -458,16 +478,17 @@ export class SwfteClient {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestBudget(opts.timeoutMs ?? 180_000));
+    const startedAt = Date.now();
     try {
       const res = await this.send(url, { method: 'GET', headers }, controller);
       if (!res.ok) {
-        const text = await res.text();
+        const text = await this.consumeBody(() => res.text(), controller, headers, startedAt);
         throw this.toApiError(res, text, { method: 'GET', path });
       }
       const out: Record<string, string> = {};
       res.headers.forEach((v, k) => { out[k.toLowerCase()] = v; });
       return {
-        bytes: new Uint8Array(await res.arrayBuffer()),
+        bytes: new Uint8Array(await this.consumeBody(() => res.arrayBuffer(), controller, headers, startedAt)),
         headers: out,
         contentType: res.headers.get('content-type') ?? '',
       };
@@ -496,11 +517,12 @@ export class SwfteClient {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestBudget(opts.timeoutMs ?? 180_000));
+    const startedAt = Date.now();
     let res: Response;
     let text: string;
     try {
       res = await this.send(url, { method: 'POST', headers, body: form }, controller);
-      text = await res.text();
+      text = await this.consumeBody(() => res.text(), controller, headers, startedAt);
     } finally {
       clearTimeout(timer);
     }

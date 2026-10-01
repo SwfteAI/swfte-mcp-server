@@ -361,15 +361,15 @@ describe('trace propagation (LL-G1)', () => {
     assert.equal(s!.headers[MCP_TOOL_HEADER.toLowerCase()], undefined);
   });
 
-  test('a backend echo that differs from the minted id is what the result reports', async () => {
+  test('a backend echo that differs from the minted id cannot substitute a foreign trace', async () => {
     const echoed = 'ab'.repeat(16);
     responder = () => ({ echo: echoed });
     const h = await harness();
     try {
       const r = await h.call('probe_get');
       assert.notEqual(ids(backend()[0]!).trace, echoed);
-      assert.equal(trailerId(r), echoed);
-      assert.equal(r._meta?.[TRACE_META_KEY], echoed);
+      assert.equal(trailerId(r), ids(backend()[0]!).trace);
+      assert.equal(r._meta?.[TRACE_META_KEY], ids(backend()[0]!).trace);
     } finally {
       await h.close();
     }
