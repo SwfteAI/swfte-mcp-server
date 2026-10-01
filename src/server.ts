@@ -17,6 +17,7 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 
 import { SwfteApiError, SwfteClient } from './client.js';
 import { loadConfig, type ServerConfig } from './config.js';
+import { redactSecrets } from './fsguard.js';
 import { UnsupportedKindError, UnsupportedVerbError } from './kinds/index.js';
 import { allTools } from './tools/index.js';
 import type { ToolDefinition } from './tools/_types.js';
@@ -55,6 +56,32 @@ export function selectTools(tools: ToolDefinition[], config: ServerConfig): Tool
   return permitted.filter((t) => !t.group || config.enabledGroups.has(t.group));
 }
 
+/** Scrub raw strings before JSON escaping, using only this request's identity. */
+function redactProtocolMessage(
+  message: string, config: ServerConfig, authInfo: AuthInfo | undefined, client: SwfteClient | undefined
+): string {
+  let safe = client ? client.redactError(message) : redactSecrets(message);
+  // Opaque OAuth tokens need not match a known secret shape or length. These
+  // literals also cover failures before a resolver has returned a client.
+  const secrets = [config.credential, authInfo?.token].filter((s): s is string => !!s).sort((a, b) => b.length - a.length);
+  for (const secret of secrets) safe = safe.split(secret).join('[redacted]');
+  return safe;
+}
+
+/** Error envelopes can nest strings in both keys and values. Never mutate them. */
+function redactErrorValue(value: unknown, redact: (message: string) => string, ancestors = new WeakSet<object>()): unknown {
+  if (typeof value === 'string') return redact(value);
+  if (value === null || typeof value !== 'object') return value;
+  if (ancestors.has(value)) return '[circular]';
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) return value.map((item) => redactErrorValue(item, redact, ancestors));
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [redact(key), redactErrorValue(item, redact, ancestors)]));
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
 export function buildServer(opts: BuildServerOptions = {}): Server {
   const config = opts.config ?? loadConfig();
   // Built once and reused when no resolver is supplied, so the stdio path keeps
@@ -85,31 +112,33 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
-    const tool = toolMap.get(req.params.name);
-    if (!tool) {
-      return {
-        isError: true,
-        content: [{ type: 'text', text: `Unknown tool: ${req.params.name}` }],
-      };
-    }
-
-    const parsed = tool.inputSchema.safeParse(req.params.arguments ?? {});
-    if (!parsed.success) {
-      return {
-        isError: true,
-        content: [
-          {
-            type: 'text',
-            text: `Invalid input for ${tool.name}: ${parsed.error.issues
-              .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
-              .join('; ')}`,
-          },
-        ],
-      };
-    }
-
+    let client: SwfteClient | undefined = sharedClient ?? undefined;
+    const redact = (message: string) => redactProtocolMessage(message, config, extra?.authInfo, client);
     try {
-      const client = await resolveClient(extra?.authInfo);
+      const tool = toolMap.get(req.params.name);
+      if (!tool) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: redact(`Unknown tool: ${req.params.name}`) }],
+        };
+      }
+
+      const parsed = tool.inputSchema.safeParse(req.params.arguments ?? {});
+      if (!parsed.success) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: redact(`Invalid input for ${tool.name}: ${parsed.error.issues
+                .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
+                .join('; ')}`),
+            },
+          ],
+        };
+      }
+
+      client = await resolveClient(extra?.authInfo);
       const result = await tool.execute(parsed.data, { client, config, localFilesystem: opts.localFilesystem ?? true });
       return {
         content: [
@@ -125,14 +154,14 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
       if (err instanceof SwfteApiError) {
         return {
           isError: true,
-          content: [{ type: 'text', text: JSON.stringify(err.toJSON(), null, 2) }],
+          content: [{ type: 'text', text: JSON.stringify(redactErrorValue(err.toJSON(), redact), null, 2) }],
         };
       }
       if (err instanceof UnsupportedKindError || err instanceof UnsupportedVerbError) {
-        return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'UNSUPPORTED_CAPABILITY', message: err.message, nextAction: 'Call swfte_capabilities to inspect implemented verbs and per-kind lifecycle paths. Artifact form, activation and infrastructure deployment are separate decisions.' }) }] };
+        return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'UNSUPPORTED_CAPABILITY', message: redact(err.message), nextAction: 'Call swfte_capabilities to inspect implemented verbs and per-kind lifecycle paths. Artifact form, activation and infrastructure deployment are separate decisions.' }) }] };
       }
       const message = err instanceof Error ? err.message : String(err);
-      return { isError: true, content: [{ type: 'text', text: message }] };
+      return { isError: true, content: [{ type: 'text', text: redact(message) }] };
     }
   });
 
@@ -140,17 +169,34 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: STATIC_RESOURCES }));
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: RESOURCE_TEMPLATES }));
   server.setRequestHandler(ReadResourceRequestSchema, async (req, extra) => {
+    let client: SwfteClient | undefined = sharedClient ?? undefined;
+    let pendingClient: Promise<SwfteClient> | undefined;
+    const redact = (message: string) => redactProtocolMessage(message, config, extra?.authInfo, client);
+    const getClient = () => pendingClient ??= Promise.resolve().then(() => resolveClient(extra?.authInfo)).then((resolved) => {
+      client = resolved;
+      return resolved;
+    });
     try {
       const content = await readResource(req.params.uri, {
-        client: async () => resolveClient(extra?.authInfo),
+        client: getClient,
         config,
         tools,
       });
       return { contents: [content] };
     } catch (err) {
-      if (err instanceof ResourceNotFoundError) throw new McpError(ErrorCode.InvalidParams, err.message);
-      if (err instanceof SwfteApiError) throw new McpError(ErrorCode.InternalError, err.message, err.toJSON());
-      throw err;
+      if (err instanceof ResourceNotFoundError) throw new McpError(ErrorCode.InvalidParams, redact(err.message));
+      if (err instanceof SwfteApiError) throw new McpError(ErrorCode.InternalError, redact(err.message), redactErrorValue(err.toJSON(), redact));
+      // The SDK serializes generic error.message AND error.data. Preserve its
+      // safe code and data while preventing that final serialization from
+      // bypassing the same per-call redactor used for backend envelopes.
+      const detail = err !== null && (typeof err === 'object' || typeof err === 'function')
+        ? err as { code?: unknown; message?: unknown; data?: unknown } : undefined;
+      const code = typeof detail?.code === 'number' && Number.isSafeInteger(detail.code) ? detail.code : ErrorCode.InternalError;
+      const message = typeof detail?.message === 'string' ? detail.message : String(err);
+      const safe = new McpError(code, redact(message), redactErrorValue(detail?.data, redact));
+      // A previously wrapped MCP error already has its protocol prefix.
+      safe.message = redact(message);
+      throw safe;
     }
   });
 
