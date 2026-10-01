@@ -63,6 +63,12 @@ export const TOOL_GROUPS = [
   // more). Out of DEFAULT_GROUPS so they do not spend the budget twice; still
   // reachable by name through SWFTE_TOOLS=…,extras.
   'extras',
+  // The learning loop (swfte_report_outcome, swfte_propose_rule, and the recipe
+  // book's swfte_recipes_search/get/apply). Opt-in on purpose: the default
+  // surface sits at its ceiling of 105, and raising that ceiling is a product
+  // decision, not a side effect of adding tools. The Builder Lab and Codex/Claude
+  // setups name it explicitly: SWFTE_TOOLS=core,…,learning (docs/CODEX.md).
+  'learning',
 ] as const;
 
 export type ToolGroup = (typeof TOOL_GROUPS)[number];
@@ -70,7 +76,7 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is 237 tools, which measurably degrades a model's ability
+ * The full surface is 239 tools, which measurably degrades a model's ability
  * to pick the right one (test/tools.test.ts "the budget comment carries the measured counts" keeps
  * these two numbers true). This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
@@ -139,7 +145,7 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   // shares adopt's Art. 25 question flow and licence-binding reading, and a
   // step of the pick-up → adopt → deliver → hand over path that a group filter
   // can hide is a step that gets skipped.
-  // Measured now: 237 registered, 105 advertised against the ceiling of 105 —
+  // Measured now: 239 registered, 105 advertised against the ceiling of 105 —
   //   core 41, workflows 16, agents 10, chatflows 12, deployments 7,
   //   datasets 6, modules 6, connect 4, untagged 3.
   // `journeys` and `relay` are deliberately absent, and that is a decision to

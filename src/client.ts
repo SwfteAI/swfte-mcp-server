@@ -1,5 +1,26 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ServerConfig } from './config.js';
+import {
+  LOCAL_STEPS_PATH,
+  LOCAL_STEPS_PER_POST,
+  MCP_CLIENT_HEADER,
+  MCP_SESSION_HEADER,
+  TRACE_ECHO_HEADER,
+  TRACEPARENT_HEADER,
+} from './learning-contract.js';
+import {
+  currentCall,
+  LocalStepQueue,
+  outsideCall,
+  parseTraceparent,
+  recordEcho,
+  traceHeaders,
+  type CallContext,
+  type PendingStep,
+} from './tracing.js';
+
+/** One attempt at posting local steps; they are best effort and never retried inline. */
+const LOCAL_STEPS_TIMEOUT_MS = 5_000;
 
 export interface RequestOptions {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -198,7 +219,7 @@ export class SwfteClient {
     let res: Response;
     let text: string;
     try {
-      res = await fetch(url, { method: opts.method, headers, body, signal: controller.signal });
+      res = await this.send(url, { method: opts.method, headers, body }, controller);
       text = await res.text();
     } finally {
       clearTimeout(timer);
@@ -245,7 +266,134 @@ export class SwfteClient {
     // AuthFilter injects the token's own trusted tenant headers and overrides
     // whatever we send, so ours can only mislead.
 
+    // Inside a tool call: the call's trace with a fresh span for this attempt, plus the MCP session,
+    // client and tool. Set last so a caller-supplied header cannot replace them. Outside a call
+    // nothing is added.
+    const call = currentCall();
+    if (call) Object.assign(headers, traceHeaders(call));
+
     return headers;
+  }
+
+  /* ── learning loop: attempt bookkeeping and local steps ─────────────────── */
+
+  private readonly localSteps = new LocalStepQueue();
+  private draining = false;
+
+  /** Steps waiting for the backend (UNREACHED attempts, undelivered local steps) and how many were dropped. */
+  get pendingLocalSteps(): { queued: number; dropped: number; steps: PendingStep['step'][] } {
+    return { queued: this.localSteps.size, dropped: this.localSteps.dropped, steps: this.localSteps.snapshot() };
+  }
+
+  private get learningEnabled(): boolean {
+    return this.config.telemetry !== false;
+  }
+
+  /**
+   * Every HTTP attempt goes through here. Inside a tool call it counts the attempt, records the echoed
+   * trace id, queues an UNREACHED step when the backend could not be reached, and drains pending steps
+   * once the backend answers. Outside a call it is a plain fetch.
+   */
+  private async send(
+    url: string,
+    init: RequestInit & { headers: Record<string, string> },
+    controller: AbortController
+  ): Promise<Response> {
+    const call = currentCall();
+    if (!call) return fetch(url, { ...init, signal: controller.signal });
+
+    call.requests += 1;
+    const startedAt = Date.now();
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, signal: controller.signal });
+    } catch (err) {
+      // Our own abort is a timeout: the request may well have reached the backend, so it is not
+      // UNREACHED. Anything else (refused, reset, DNS) never produced an answer.
+      if (!controller.signal.aborted) this.queueUnreached(call, init.headers, startedAt);
+      throw err;
+    }
+    recordEcho(call, res.headers.get(TRACE_ECHO_HEADER));
+    this.drainLocalSteps();
+    return res;
+  }
+
+  private queueUnreached(call: CallContext, headers: Record<string, string>, startedAt: number): void {
+    if (!this.learningEnabled) return;
+    const ids = parseTraceparent(headers[TRACEPARENT_HEADER]);
+    if (!ids) return;
+    this.localSteps.push({
+      sessionId: call.sessionId,
+      client: call.client,
+      step: {
+        traceId: ids.traceId,
+        spanId: ids.spanId,
+        tool: call.tool,
+        resultClass: 'UNREACHED',
+        errorSignature: 'net:unreachable',
+        argShape: call.argShape,
+        ms: Math.max(0, Date.now() - startedAt),
+        occurredAtMs: startedAt,
+      },
+    });
+  }
+
+  /**
+   * Post a step for a tool call that made no backend request. Fire-and-forget: it never throws, never
+   * delays the caller, and a step it cannot deliver waits in the bounded queue.
+   */
+  recordLocalStep(entry: PendingStep): void {
+    try {
+      if (!this.learningEnabled) return;
+      this.localSteps.push(entry);
+      this.drainLocalSteps();
+    } catch {
+      // A step never fails a tool.
+    }
+  }
+
+  /**
+   * Deliver pending steps in batches of LOCAL_STEPS_PER_POST, one session/client per POST. Runs outside
+   * any tool call (so the POST carries no call trace, counts for no call and cannot queue a step of its
+   * own) and outside the caller's operation deadline. One drain at a time.
+   */
+  private drainLocalSteps(): void {
+    if (this.draining || this.localSteps.size === 0 || !this.learningEnabled) return;
+    this.draining = true;
+    outsideCall(() =>
+      this.operationDeadline.exit(() => {
+        void this.deliverLocalSteps()
+          .catch(() => false)
+          .then((reachable) => {
+            this.draining = false;
+            if (reachable && this.localSteps.size > 0) this.drainLocalSteps();
+          });
+      })
+    );
+  }
+
+  /** Returns false when the backend could not be reached (the batch is back in the queue). */
+  private async deliverLocalSteps(): Promise<boolean> {
+    while (this.localSteps.size > 0) {
+      const batch = this.localSteps.takeBatch(LOCAL_STEPS_PER_POST);
+      const head = batch[0]!;
+      try {
+        await this.request({
+          method: 'POST',
+          path: LOCAL_STEPS_PATH,
+          body: { steps: batch.map((e) => e.step) },
+          headers: { [MCP_SESSION_HEADER]: head.sessionId, [MCP_CLIENT_HEADER]: head.client },
+          retries: 0,
+          timeoutMs: LOCAL_STEPS_TIMEOUT_MS,
+        });
+      } catch (err) {
+        // The backend answered and refused (flag off, not a PAT, invalid): resending cannot help, drop it.
+        if (err instanceof SwfteApiError) continue;
+        this.localSteps.unshift(batch);
+        return false;
+      }
+    }
+    return true;
   }
 
   private toApiError(res: Response, text: string, opts: RequestOptions): SwfteApiError {
@@ -311,7 +459,7 @@ export class SwfteClient {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestBudget(opts.timeoutMs ?? 180_000));
     try {
-      const res = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+      const res = await this.send(url, { method: 'GET', headers }, controller);
       if (!res.ok) {
         const text = await res.text();
         throw this.toApiError(res, text, { method: 'GET', path });
@@ -351,7 +499,7 @@ export class SwfteClient {
     let res: Response;
     let text: string;
     try {
-      res = await fetch(url, { method: 'POST', headers, body: form, signal: controller.signal });
+      res = await this.send(url, { method: 'POST', headers, body: form }, controller);
       text = await res.text();
     } finally {
       clearTimeout(timer);

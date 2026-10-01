@@ -24,6 +24,18 @@ import { RESOURCE_TEMPLATES, STATIC_RESOURCES, ResourceNotFoundError, readResour
 import { PROMPTS, getPrompt } from './prompts.js';
 
 import { PACKAGE_NAME, PACKAGE_VERSION } from './version.js';
+import { normaliseClientName } from './learning-contract.js';
+import {
+  errorSignature,
+  mintSessionId,
+  mintSpanId,
+  newCallContext,
+  outsideCall,
+  resultTraceId,
+  runInCall,
+  sessionIdOr,
+  withTrace,
+} from './tracing.js';
 
 export interface BuildServerOptions {
   config?: ServerConfig;
@@ -83,57 +95,126 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
     })),
   }));
 
+  // ── Learning loop: every tool call is one traced step (see tracing.ts) ──────
+  // One session id per server (stdio: the process's session); a transport that names its own session
+  // (stateful HTTP) wins. The client is the `initialize` clientInfo, normalised so an unknown host is
+  // `other` and its raw name never travels.
+  const serverSessionId = mintSessionId();
+
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
+    const call = newCallContext({
+      sessionId: sessionIdOr(extra?.sessionId, serverSessionId),
+      client: normaliseClientName(server.getClientVersion()?.name),
+      tool: req.params.name,
+      args: req.params.arguments,
+    });
+    const startedAt = Date.now();
+    const outcome = await runInCall(call, () => callTool(req, extra)).catch((err: unknown) => ({
+      client: undefined,
+      errorToken: 'error',
+      result: { isError: true, content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }] },
+    }));
+    const result = outcome.result as { isError?: boolean; content: Array<{ type: 'text'; text: string }> };
+
+    if (call.requests === 0) {
+      // The call attempted no backend request, so the backend has no step for it: post a local one.
+      // (Attempts that could not reach the backend are already queued as UNREACHED by the client.)
+      // Fire-and-forget, outside the call, after the result is settled; it never fails or delays it.
+      const step = {
+        traceId: call.traceId,
+        spanId: mintSpanId(),
+        tool: call.tool,
+        resultClass: result.isError ? ('ERROR' as const) : ('OK' as const),
+        ...(result.isError ? { errorSignature: errorSignature(outcome.errorToken ?? 'error') } : {}),
+        argShape: call.argShape,
+        ms: Math.max(0, Date.now() - startedAt),
+        occurredAtMs: startedAt,
+      };
+      outsideCall(() => {
+        void (async () => {
+          const client = outcome.client ?? (await resolveClient(extra?.authInfo));
+          if (client instanceof SwfteClient) {
+            client.recordLocalStep({ step, sessionId: call.sessionId, client: call.client });
+          }
+        })().catch(() => undefined);
+      });
+    }
+
+    return withTrace(result, resultTraceId(call));
+  });
+
+  /**
+   * The tool call itself, unchanged in what it answers. Returns the result plus what the learning step
+   * needs: the client it resolved and a value-free error token.
+   */
+  async function callTool(
+    req: { params: { name: string; arguments?: Record<string, unknown> } },
+    extra: { authInfo?: AuthInfo } | undefined
+  ): Promise<{ result: Record<string, unknown>; client?: SwfteClient; errorToken?: string }> {
     const tool = toolMap.get(req.params.name);
     if (!tool) {
       return {
-        isError: true,
-        content: [{ type: 'text', text: `Unknown tool: ${req.params.name}` }],
+        errorToken: 'unknown_tool',
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: `Unknown tool: ${req.params.name}` }],
+        },
       };
     }
 
     const parsed = tool.inputSchema.safeParse(req.params.arguments ?? {});
     if (!parsed.success) {
       return {
-        isError: true,
-        content: [
-          {
-            type: 'text',
-            text: `Invalid input for ${tool.name}: ${parsed.error.issues
-              .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
-              .join('; ')}`,
-          },
-        ],
+        errorToken: 'invalid_input',
+        result: {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: `Invalid input for ${tool.name}: ${parsed.error.issues
+                .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
+                .join('; ')}`,
+            },
+          ],
+        },
       };
     }
 
+    let client: SwfteClient | undefined;
     try {
-      const client = await resolveClient(extra?.authInfo);
+      client = await resolveClient(extra?.authInfo);
       const result = await tool.execute(parsed.data, { client, config, localFilesystem: opts.localFilesystem ?? true });
       return {
-        content: [
-          {
-            type: 'text',
-            text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
-          },
-        ],
+        client,
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
+            },
+          ],
+        },
       };
     } catch (err) {
       // Structured failures carry a code and a suggested action; hand those
       // through as JSON so the model can branch on them instead of parsing prose.
       if (err instanceof SwfteApiError) {
         return {
-          isError: true,
-          content: [{ type: 'text', text: JSON.stringify(err.toJSON(), null, 2) }],
+          client,
+          errorToken: /^[A-Za-z][A-Za-z0-9_]{0,59}$/.test(err.code) ? err.code : 'api_error',
+          result: {
+            isError: true,
+            content: [{ type: 'text', text: JSON.stringify(err.toJSON(), null, 2) }],
+          },
         };
       }
       if (err instanceof UnsupportedKindError || err instanceof UnsupportedVerbError) {
-        return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'UNSUPPORTED_CAPABILITY', message: err.message, nextAction: 'Call swfte_capabilities to inspect implemented verbs and per-kind lifecycle paths. Artifact form, activation and infrastructure deployment are separate decisions.' }) }] };
+        return { client, errorToken: 'unsupported_capability', result: { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'UNSUPPORTED_CAPABILITY', message: err.message, nextAction: 'Call swfte_capabilities to inspect implemented verbs and per-kind lifecycle paths. Artifact form, activation and infrastructure deployment are separate decisions.' }) }] } };
       }
       const message = err instanceof Error ? err.message : String(err);
-      return { isError: true, content: [{ type: 'text', text: message }] };
+      return { client, errorToken: 'error', result: { isError: true, content: [{ type: 'text', text: message }] } };
     }
-  });
+  }
 
   // Resources: local capabilities plus a per-artifact catalog context template.
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: STATIC_RESOURCES }));
