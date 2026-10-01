@@ -5,7 +5,9 @@ import { z } from 'zod';
 import { gate, preflight, type PreflightManifest } from '../preflight.js';
 import { deriveFromLive, deriveFromSpec, seedsFromRegistry, type Seed } from '../preflight/derive.mjs';
 import { withClientTransport } from '../preflight.js';
-import type { SwfteClient } from '../client.js';
+import { SwfteApiError, type SwfteClient } from '../client.js';
+import { SetupArtifactSchema } from './setup.js';
+import type { SetupTaskEntry } from '../contracts/setup-proof-v1.js';
 import type { ToolDefinition } from './_types.js';
 
 /**
@@ -116,15 +118,24 @@ export const preflightTools: ToolDefinition[] = [
     inputSchema: ManifestInput.extend({
       workflowId: z.string().optional().describe('Derive a manifest from this workflow when none is given.'),
       executionsPerWorkflow: z.number().int().min(0).max(10).optional().describe('How many recent runs to read per workflow. Default 3.'),
+      artifact:SetupArtifactSchema.optional().describe('Read current server setup tasks before local preflight. Only an explicit404 enables an older-server fallback.'),
     }),
     execute: async (input, { client, localFilesystem }) => {
+      const artifact=input.artifact ?? (input.workflowId?{kind:'workflow',id:input.workflowId}:undefined);
+      let setup:SetupTaskEntry[]|null=null;
+      let setupUnavailable=false;
+      if (artifact) {
+        try { setup=await client.request<SetupTaskEntry[]>({method:'GET',path:`/v2/artifacts/${encodeURIComponent(artifact.kind)}/${encodeURIComponent(artifact.id)}/setup`}); }
+        catch (error) { if (error instanceof SwfteApiError && error.status===404) setupUnavailable=true; else throw error; }
+      }
       const manifest = await resolveManifest(
         client,
         input,
         input.workflowId ? (['workflow', input.workflowId] as Seed) : undefined,
         localFilesystem
       );
-      return preflight(client, manifest, { executionsPerWorkflow: input.executionsPerWorkflow });
+      const report=await preflight(client, manifest, { executionsPerWorkflow: input.executionsPerWorkflow });
+      return {...report,setupTasks:setup,setupSource:setupUnavailable?'older-server-local-fallback':setup?'server-current-content':'no-artifact-context',setupBlocksSandbox:setup?.some(entry=>entry.task.blocksSandbox && !['RESOLVED','AUTO_BOUND','WAIVED'].includes(entry.task.state??''))??null};
     },
   },
 

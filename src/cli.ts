@@ -14,7 +14,7 @@
  * swfte.json lives) or --cwd <dir>. Every command is the same code the MCP
  * tools run (src/bake.ts); this file only parses arguments and prints.
  */
-import { realpathSync } from 'node:fs';
+import { realpathSync, readFileSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { bakeArtifact, syncProject, upgradeAlias, verifyProject, type SyncResult, type VerifyReport } from './bake.js';
 import { OperationDeadlineError, SwfteApiError, SwfteClient } from './client.js';
@@ -28,6 +28,12 @@ import { credentialBaseUrl, UntrustedHostError } from './hosts.js';
 import { loadLock, LockError } from './lock.js';
 import { FRAMEWORKS, type Framework } from './stack.js';
 import { PACKAGE_NAME, PACKAGE_VERSION } from './version.js';
+import { setupTools } from './tools/setup.js';
+import { proveTools } from './tools/prove.js';
+import { promotionTools } from './tools/promotion.js';
+import { cloudLinkTools } from './tools/cloud-link.js';
+
+const runtimeCommands:Record<string,string>={setup:'swfte_setup',proof:'swfte_proof',resolve:'swfte_resolve',prove:'swfte_prove','prove-status':'swfte_prove_status','prove-report':'swfte_prove_report',findings:'swfte_prove_findings',promote:'swfte_promote','promotion-preview':'swfte_promotion_preview','promotion-status':'swfte_promotion_status',rollback:'swfte_promotion_rollback','aws-link':'swfte_aws_link','aws-probe':'swfte_aws_link_probe','provision-plan':'swfte_provision_plan','provision-request':'swfte_provision_request'};
 
 export interface CliIO {
   out: (line: string) => void;
@@ -66,6 +72,7 @@ Usage:
   swfte sync [--alias <name>]... [--dry-run] [--force]
   swfte verify [--offline] [--json] [--compliance [--paths <p,…>]]
   swfte upgrade <alias> [--accept-capability-changes] [--force] [--dry-run]
+  swfte setup|proof|resolve|prove|prove-status|prove-report|findings|promote|promotion-preview|promotion-status|rollback|aws-link|aws-probe|provision-plan|provision-request --input <project-relative-json>
 
   <catalogRef>   "<kind>:<id>", e.g. workflow:wf_123 (from swfte_find_existing or Studio)
   --framework    ${FRAMEWORKS.join(' | ')} (default: detected from package.json / pyproject.toml / requirements*.txt)
@@ -96,7 +103,7 @@ interface Parsed {
 }
 
 const BOOLEAN = new Set(['force', 'dry-run', 'offline', 'json', 'accept-capability-changes', 'help', 'version', 'compliance', 'strict', 'no-pin', 'record']);
-const VALUED = new Set(['framework', 'out', 'alias', 'language', 'cwd', 'paths', 'port', 'base-url', 'workspace']);
+const VALUED = new Set(['framework', 'out', 'alias', 'language', 'cwd', 'paths', 'port', 'base-url', 'workspace', 'input']);
 /** Credentials come from the environment only: a flag would land in shell history and CI logs. */
 const CREDENTIAL_FLAGS = new Set(['token', 'api-key', 'apikey', 'pat', 'key', 'secret', 'password']);
 const SHORT: Record<string, string> = { f: 'force', h: 'help', v: 'version', C: 'cwd' };
@@ -239,7 +246,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
   try {
     const root = projectRoot(io, p);
     const needsNetwork =
-      p.command === 'add' || p.command === 'sync' || p.command === 'upgrade' || (p.command === 'verify' && !flag(p, 'offline')) || (p.command === 'dev' && flag(p, 'record'));
+      Boolean(runtimeCommands[p.command]) || p.command === 'add' || p.command === 'sync' || p.command === 'upgrade' || (p.command === 'verify' && !flag(p, 'offline')) || (p.command === 'dev' && flag(p, 'record'));
     let config: ServerConfig | null = null;
     if (needsNetwork) {
       try {
@@ -259,6 +266,17 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
     // ends the run ("could not check", exit 2) instead of holding CI for minutes of retries.
     const budget = timeoutBudget(io.env, p.command);
     const exec = async (): Promise<number> => {
+    if (p.command && runtimeCommands[p.command]) {
+      if (!client || !config) throw new ConfigError('A configured credential is required.');
+      if (p.positionals.length || !value(p,'input')) throw new UsageError('Runtime commands require --input <project-relative-json> and no positional arguments.');
+      const file=writer.resolve(value(p,'input')!);
+      if (!statSync(file).isFile() || statSync(file).size>350000) throw new UsageError('Runtime input must be a bounded JSON file.');
+      const tool=[...setupTools,...proveTools,...promotionTools,...cloudLinkTools].find(candidate=>candidate.name===runtimeCommands[p.command!]);
+      if (!tool) throw new UsageError('The requested runtime command is unavailable.');
+      const input=tool.inputSchema.parse(JSON.parse(readFileSync(file,'utf8')));
+      emit(await tool.execute(input,{client,config,localFilesystem:true}));
+      return 0;
+    }
     switch (p.command) {
       case 'add': {
         const ref = p.positionals[0];
