@@ -244,7 +244,9 @@ describe('advertised surface', () => {
     // Nothing advertised covers either, so there was no duplicate to move to
     // `extras`; DEFAULT_GROUPS is unchanged (test/delivery.test.ts pins it).
     // Measured at 105 — core 41, the rest as above.
-    assert.ok(selected.length <= 105, `default surface is ${selected.length} tools`);
+    // Phase 5 raises 105 -> 109 for the four distinct contract/decision/translation
+    // operations documented in config.ts. An additional tool needs a new review.
+    assert.ok(selected.length <= 109, `default surface is ${selected.length} tools`);
     assert.ok(selected.length > 40, `default surface is only ${selected.length} tools`);
   });
 

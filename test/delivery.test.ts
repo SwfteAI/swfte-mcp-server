@@ -506,7 +506,7 @@ describe('default tool groups with the delivery tools', () => {
 
     const stock = selectTools(allTools, config()).map((t) => t.name);
     assert.ok(stock.includes('swfte_deliver') && stock.includes('swfte_handover_record'));
-    assert.equal(stock.length, 105, 'the default surface grew by exactly the two delivery tools');
+    assert.equal(stock.length, 109, 'delivery remains advertised alongside the four explicitly budgeted Phase 5 tools');
 
     // Core: no group filter hides them.
     const voiceOnly = selectTools(allTools, loadConfig({ SWFTE_PAT: CREDENTIAL, SWFTE_TOOLS: 'voice' } as never)).map((t) => t.name);

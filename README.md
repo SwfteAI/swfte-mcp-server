@@ -17,7 +17,7 @@ If you don't know what Swfte is, [start here](https://www.swfte.com). It's the u
 
 ## What this gives you
 
-- **237 MCP tools** (236 in a default install; gate resolution needs `SWFTE_ALLOW_GATE_DECISIONS=1`) that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
+- **241 MCP tools** (109 advertised by default; gate resolution needs `SWFTE_ALLOW_GATE_DECISIONS=1`) that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
 - **Stdio transport** — works out of the box with Claude Desktop and Claude Code.
 - **Workspace-scoped** — set `SWFTE_WORKSPACE_ID` once, or pass `workspaceId` per call.
 - **Credential stays local** — your API key is read from the environment of the machine running the MCP server, sent only to `SWFTE_BASE_URL`, and never written to disk or returned to the model. See [Security model](#security-model) for what the server can read, write and send.
@@ -51,7 +51,7 @@ widget, application, or MCP server**.
   server-side page cap, read-merge-write updates where the raw PATCH would wipe
   omitted fields, retry with load-shedding detection, and typed error envelopes
   carrying the backend's own code plus a suggested action.
-- **237 tools available, 105 advertised by default**, adjustable via `SWFTE_TOOLS`.
+- **241 tools available, 109 advertised by default**, adjustable via `SWFTE_TOOLS`.
 - **Stdio transport**, multi-arch Docker image, and Zod-typed inputs published
   as JSON Schema over `tools/list`.
 
@@ -236,8 +236,8 @@ or `mcp-server`.
 | Cost control | `swfte_cost_*` | `cost` | |
 | Agent mail | `swfte_agent_mail_*` | `agent-mail` | |
 
-Advertising all 237 tools measurably degrades a model's ability to pick the
-right one, so 105 are advertised by default. `SWFTE_TOOLS=all` widens it, and
+Advertising all 241 tools measurably degrades a model's ability to pick the
+right one, so 109 are advertised by default. `SWFTE_TOOLS=all` widens it, and
 `swfte_whoami` reports which groups are live and what is hidden — nothing
 disappears silently.
 
@@ -329,6 +329,23 @@ Resources and prompts carry the same flow for clients that use them:
 `swfte://capabilities`, `swfte://catalog/{kind}/{id}` (the context package),
 and the prompts `reuse-then-build`, `ship-with-analytics-and-payments`,
 `bake-into-codebase` and `pick-up-tailor-deploy`.
+
+`swfte_get_openapi` reads the artifact's backend-derived OpenAPI document;
+`swfte_get_decisions` reads its visible stored and derived rationale. Local
+Nexus imports default to a bounded preview showing opaque IDs and counts.
+`swfte decisions ingest --ref workflow:wf_123` reads the real default
+`~/.nexus`; `--from` selects a data directory inside the project. Preview
+needs no credentials and makes no HTTP calls. Only `--apply` (or
+`swfte_ingest_decisions {apply:true}`) posts imports, always as private
+PROPOSED decisions. Upstream human or model claims do not confirm them in
+Swfte. Hosted MCP sessions cannot read local Nexus data.
+
+`swfte_translate_check` checks canvas translation without exporting files.
+`swfte_export_code` accepts `source: execution | canvas | auto` (default
+`auto`): an execution artifact's 404 triggers one canvas export attempt.
+Unsupported canvas nodes produce the complete refusal list and write no
+destination files. The initial translator supports exact INPUT-to-OUTPUT
+marker semantics; other canvas behaviors require an explicit refusal.
 
 ---
 

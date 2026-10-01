@@ -28,6 +28,7 @@ import { credentialBaseUrl, UntrustedHostError } from './hosts.js';
 import { loadLock, LockError } from './lock.js';
 import { FRAMEWORKS, type Framework } from './stack.js';
 import { PACKAGE_NAME, PACKAGE_VERSION } from './version.js';
+import { runDecisionsCli } from './cli-decisions.js';
 
 export interface CliIO {
   out: (line: string) => void;
@@ -66,6 +67,10 @@ Usage:
   swfte sync [--alias <name>]... [--dry-run] [--force]
   swfte verify [--offline] [--json] [--compliance [--paths <p,…>]]
   swfte upgrade <alias> [--accept-capability-changes] [--force] [--dry-run]
+  swfte decisions ingest [--from <project-dir>] [--repo <exact-slug>] [--ref <kind:id>] [--apply] [--json]
+
+  decisions ingest previews bounded local Nexus data without credentials or HTTP calls.
+  --apply explicitly imports private PROPOSED decisions; previews show IDs and counts.
 
   <catalogRef>   "<kind>:<id>", e.g. workflow:wf_123 (from swfte_find_existing or Studio)
   --framework    ${FRAMEWORKS.join(' | ')} (default: detected from package.json / pyproject.toml / requirements*.txt)
@@ -216,6 +221,7 @@ function printVerify(io: CliIO, r: VerifyReport): void {
 
 /** Runs one CLI invocation; returns the process exit code. Never calls process.exit, so tests can drive it. */
 export async function runCli(argv: string[], io: CliIO): Promise<number> {
+  if (argv[0] === 'decisions') return runDecisionsCli(argv.slice(1), io);
   let p: Parsed;
   try {
     p = parseArgs(argv);
