@@ -157,7 +157,8 @@ export class SwfteClient {
 
   /** Scrub this call's actual credential without exposing it to protocol handlers. */
   redactError(message: string): string {
-    return redactSecrets(message, [this.config.credential]);
+    const credential = this.config.credential;
+    return redactSecrets(credential ? message.split(credential).join('[redacted]') : message);
   }
 
   async request<T = unknown>(opts: RequestOptions): Promise<T> {
