@@ -99,7 +99,7 @@ export type SimulationRun = {
   specHash: string
   specVersion: string
   seed: number
-  target: { kind: string; id: string; version?: number | null; environment: string }
+  target: { kind: string; id: string; version?: number | null; actualVersion?: string | null; contentHash?: string | null; environment: string; instanceIds?: string[] }
   budget: SimulationBudget
   counters: SimulationCounters
   coverage: SimulationCoverageCell[]
@@ -204,4 +204,29 @@ export type SimulationPersonaSummary = {
 export type SimulationGraph = {
   elements: Array<{ id: string; type: string; label: string; attrs: Record<string, unknown> }>
   edges: Array<{ from: string; to: string; relation: string }>
+}
+
+/** Actual redacted simulation records; never a production runtime receipt. */
+export type SimulationValidationPack = {
+  ref: string
+  runId: string
+  workspaceId: string
+  contentHash: string
+  payload: {
+    schemaVersion: number
+    sourceRunId: string
+    evidenceKind: 'simulation'
+    artifactKind: string
+    industry: string
+    target: SimulationRun['target']
+    sourceSpecHash: string
+    spec: SimulationSpec
+    sourcePacks: Array<{ ref: string; kind: SimulationPackKind; manifestHash: string }>
+    unavailableDeclarations: string[]
+    scenarios: unknown[]
+    faults: unknown[]
+    findings: SimulationFinding[]
+    evidenceHeads: Record<string, string>
+    sourceStatus: SimulationRunStatus
+  }
 }

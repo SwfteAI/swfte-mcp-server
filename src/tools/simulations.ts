@@ -23,6 +23,7 @@ import {
   type SimulationEstimate,
   type SimulationFinding,
   type SimulationRun,
+  type SimulationValidationPack,
   type SpecError,
 } from '../contracts/simulations.js';
 import type { ToolDefinition } from './_types.js';
@@ -113,6 +114,10 @@ function check(schema: Schema, value: unknown, path: string, errors: SpecError[]
     return;
   }
   const at = path || '/';
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    errors.push({ path: at, code: 'TYPE', message: 'must be a finite JSON number' });
+    return;
+  }
   if (schema.const !== undefined && canonical(schema.const) !== canonical(value)) {
     errors.push({ path: at, code: 'CONST', message: `must be ${show(schema.const)}, got ${show(value)}` });
     return;
@@ -240,7 +245,23 @@ export function coverageByDimension(cells: SimulationCoverageCell[] = []) {
   return out;
 }
 
-const round = (n: number | undefined) => Math.round((n ?? 0) * 10_000) / 10_000;
+const round = (n: number | undefined) => {
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return null;
+  const rounded = Math.round(n * 10_000) / 10_000;
+  return Number.isFinite(rounded) ? rounded : n;
+};
+
+/** Preserve actual saved identity and provenance before presenting reusable material. */
+function requireValidationPack(value: unknown, sourceRunId: string, workspaceId?: string): SimulationValidationPack {
+  const pack = value as Partial<SimulationValidationPack> | null;
+  if (!pack || pack.runId !== sourceRunId || pack.ref !== `validation/${sourceRunId}@1`
+      || typeof pack.workspaceId !== 'string' || !pack.workspaceId || (workspaceId && pack.workspaceId !== workspaceId)
+      || typeof pack.contentHash !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(pack.contentHash)
+      || pack.payload?.schemaVersion !== 1 || pack.payload?.sourceRunId !== sourceRunId || pack.payload?.evidenceKind !== 'simulation') {
+    throw new Error('VALIDATION_PACK_INVALID: saved identity or simulation provenance is unavailable.');
+  }
+  return pack as SimulationValidationPack;
+}
 
 export function summarizeRun(run: SimulationRun) {
   const c = run.counters;
@@ -294,25 +315,28 @@ export const simulationTools: ToolDefinition[] = [
     title: 'Create a simulation run',
     description:
       'POST /v2/simulations with {yaml} or {spec}. The server validates everything (schema plus ownership, ' +
-      'sandbox-only target, packs, flags, roles). Returns {created:true, run:{id, status, specHash, …}} or ' +
+      'sandbox-only target, packs, flags, roles). Or pass validationPackRunId to explicitly reuse saved redacted ' +
+      'simulation material through the server, with current source-pack and policy validation. Returns {created:true, run:{id, status, specHash, …}} or ' +
       '{created:false, errors:[{path, code, message}]}. Creating spends nothing; swfte_simulation_start does.',
-    inputSchema: z.object({ ...SpecInput, workspaceId: Workspace }),
+    inputSchema: z.object({ ...SpecInput, validationPackRunId: RunId.optional(), acceptableUseAcknowledged: z.boolean().optional(), workspaceId: Workspace }),
     execute: async (input, { client }) => {
-      requireOneSpec(input);
-      const body = input.yaml !== undefined ? { yaml: input.yaml } : { spec: input.spec };
+      if ([input.yaml, input.spec, input.validationPackRunId].filter(value => value !== undefined).length !== 1) throw new Error('Pass exactly one of `yaml`, `spec` or `validationPackRunId`.');
+      const body = input.validationPackRunId !== undefined ? {} : input.yaml !== undefined ? { yaml: input.yaml } : { spec: input.spec };
+      if (input.acceptableUseAcknowledged === true) Object.assign(body, { acceptableUseAcknowledged: true });
       const res = await client.request<Record<string, unknown>>({
         method: 'POST',
-        path: SIMULATIONS_BASE,
+        path: input.validationPackRunId !== undefined ? `${SIMULATIONS_BASE}/validation-packs/${encodeURIComponent(input.validationPackRunId)}/reuse` : SIMULATIONS_BASE,
         body,
         workspaceId: input.workspaceId,
-        expectStatuses: [400],
+        expectStatuses: [400, 409],
       });
       if (res && typeof res === 'object' && typeof res.id === 'string') {
         const run = res as unknown as SimulationRun;
         return { created: true, run: { id: run.id, status: run.status, specHash: run.specHash, mode: run.mode, profile: run.profile, target: run.target, budget: run.budget } };
       }
       const errors = (res?.errors as SpecError[] | undefined) ?? [];
-      return { created: false, valid: false, errors, message: typeof res?.message === 'string' ? res.message : undefined };
+      const code = typeof res?.code === 'string' ? res.code : typeof res?.error === 'string' ? res.error : undefined;
+      return { created: false, valid: false, errors, code, message: typeof res?.message === 'string' ? res.message : undefined };
     },
   },
   {
@@ -321,7 +345,7 @@ export const simulationTools: ToolDefinition[] = [
     description:
       'POST /v2/simulations/{id}/start (the binding gate: flags, role, quota, credit, budget). With estimate:true ' +
       '(default) it first calls POST /estimate (advisory, no spend) and includes the result; with ' +
-      'onlyIfWithinBudget:true it does not start when the estimate exceeds the budget. Spends against the run budget.',
+      'onlyIfWithinBudget:true it refuses over-budget, missing or unpriced estimates. Actual model/execution admission always requires a known bounded price and reserves the shared cap first.',
     inputSchema: z.object({
       id: RunId,
       estimate: z.boolean().default(true).describe('Fetch the advisory estimate first.'),
@@ -332,8 +356,13 @@ export const simulationTools: ToolDefinition[] = [
       let estimate: SimulationEstimate | undefined;
       if (input.estimate || input.onlyIfWithinBudget) {
         estimate = await client.request<SimulationEstimate>({ method: 'POST', path: runPath(input.id, '/estimate'), workspaceId: input.workspaceId });
-        if (input.onlyIfWithinBudget && estimate && estimate.withinBudget === false) {
-          return { started: false, reason: 'ESTIMATE_OVER_BUDGET', estimate };
+        if (input.onlyIfWithinBudget) {
+          if (!estimate || !Array.isArray(estimate.unpricedModels) || typeof estimate.withinBudget !== 'boolean'
+              || typeof estimate.usdCeiling !== 'number' || !Number.isFinite(estimate.usdCeiling) || estimate.usdCeiling < 0) {
+            return { started: false, reason: 'ESTIMATE_UNAVAILABLE', estimate };
+          }
+          if (estimate.unpricedModels.length) return { started: false, reason: 'ESTIMATE_UNPRICED', estimate };
+          if (estimate.withinBudget !== true) return { started: false, reason: 'ESTIMATE_OVER_BUDGET', estimate };
         }
       }
       await client.request({ method: 'POST', path: runPath(input.id, '/start'), workspaceId: input.workspaceId });
@@ -388,14 +417,19 @@ export const simulationTools: ToolDefinition[] = [
     name: 'swfte_simulation_report',
     title: 'Simulation report',
     description:
-      `GET /v2/simulations/{id}/report?format=md|json. ${REPORT_DISCLAIMER} ${UNKNOWN_RULE} Every claim cites evidence ids.`,
+      `GET /v2/simulations/{id}/report?format=md|json; format=validation-pack reads saved workspace-private redacted simulation material for explicit reuse. ${REPORT_DISCLAIMER} ${UNKNOWN_RULE} Every claim cites evidence ids.`,
     readOnly: true,
     inputSchema: z.object({
       id: RunId,
-      format: z.enum(['md', 'json']).default('json'),
+      format: z.enum(['md', 'json', 'validation-pack']).default('json'),
       workspaceId: Workspace,
     }),
     execute: async (input, { client }) => {
+      if (input.format === 'validation-pack') {
+        const saved = await client.request<unknown>({ method: 'GET', path: `${SIMULATIONS_BASE}/validation-packs/${encodeURIComponent(input.id)}`, workspaceId: input.workspaceId });
+        const pack = requireValidationPack(saved,input.id,input.workspaceId ?? client.configuredWorkspaceId);
+        return { format: 'validation-pack', evidenceKind: pack.payload.evidenceKind, disclaimer: REPORT_DISCLAIMER, pack };
+      }
       const md = input.format === 'md';
       const res = await client.request<unknown>({
         method: 'GET',
@@ -409,4 +443,3 @@ export const simulationTools: ToolDefinition[] = [
     },
   },
 ];
-
