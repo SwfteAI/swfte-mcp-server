@@ -291,11 +291,42 @@ interface Bindings {
   opaque: boolean;
 }
 
+// Index every name in a lexical scope once, including negative lookups. Caching one name at a
+// time still walks the whole scope for each distinct call-site variable and remains quadratic.
+const BINDINGS_CACHE = new WeakMap<Tree, Map<number, Map<string, Bindings>>>();
+
 function bindingsIn(scope: PyNode, name: string): Bindings {
-  const b: Bindings = { values: [], opaque: false };
+  let scopes = BINDINGS_CACHE.get(scope.tree);
+  if (!scopes) {
+    scopes = new Map();
+    BINDINGS_CACHE.set(scope.tree, scopes);
+  }
+  let names = scopes.get(scope.id);
+  if (!names) {
+    names = indexBindings(scope);
+    scopes.set(scope.id, names);
+  }
+  return names.get(name) ?? { values: [], opaque: false };
+}
+
+function indexBindings(scope: PyNode): Map<string, Bindings> {
+  const names = new Map<string, Bindings>();
+  const binding = (name: string): Bindings => {
+    let value = names.get(name);
+    if (!value) {
+      value = { values: [], opaque: false };
+      names.set(name, value);
+    }
+    return value;
+  };
+  const opaquePattern = (node: PyNode | null) => {
+    if (!node) return;
+    walk(node, (part) => { if (part.type === 'identifier') binding(part.text).opaque = true; });
+  };
   const visit = (n: PyNode): boolean | void => {
     if (n.id !== scope.id && (n.type === 'function_definition' || n.type === 'class_definition')) {
-      if (n.childForFieldName('name')?.text === name) b.opaque = true;
+      const name = n.childForFieldName('name')?.text;
+      if (name) binding(name).opaque = true;
       return false;
     }
     switch (n.type) {
@@ -304,36 +335,40 @@ function bindingsIn(scope: PyNode, name: string): Bindings {
       case 'assignment': {
         const left = n.childForFieldName('left');
         const right = n.childForFieldName('right');
-        if (left?.type === 'identifier' && left.text === name) {
+        if (left?.type === 'identifier') {
+          const b = binding(left.text);
           if (right) b.values.push(right);
           else b.opaque = true;
-        } else if (left && patternBinds(left, name) && left.type !== 'attribute' && left.type !== 'subscript') b.opaque = true;
+        } else if (left && left.type !== 'attribute' && left.type !== 'subscript') opaquePattern(left);
         break;
       }
       case 'augmented_assignment':
-        if (patternBinds(n.childForFieldName('left'), name)) b.opaque = true;
+        opaquePattern(n.childForFieldName('left'));
         break;
       case 'for_statement':
       case 'for_in_clause':
-        if (patternBinds(n.childForFieldName('left'), name)) b.opaque = true;
+        opaquePattern(n.childForFieldName('left'));
         break;
       case 'as_pattern':
       case 'with_item':
-        if (n.children.some((c) => c && c.type === 'as_pattern_target' && patternBinds(c, name))) b.opaque = true;
+        for (const child of n.children) if (child?.type === 'as_pattern_target') opaquePattern(child);
         break;
       case 'as_pattern_target':
-        if (patternBinds(n, name)) b.opaque = true;
+        opaquePattern(n);
         break;
       case 'named_expression':
-        if (n.childForFieldName('name')?.text === name) b.opaque = true;
+        {
+          const name = n.childForFieldName('name')?.text;
+          if (name) binding(name).opaque = true;
+        }
         break;
       case 'import_statement':
       case 'import_from_statement':
-        if (n.text.split(/[\s,()]+/).includes(name)) b.opaque = true;
+        for (const name of n.text.split(/[\s,()]+/)) if (name) binding(name).opaque = true;
         break;
       case 'global_statement':
       case 'nonlocal_statement':
-        if (patternBinds(n, name)) b.opaque = true;
+        opaquePattern(n);
         break;
       default:
         break;
@@ -341,7 +376,7 @@ function bindingsIn(scope: PyNode, name: string): Bindings {
     return undefined;
   };
   walk(scope, visit);
-  return b;
+  return names;
 }
 
 /**

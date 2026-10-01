@@ -478,3 +478,31 @@ describe('py corpus', () => {
     await compare('monorepo', 'py/');
   });
 });
+
+describe('Python scope binding index', () => {
+  test('large scopes resolve every distinct call-site variable without crossing parse trees', () => {
+    const source = SDK + Array.from({ length: 600 }, (_, i) =>
+      `artifact_${i} = "wf_${i}"\nclient.workflows.invoke_and_wait(artifact_${i}, {"topic": "local"})`,
+    ).join('\n');
+    const r = run(source);
+    assert.equal(r.sites.length, 600);
+    assert.deepEqual(r.sites.map(site => site.artifact.id), Array.from({ length: 600 }, (_, i) => `wf_${i}`));
+    const other = run(SDK + 'artifact_0 = "wf_other"\nclient.workflows.invoke_and_wait(artifact_0, {})\n');
+    assert.equal(other.sites[0]!.artifact.id, 'wf_other');
+  });
+  test('scope shadowing, opaque loops and reassignment remain unresolved', () => {
+    const r = run(SDK + [
+      'artifact = "wf_outer"',
+      'def local():',
+      '    artifact = "wf_inner"',
+      '    client.workflows.invoke_and_wait(artifact, {})',
+      'client.workflows.invoke_and_wait(artifact, {})',
+      'for artifact in items:',
+      '    client.workflows.invoke_and_wait(artifact, {})',
+    ].join('\n'));
+    assert.equal(r.sites.length, 3);
+    assert.equal(r.sites[0]!.artifact.id, 'wf_inner');
+    assert.equal(r.sites[1]!.artifact.unresolved, true);
+    assert.equal(r.sites[2]!.artifact.unresolved, true);
+  });
+});

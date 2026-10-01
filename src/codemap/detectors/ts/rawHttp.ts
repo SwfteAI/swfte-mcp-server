@@ -22,7 +22,9 @@ const BODY_VERBS = new Set(['post', 'put', 'patch']);
 
 const COLLECTIONS: Record<string, string> = { workflows: 'workflow', agents: 'agent', chatflows: 'chatflow', widgets: 'widget', applications: 'application' };
 
-const HOST_RE = /(^|[^A-Za-z0-9.-])(?:[a-z0-9-]+\.)*api\.swfte\.com(?=[/:?#\u0000]|$)/;
+// Match only a URL authority. An API hostname in a foreign path, query, fragment or userinfo
+// cannot make that foreign request a Swfte call. Unknown authority suffixes stay unknown.
+const HOST_RE = /^(?:https?:\/\/|\/\/)(?:[a-z0-9-]+\.)*api\.swfte\.com(?::[0-9]+)?(?=[/?#]|$)/i;
 const PLACE = '\u0000';
 
 interface Folded {
@@ -44,6 +46,7 @@ function fold(parts: Part[]): Folded {
       places.push(p.k === 'env' ? p.name : null);
     }
   }
+  if (hostKnown && !text.startsWith(`${PLACE}/`)) hostKnown = false;
   if (HOST_RE.test(text)) hostKnown = true;
   return { text, places, hostKnown };
 }
