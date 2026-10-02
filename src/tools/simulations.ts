@@ -252,12 +252,91 @@ const round = (n: number | undefined) => {
 };
 
 /** Preserve actual saved identity and provenance before presenting reusable material. */
+// Admission of wire shape/identity only. Java FullContentHash is authoritative;
+// JSON parsing can erase BigDecimal scale, so this client does not recompute its checksum.
+function savedObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+function savedText(value: unknown): value is string { return typeof value === 'string' && value.trim().length > 0 }
+function savedHash(value: unknown, prefixed = false): boolean {
+  return typeof value === 'string' && (prefixed ? /^sha256:[a-f0-9]{64}$/ : /^[a-f0-9]{64}$/).test(value)
+}
+function savedVersion(value: unknown): boolean { return value == null || (typeof value === 'number' && Number.isSafeInteger(value)) }
+function savedActualVersion(value: unknown): boolean { return value == null || savedText(value) }
+function savedStrings(value: unknown): value is string[] { return Array.isArray(value) && value.every(item => typeof item === 'string') }
+const savedTargetKinds = ['workflow', 'agent', 'chatflow', 'app', 'widget', 'worker_box']
+function savedTerminalStatus(value: unknown): boolean {
+  return typeof value === 'string' && ['DONE', 'FAILED', 'STOPPED', 'BUDGET_EXHAUSTED'].includes(value)
+}
+function savedProvenanceShape(payload: Record<string, unknown>): boolean {
+  return Array.isArray(payload.sourcePacks) && payload.sourcePacks.every(item => savedObject(item)
+    && savedText(item.ref) && typeof item.kind === 'string' && ['PERSONA', 'SCENARIO', 'FAULT'].includes(item.kind)
+    && savedHash(item.manifestHash)) && savedStrings(payload.unavailableDeclarations)
+}
+function savedPayloadShape(payload: Record<string, unknown>): boolean {
+  return savedHash(payload.sourceSpecHash) && savedObject(payload.spec)
+    && payload.spec.apiVersion === 'swfte.dev/simulation/v1' && payload.spec.kind === 'Simulation' && savedObject(payload.spec.spec)
+    && (payload.industry == null || typeof payload.industry === 'string')
+    && [payload.scenarios, payload.faults, payload.findings].every(items => Array.isArray(items) && items.every(savedObject))
+    && savedObject(payload.evidenceHeads) && Object.values(payload.evidenceHeads).every(value => typeof value === 'string')
+}
+function savedRawTargetShape(payload: Record<string, unknown>, workspaceId: unknown): boolean {
+  const target = payload.target
+  return savedObject(target) && typeof target.kind === 'string' && savedTargetKinds.some(kind => kind.toUpperCase() === target.kind)
+    && payload.artifactKind === target.kind.toLowerCase() && savedText(target.id) && target.workspaceId === workspaceId
+    && target.environment === 'sandbox' && savedHash(target.contentHash, true) && savedVersion(target.version)
+    && savedActualVersion(target.actualVersion) && savedStrings(target.instanceIds)
+}
+function createdTargetShape(value: unknown): boolean {
+  return savedObject(value) && typeof value.kind === 'string' && savedTargetKinds.includes(value.kind)
+    && savedText(value.id) && value.environment === 'sandbox' && savedHash(value.contentHash, true)
+    && savedVersion(value.version) && savedActualVersion(value.actualVersion)
+}
+function savedWorkspaceMatches(value: unknown, expected?: string): boolean {
+  return savedText(value) && (expected === undefined || value === expected)
+}
+function savedFiniteNumber(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) }
+function savedNonnegativeNumber(value: unknown): boolean { return savedFiniteNumber(value) && value >= 0 }
+function savedCount(value: unknown): boolean { return savedFiniteNumber(value) && value >= 0 && Number.isInteger(value) }
+function savedNullableString(value: unknown): boolean { return value == null || typeof value === 'string' }
+function savedCoverageShape(value: unknown): boolean {
+  return Array.isArray(value) && value.every(cell => savedObject(cell) && typeof cell.elementId === 'string'
+    && typeof cell.dimension === 'string' && (SIMULATION_DIMENSIONS as readonly string[]).includes(cell.dimension)
+    && typeof cell.applicable === 'boolean' && [cell.passes, cell.fails, cell.unknowns].every(savedCount)
+    && typeof cell.outcome === 'string' && ['PASS', 'FAIL', 'UNKNOWN'].includes(cell.outcome) && savedStrings(cell.evidenceIds))
+}
+function savedRoutingShape(value: unknown): boolean {
+  return value == null || (savedObject(value)
+    && (value.chains === undefined || (savedObject(value.chains) && Object.values(value.chains).every(savedStrings)))
+    && (value.residencyApplied === undefined || typeof value.residencyApplied === 'boolean'))
+}
+function savedRunFieldsShape(value: Record<string, unknown>): boolean {
+  const budget = value.budget, counters = value.counters
+  return [value.mode, value.profile, value.specVersion, value.createdAt].every(savedText)
+    // A Java signed long may exceed exact JS precision; shape admission is not identity verification.
+    && savedFiniteNumber(value.seed) && Number.isInteger(value.seed)
+    && savedObject(budget) && [budget.usdPersonas, budget.usdSystemUnderTest, budget.usdReport].every(savedNonnegativeNumber)
+    && savedCount(budget.maxSteps) && savedObject(counters)
+    && [counters.personas, counters.sessionsPlanned, counters.sessionsDone, counters.sessionsUnknown, counters.steps, counters.findings].every(savedCount)
+    && [counters.usdPersonas, counters.usdSystemUnderTest, counters.usdReport].every(savedNonnegativeNumber)
+    && savedCoverageShape(value.coverage) && savedFiniteNumber(value.completeness) && value.completeness >= 0 && value.completeness <= 1
+    && savedRoutingShape(value.routing) && [value.name, value.startedAt, value.finishedAt, value.error].every(savedNullableString)
+}
+
+function savedCreatedShape(value: unknown, workspaceId?: string): value is SimulationRun {
+  return savedObject(value) && typeof value.id === 'string' && /^sim_[A-Za-z0-9]{1,64}$/.test(value.id)
+    && value.status === 'CREATED' && savedWorkspaceMatches(value.workspaceId, workspaceId)
+    && savedHash(value.specHash) && createdTargetShape(value.target) && savedRunFieldsShape(value)
+}
+
 function requireValidationPack(value: unknown, sourceRunId: string, workspaceId?: string): SimulationValidationPack {
   const pack = value as Partial<SimulationValidationPack> | null;
   if (!pack || pack.runId !== sourceRunId || pack.ref !== `validation/${sourceRunId}@1`
       || typeof pack.workspaceId !== 'string' || !pack.workspaceId || (workspaceId && pack.workspaceId !== workspaceId)
       || typeof pack.contentHash !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(pack.contentHash)
-      || pack.payload?.schemaVersion !== 1 || pack.payload?.sourceRunId !== sourceRunId || pack.payload?.evidenceKind !== 'simulation') {
+      || !savedObject(pack.payload) || pack.payload.schemaVersion !== 1 || pack.payload.sourceRunId !== sourceRunId || pack.payload.evidenceKind !== 'simulation'
+      || !savedPayloadShape(pack.payload) || !savedProvenanceShape(pack.payload) || !savedTerminalStatus(pack.payload.sourceStatus)
+      || !savedRawTargetShape(pack.payload, pack.workspaceId)) {
     throw new Error('VALIDATION_PACK_INVALID: saved identity or simulation provenance is unavailable.');
   }
   return pack as SimulationValidationPack;
@@ -330,6 +409,19 @@ export const simulationTools: ToolDefinition[] = [
         workspaceId: input.workspaceId,
         expectStatuses: [400, 409],
       });
+      if (input.validationPackRunId !== undefined) {
+        // Expected 400/409 server refusals retain their original envelope; malformed successes refuse.
+        const refusal = savedObject(res) && (typeof res.code === 'string' || typeof res.error === 'string'
+          || (res.valid === false && Array.isArray(res.errors)))
+        if (!refusal && !savedCreatedShape(res, input.workspaceId ?? client.configuredWorkspaceId)) {
+          throw new Error('VALIDATION_PACK_REUSE_INVALID: saved reuse creation identity is unavailable.')
+        }
+        if (refusal) {
+          return { created: false, valid: false, errors: Array.isArray(res.errors) ? res.errors : [],
+            code: typeof res.code === 'string' ? res.code : typeof res.error === 'string' ? res.error : undefined,
+            message: typeof res.message === 'string' ? res.message : undefined }
+        }
+      }
       if (res && typeof res === 'object' && typeof res.id === 'string') {
         const run = res as unknown as SimulationRun;
         return { created: true, run: { id: run.id, status: run.status, specHash: run.specHash, mode: run.mode, profile: run.profile, target: run.target, budget: run.budget } };

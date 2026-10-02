@@ -95,13 +95,31 @@ const RUN = {
   ],
   completeness: 0.4, createdAt: '2026-09-26T00:00:00Z',
 };
-// Contract-only server fixture. These mocked fields are never runtime receipts.
-const VALIDATION_PACK = {
-  ref: `validation/${RUN_ID}@1`, runId: RUN_ID, workspaceId: WS, contentHash: 'sha256:' + 'a'.repeat(64),
-  payload: { schemaVersion: 1, sourceRunId: RUN_ID, evidenceKind: 'simulation', artifactKind: 'workflow', industry: 'unspecified',
-    target: RUN.target, sourceSpecHash: RUN.specHash, spec: {}, sourcePacks: [], unavailableDeclarations: [],
-    scenarios: [], faults: [], findings: [], evidenceHeads: {}, sourceStatus: 'DONE' },
-};
+// Mirrors SavedValidationPacks schema1 + raw TargetRef wire fields; not a signed integrity/runtime receipt.
+function savedMaterialFixture(runId: string, workspaceId: string) {
+  return {
+    ref: `validation/${runId}@1`, runId, workspaceId, contentHash: 'sha256:' + 'a'.repeat(64),
+    payload: { schemaVersion: 1, sourceRunId: runId, evidenceKind: 'simulation', artifactKind: 'workflow', industry: null,
+      target: { kind: 'WORKFLOW', id: 'wf_fixture_1', workspaceId, environment: 'sandbox', version: null,
+        actualVersion: null, instanceIds: [], contentHash: 'sha256:' + 'b'.repeat(64) },
+      sourceSpecHash: 'c'.repeat(64),
+      spec: { apiVersion: 'swfte.dev/simulation/v1', kind: 'Simulation', metadata: { name: 'saved' },
+        spec: { mode: 'proving', profile: 'standard', target: { kind: 'workflow', id: 'wf_fixture_1', environment: 'sandbox' }, graders: ['swfte/function@1'] } },
+      sourcePacks: [{ ref: 'swfte/core-users@1', kind: 'PERSONA', manifestHash: 'd'.repeat(64) }],
+      unavailableDeclarations: ['swfte/unavailable@1'], scenarios: [], faults: [], findings: [],
+      evidenceHeads: { ses_actual: 'e'.repeat(64) }, sourceStatus: 'DONE' },
+  }
+}
+function savedCreatedFixture(workspaceId: string) {
+  return { id: 'sim_new01', workspaceId, name: 'saved reuse', status: 'CREATED', specHash: 'f'.repeat(64), specVersion: 'v1', seed: 7741, mode: 'proving', profile: 'standard',
+    budget: { usdPersonas: 8, usdSystemUnderTest: 12, usdReport: 4, maxSteps: 20000 },
+    counters: { personas: 0, sessionsPlanned: 0, sessionsDone: 0, sessionsUnknown: 0, steps: 0, findings: 0, usdPersonas: 0, usdSystemUnderTest: 0, usdReport: 0 },
+    coverage: [], completeness: 0, routing: null, createdAt: '2026-10-02T00:00:00Z', startedAt: null, finishedAt: null, error: null,
+    target: { kind: 'workflow', id: 'wf_fixture_1', environment: 'sandbox', version: null, actualVersion: null,
+      contentHash: 'sha256:' + 'b'.repeat(64) } }
+}
+
+const VALIDATION_PACK = savedMaterialFixture(RUN_ID, WS);
 
 /* ── validate ── */
 describe('swfte_simulation_validate (local)', () => {
@@ -186,7 +204,7 @@ describe('simulation API tools', () => {
   });
 
   test('explicit saved pack reuse creates once in the chosen workspace without starting', async () => {
-    const created = { ...RUN, id: 'sim_new01', status: 'CREATED', target: { ...RUN.target, contentHash: 'sha256:' + 'b'.repeat(64), actualVersion: '4' } };
+    const created = savedCreatedFixture('ws-explicit');
     route('POST', new RegExp(`^/v2/simulations/validation-packs/${RUN_ID}/reuse$`), { status: 201, body: created });
     const result = await run('swfte_simulation_create', { validationPackRunId: RUN_ID, workspaceId: 'ws-explicit', acceptableUseAcknowledged: true });
     assert.equal(result.created, true);
@@ -345,6 +363,106 @@ describe('simulation API tools', () => {
     await assert.rejects(run('swfte_simulation_report', { id: RUN_ID, format: 'validation-pack', workspaceId: 'foreign' }),
       (error: unknown) => error instanceof SwfteApiError && error.status === 404);
     assert.equal(seen.every(request => request.method === 'GET'), true);
+  });
+
+
+  test('saved produced nullable terminal envelope remains simulation material', async () => {
+    for (const status of ['DONE', 'FAILED', 'STOPPED', 'BUDGET_EXHAUSTED']) {
+      const pack = savedMaterialFixture(RUN_ID, WS); pack.payload.sourceStatus = status;
+      route('GET', /\/validation-packs\/sim_[^/]+$/, { body: pack });
+      assert.deepEqual((await run('swfte_simulation_report', { id: RUN_ID, format: 'validation-pack' })).pack, pack);
+    }
+    assert.equal(seen.every(request => request.method === 'GET'), true);
+  });
+  test('saved malformed complete payload refuses before reuse', async () => {
+    const pack = savedMaterialFixture(RUN_ID, WS);
+    for (const payload of [{ ...pack.payload, spec: { ...pack.payload.spec, spec: [] } },
+      { ...pack.payload, unavailableDeclarations: [null] }, { ...pack.payload, scenarios: {} },
+      { ...pack.payload, evidenceHeads: { session: false } }, { ...pack.payload, sourceSpecHash: 'short' }]) {
+      route('GET', /\/validation-packs\/sim_[^/]+$/, { body: { ...pack, payload } });
+      await assert.rejects(run('swfte_simulation_report', { id: RUN_ID, format: 'validation-pack' }), /VALIDATION_PACK_INVALID/);
+    }
+    assert.equal(seen.every(request => request.method === 'GET'), true);
+  });
+  test('saved target and provenance shape refuses without fake receipt', async () => {
+    const pack = savedMaterialFixture(RUN_ID, WS);
+    for (const payload of [{ ...pack.payload, sourcePacks: [{ ...pack.payload.sourcePacks[0], manifestHash: 'short' }] },
+      { ...pack.payload, sourceStatus: 'RUNNING' }, { ...pack.payload, target: { ...pack.payload.target, kind: 'workflow' } },
+      { ...pack.payload, target: { ...pack.payload.target, version: 1.5 } },
+      { ...pack.payload, target: { ...pack.payload.target, workspaceId: 'foreign' } }]) {
+      route('GET', /\/validation-packs\/sim_[^/]+$/, { body: { ...pack, payload } });
+      await assert.rejects(run('swfte_simulation_report', { id: RUN_ID, format: 'validation-pack' }), /VALIDATION_PACK_INVALID/);
+    }
+  });
+  test('saved reuse requires current CREATED response identity', async () => {
+    const created = savedCreatedFixture(WS);
+    for (const invalid of [{ ...created, status: 'RUNNING' }, { id: 'sim_new01' }, {}, null,
+      { ...created, specHash: 'short' }, { ...created, target: { ...created.target, environment: 'production' } },
+      { ...created, target: { ...created.target, kind: 'WORKFLOW' } },
+      { ...created, target: { ...created.target, version: 1.5 } }]) {
+      route('POST', /\/validation-packs\/[^/]+\/reuse$/, { status: 201, body: invalid });
+      await assert.rejects(run('swfte_simulation_create', { validationPackRunId: RUN_ID }), /VALIDATION_PACK_REUSE_INVALID/);
+    }
+    route('POST', /\/validation-packs\/[^/]+\/reuse$/, { status: 201, body: created });
+    assert.equal((await run('swfte_simulation_create', { validationPackRunId: RUN_ID })).created, true);
+    assert.equal(seen.every(request => request.path.endsWith('/reuse')), true);
+  });
+  test('saved reuse binds explicit and configured workspace', async () => {
+    route('POST', /\/validation-packs\/[^/]+\/reuse$/, { status: 201, body: savedCreatedFixture('foreign') });
+    await assert.rejects(run('swfte_simulation_create', { validationPackRunId: RUN_ID }), /VALIDATION_PACK_REUSE_INVALID/);
+    route('POST', /\/validation-packs\/[^/]+\/reuse$/, { status: 201, body: savedCreatedFixture('explicit') });
+    assert.equal((await run('swfte_simulation_create', { validationPackRunId: RUN_ID, workspaceId: 'explicit' })).created, true);
+    route('POST', /\/validation-packs\/[^/]+\/reuse$/, { status: 201, body: savedCreatedFixture(WS) });
+    assert.equal((await run('swfte_simulation_create', { validationPackRunId: RUN_ID })).created, true);
+    assert.deepEqual(seen.map(wsHeader), [WS, 'explicit', WS]);
+  });
+  test('saved reuse preserves conflict and missing errors without start', async () => {
+    for (const status of [400, 409]) {
+      route('POST', /\/validation-packs\/[^/]+\/reuse$/, { status, body: { valid: false, code: 'ACTUAL_REFUSAL', errors: [] } });
+      const result = await run('swfte_simulation_create', { validationPackRunId: RUN_ID });
+      assert.equal(result.created, false); assert.equal(result.code, 'ACTUAL_REFUSAL');
+    }
+    route('POST', /\/validation-packs\/[^/]+\/reuse$/, { status: 404, body: { code: 'NOT_FOUND' } });
+    await assert.rejects(run('swfte_simulation_create', { validationPackRunId: RUN_ID }), (error: unknown) => error instanceof SwfteApiError && error.status === 404);
+    assert.equal(seen.every(request => request.path.endsWith('/reuse')), true);
+  });
+
+
+  test('saved reuse refuses incomplete typed runs', async () => {
+    const created = savedCreatedFixture(WS)
+    const invalidRuns: unknown[] = []
+    for (const field of ['budget', 'counters', 'coverage', 'completeness', 'seed', 'mode', 'profile', 'specVersion', 'createdAt']) {
+      const missing: Record<string, unknown> = { ...created }; delete missing[field]; invalidRuns.push(missing)
+    }
+    invalidRuns.push({ ...created, budget: { ...created.budget, usdPersonas: 'free' } },
+      { ...created, budget: { ...created.budget, maxSteps: 1.5 } },
+      { ...created, counters: { ...created.counters, sessionsDone: -1 } },
+      { ...created, counters: { ...created.counters, usdSystemUnderTest: 'unknown' } },
+      { ...created, coverage: [{}] }, { ...created, completeness: 2 }, { ...created, seed: '7741' },
+      { ...created, routing: { chains: { PERSONA: [false] } } }, { ...created, finishedAt: false }, { ...created, name: false })
+    for (const invalid of invalidRuns) {
+      route('POST', /\/validation-packs\/[^/]+\/reuse$/, { status: 201, body: invalid });
+      await assert.rejects(run('swfte_simulation_create', { validationPackRunId: RUN_ID }), /VALIDATION_PACK_REUSE_INVALID/);
+    }
+    // Java long transport may round; finite integer is admitted without asserting numeric integrity.
+    const complete = { ...created, name: null, seed: 9223372036854775807,
+      routing: { chains: { PERSONA: ['provider/model'] }, residencyApplied: true },
+      coverage: [{ elementId: 'n1', dimension: 'FUNCTION', applicable: true, passes: 0, fails: 0, unknowns: 1, outcome: 'UNKNOWN', evidenceIds: ['ev_actual'] }] }
+    route('POST', /\/validation-packs\/[^/]+\/reuse$/, { status: 201, body: complete });
+    const result = await run('swfte_simulation_create', { validationPackRunId: RUN_ID });
+    assert.equal(result.created, true); assert.equal(result.run.status, 'CREATED');
+    assert.equal(seen.every(request => request.path.endsWith('/reuse')), true);
+  });
+  test('saved reuse requires consumable run identifiers', async () => {
+    const created = savedCreatedFixture(WS);
+    for (const id of ['sim_a-b', 'sim_a_b', 'sim_', 'sim_' + 'a'.repeat(65)]) {
+      route('POST', /\/validation-packs\/[^/]+\/reuse$/, { status: 201, body: { ...created, id } });
+      await assert.rejects(run('swfte_simulation_create', { validationPackRunId: RUN_ID }), /VALIDATION_PACK_REUSE_INVALID/);
+    }
+    for (const id of ['sim_' + 'a'.repeat(32), 'sim_' + 'A1'.repeat(32)]) {
+      route('POST', /\/validation-packs\/[^/]+\/reuse$/, { status: 201, body: { ...created, id } });
+      assert.equal((await run('swfte_simulation_create', { validationPackRunId: RUN_ID })).run.id, id);
+    }
   });
 
   test('registry still exposes exactly the six original simulation tools', () => {

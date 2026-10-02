@@ -207,26 +207,38 @@ export type SimulationGraph = {
 }
 
 /** Actual redacted simulation records; never a production runtime receipt. */
+/** Raw TargetRef in saved material; ordinary run targets use lowercase kinds. */
+export type SimulationSavedTarget = {
+  kind: Uppercase<SimulationTargetKind>
+  id: string
+  version?: number | null
+  actualVersion?: string | null
+  environment: 'sandbox'
+  workspaceId: string
+  instanceIds: string[]
+  contentHash: string
+}
+
 export type SimulationValidationPack = {
   ref: string
   runId: string
   workspaceId: string
   contentHash: string
   payload: {
-    schemaVersion: number
+    schemaVersion: 1
     sourceRunId: string
     evidenceKind: 'simulation'
-    artifactKind: string
-    industry: string
-    target: SimulationRun['target']
+    artifactKind: SimulationTargetKind
+    industry: string | null
+    target: SimulationSavedTarget
     sourceSpecHash: string
     spec: SimulationSpec
-    sourcePacks: Array<{ ref: string; kind: SimulationPackKind; manifestHash: string }>
+    sourcePacks: Array<{ ref: string; kind: Exclude<SimulationPackKind, 'REPORT'>; manifestHash: string }>
     unavailableDeclarations: string[]
     scenarios: unknown[]
     faults: unknown[]
     findings: SimulationFinding[]
     evidenceHeads: Record<string, string>
-    sourceStatus: SimulationRunStatus
+    sourceStatus: Extract<SimulationRunStatus, 'DONE' | 'BUDGET_EXHAUSTED' | 'STOPPED' | 'FAILED'>
   }
 }
