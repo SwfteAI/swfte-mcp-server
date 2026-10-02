@@ -32,8 +32,9 @@ import { setupTools } from './tools/setup.js';
 import { proveTools } from './tools/prove.js';
 import { promotionTools } from './tools/promotion.js';
 import { cloudLinkTools } from './tools/cloud-link.js';
+import { runtimeExecTools } from './tools/runtime-exec.js';
 
-const runtimeCommands:Record<string,string>={setup:'swfte_setup',proof:'swfte_proof',resolve:'swfte_resolve',prove:'swfte_prove','prove-status':'swfte_prove_status','prove-report':'swfte_prove_report',findings:'swfte_prove_findings',promote:'swfte_promote','promotion-preview':'swfte_promotion_preview','promotion-status':'swfte_promotion_status',rollback:'swfte_promotion_rollback','aws-link':'swfte_aws_link','aws-probe':'swfte_aws_link_probe','provision-plan':'swfte_provision_plan','provision-request':'swfte_provision_request'};
+const runtimeCommands:Record<string,string>={setup:'swfte_setup',proof:'swfte_proof',resolve:'swfte_resolve',prove:'swfte_prove','prove-status':'swfte_prove_status','prove-report':'swfte_prove_report',findings:'swfte_findings',promote:'swfte_promote','promotion-preview':'swfte_promotion_preview','promotion-status':'swfte_promotion_status',rollback:'swfte_promotion_rollback','aws-link':'swfte_aws_link','aws-probe':'swfte_aws_link_probe','provision-plan':'swfte_provision_plan','provision-request':'swfte_provision_request','runtime-exec':'swfte_runtime_exec','runtime-status':'swfte_runtime_exec_status','runtime-cancel':'swfte_runtime_exec_cancel','runtime-events':'swfte_runtime_exec_events','runtime-files':'swfte_runtime_files','runtime-read':'swfte_runtime_file_read','runtime-write':'swfte_runtime_file_write','runtime-upload':'swfte_runtime_upload'};
 
 export interface CliIO {
   out: (line: string) => void;
@@ -73,6 +74,7 @@ Usage:
   swfte verify [--offline] [--json] [--compliance [--paths <p,…>]]
   swfte upgrade <alias> [--accept-capability-changes] [--force] [--dry-run]
   swfte setup|proof|resolve|prove|prove-status|prove-report|findings|promote|promotion-preview|promotion-status|rollback|aws-link|aws-probe|provision-plan|provision-request --input <project-relative-json>
+  swfte runtime-exec|runtime-status|runtime-cancel|runtime-events|runtime-files|runtime-read|runtime-write|runtime-upload --input <project-relative-json>
 
   <catalogRef>   "<kind>:<id>", e.g. workflow:wf_123 (from swfte_find_existing or Studio)
   --framework    ${FRAMEWORKS.join(' | ')} (default: detected from package.json / pyproject.toml / requirements*.txt)
@@ -271,7 +273,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       if (p.positionals.length || !value(p,'input')) throw new UsageError('Runtime commands require --input <project-relative-json> and no positional arguments.');
       const file=writer.resolve(value(p,'input')!);
       if (!statSync(file).isFile() || statSync(file).size>350000) throw new UsageError('Runtime input must be a bounded JSON file.');
-      const tool=[...setupTools,...proveTools,...promotionTools,...cloudLinkTools].find(candidate=>candidate.name===runtimeCommands[p.command!]);
+      const tool=[...setupTools,...proveTools,...promotionTools,...cloudLinkTools,...runtimeExecTools].find(candidate=>candidate.name===runtimeCommands[p.command!]);
       if (!tool) throw new UsageError('The requested runtime command is unavailable.');
       const input=tool.inputSchema.parse(JSON.parse(readFileSync(file,'utf8')));
       emit(await tool.execute(input,{client,config,localFilesystem:true}));

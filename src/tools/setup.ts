@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ToolDefinition } from './_types.js';
 import type { SetupTaskEntry, ProofRecord, ResolverSession } from '../contracts/setup-proof-v1.js';
+import {resolverEvents} from './_resolver-events.js';
 
 export const SetupArtifactSchema = z.object({
   kind: z.enum(['workflow','chatflow','agent','widget','application','journey','mcp','finetune']),
@@ -51,8 +52,13 @@ export const setupTools: ToolDefinition[] = [
   },
   {
     name:'swfte_resolver_status', title:'Read resolver execution records', readOnly:true,
-    description:'Read the actual owned resolver session or its redacted verified tool records.',
-    inputSchema:z.object({ sessionId:z.string().min(1).max(200), events:z.boolean().default(false) }).strict(),
-    execute:(input,{client})=>client.request({method:'GET',path:`/v2/resolver/sessions/${encodeURIComponent(input.sessionId)}${input.events?'/events':''}`}),
+    description:'Read the actual owned resolver session or a bounded window of its redacted canonical journal. Events resume after the actual Last-Event-ID; reported tool success does not substitute for verification.',
+    inputSchema:z.object({ sessionId:z.string().min(1).max(200), events:z.boolean().default(false),after:z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER-128).default(-1) }).strict(),
+    execute:async(input,{client})=>{
+      if(!input.events)return client.request({method:'GET',path:`/v2/resolver/sessions/${encodeURIComponent(input.sessionId)}`});
+      const wire=await client.request<unknown>({method:'GET',path:`/v2/resolver/sessions/${encodeURIComponent(input.sessionId)}/events`,
+        headers:{Accept:'text/event-stream',...(input.after>=0?{'Last-Event-ID':String(input.after)}:{})},retries:0,maxResponseBytes:256*1024,timeoutMs:35_000});
+      return resolverEvents(wire===undefined?'':wire,input.sessionId,input.after,client.configuredWorkspaceId);
+    },
   },
 ];

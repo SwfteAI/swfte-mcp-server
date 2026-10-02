@@ -49,6 +49,7 @@ import { setupTools } from './setup.js';
 import { proveTools } from './prove.js';
 import { cloudLinkTools } from './cloud-link.js';
 import { promotionTools } from './promotion.js';
+import { runtimeExecTools } from './runtime-exec.js';
 
 /**
  * Tag a whole module's tools with a group, so `SWFTE_TOOLS` can trim them
@@ -79,6 +80,7 @@ export const allTools: ToolDefinition[] = [
   ...tag('runtime', proveTools),
   ...tag('runtime', cloudLinkTools),
   ...tag('runtime', promotionTools),
+  ...tag('runtime', runtimeExecTools),
   // Learning loop (brief 08): report an outcome / propose a rule to the human review queue.
   ...tag('learning', learningTools),
   ...tag('apps', appWizardTools),
