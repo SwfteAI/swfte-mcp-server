@@ -9,6 +9,13 @@ import { DETECTORS as JAVA, releaseAnalysis as releaseJava } from '../src/codema
 import { releaseParsedSource } from '../src/codemap/detectors/ts/parse.js';
 import { detectProject } from '../src/codemap/detect.js';
 import type { Detector, DetectedSite, SourceLanguage } from '../src/codemap/types.js';
+import typescript from 'typescript';
+import { parseSource } from '../src/codemap/detectors/ts/common.js';
+import { inputKeysOf, outputKeysOf } from '../src/codemap/detectors/ts/keys.js';
+import { withTree as withPythonTree, walk as walkPython, children as pythonChildren } from '../src/codemap/detectors/py/parse.js';
+import { inputKeys as pythonInput, outputKeys as pythonOutput } from '../src/codemap/detectors/py/keys.js';
+import { withTree as withJavaTree, walk as walkJava, argsOf as javaArgs } from '../src/codemap/detectors/java/parse.js';
+import { inputKeys as javaInput, outputKeys as javaOutput } from '../src/codemap/detectors/java/keys.js';
 
 function scan(language: SourceLanguage, text: string): DetectedSite[] {
  const detectors: Detector[] = language === 'typescript' ? TS : language === 'python' ? PY : JAVA;
@@ -135,4 +142,85 @@ test('indexed references preserve the existing 64-key limit', () => {
   const rows=scan(language as SourceLanguage,text); assert.equal(rows.length,1,language);
   assert.deepEqual(rows[0]!.outputKeys,names.slice(0,64),language);
  }
+});
+
+// Keep both actual trees alive: scan() deliberately releases indexes, so it cannot cover this case.
+test('public keys distinguish simultaneous same-position trees and requery the first tree', () => {
+ const body=(language:SourceLanguage, suffix:string)=>language==='typescript'
+  ?ts(`const arg={key_${suffix}:1}; const r=client.workflows.invoke('wf_same',arg); console.log(r.outputs.out_${suffix});`)
+  :language==='python'?py(`    arg={'key_${suffix}':1}\n    r=client.workflows.invoke('wf_same',arg)\n    print(r.outputs['out_${suffix}'])`)
+  :java(`var arg=Map.of("key_${suffix}",1); var r=client.workflows().invoke("wf_same",arg); sink(r.getOutputs().get("out_${suffix}"));`);
+ const expected=(suffix:string)=>[[`key_${suffix}`],[`out_${suffix}`]];
+ try {
+  const first=parseSource('caller.ts',body('typescript','one'));
+  const second=parseSource('caller.ts',body('typescript','two'));
+  const locate=(root:typescript.Node):typescript.CallExpression=>{
+   let found:typescript.CallExpression|undefined;
+   const visit=(n:typescript.Node):void=>{if(typescript.isCallExpression(n)&&n.expression.getText()==='client.workflows.invoke')found=n;typescript.forEachChild(n,visit);};
+   visit(root); assert.ok(found); return found;
+  };
+  const a=locate(first), b=locate(second);
+  assert.equal(a.pos,b.pos); assert.notEqual(a.getSourceFile(),b.getSourceFile());
+  const answer=(c:typescript.CallExpression)=>[inputKeysOf(c.arguments[1]),outputKeysOf(c)];
+  const old=answer(a); assert.deepEqual(old,expected('one'));
+  assert.deepEqual(answer(b),expected('two')); assert.deepEqual(answer(a),expected('one'));
+  assert.deepEqual(old,expected('one'));
+  // Nested withTree callbacks keep the first native Tree alive until after the second requery.
+  const python=withPythonTree(body('python','one'), firstRoot=>withPythonTree(body('python','two'),secondRoot=>{
+   const locate=(root:typeof firstRoot)=>{
+    let found:typeof firstRoot|undefined;
+    walkPython(root,n=>{if(n.type==='call'&&n.childForFieldName('function')?.text==='client.workflows.invoke')found=n;});
+    assert.ok(found); return found;
+   };
+   const a=locate(firstRoot),b=locate(secondRoot);
+   const answer=(c:typeof a)=>[pythonInput(pythonChildren(c.childForFieldName('arguments')!)[1]??null),pythonOutput(c)];
+   const old=answer(a), fresh=answer(b), again=answer(a);
+   return {samePosition:a.startIndex===b.startIndex,differentTree:a.tree!==b.tree,old,fresh,again};
+  }));
+  assert.ok(python,'both actual Python parses and callbacks must complete');
+  assert.equal(python.samePosition,true);assert.equal(python.differentTree,true);
+  assert.deepEqual(python.old,expected('one'));assert.deepEqual(python.fresh,expected('two'));assert.deepEqual(python.again,expected('one'));
+  const j=withJavaTree(body('java','one'),firstRoot=>withJavaTree(body('java','two'),secondRoot=>{
+   const locate=(root:typeof firstRoot)=>{
+    let found:typeof firstRoot|undefined;
+    walkJava(root,n=>{if(n.type==='method_invocation'&&n.childForFieldName('name')?.text==='invoke')found=n;});
+    assert.ok(found);return found;
+   };
+   const a=locate(firstRoot),b=locate(secondRoot);
+   const answer=(c:typeof a)=>[javaInput(javaArgs(c)[1]??null),javaOutput(c)];
+   const old=answer(a),fresh=answer(b),again=answer(a);
+   return {samePosition:a.startIndex===b.startIndex,differentTree:a.tree!==b.tree,old,fresh,again};
+  }));
+  assert.ok(j,'both actual Java parses and callbacks must complete');
+  assert.equal(j.samePosition,true);assert.equal(j.differentTree,true);
+  assert.deepEqual(j.old,expected('one'));assert.deepEqual(j.fresh,expected('two'));assert.deepEqual(j.again,expected('one'));
+ } finally {releaseTS();releasePY();releaseJava();releaseParsedSource();}
+});
+
+test('project detector failure after real key analysis truncates and next dispatch has fresh answers', async () => {
+ const root=mkdtempSync(join(tmpdir(),'swfte-populated-reference-failure-'));
+ try {
+  for(const language of ['typescript','python','java'] as const) {
+   const file=join(root,language==='typescript'?'caller.ts':language==='python'?'caller.py':'Caller.java');
+   const source=(suffix:string)=>language==='typescript'
+    ?ts(`const arg={key_${suffix}:1}; const r=client.workflows.invoke('wf_${suffix}',arg); console.log(r.outputs.out_${suffix});`)
+    :language==='python'?py(`    arg={'key_${suffix}':1}\n    r=client.workflows.invoke('wf_${suffix}',arg)\n    print(r.outputs['out_${suffix}'])`)
+    :java(`var arg=Map.of("key_${suffix}",1); var r=client.workflows().invoke("wf_${suffix}",arg); sink(r.getOutputs().get("out_${suffix}"));`);
+   writeFileSync(file,source('old'));
+   const real=(language==='typescript'?TS:language==='python'?PY:JAVA)[0]!;
+   let observed:DetectedSite[]=[];let populated=0;
+   const failing:Detector={id:'controlled-after-real-analysis',languages:[language],detect(f,c){
+    const actual=real.detect(f,c);observed=actual.sites;populated++;throw new Error('after real indexed analysis');
+   }};
+   const failed=await detectProject(root,{detectors:[failing]});
+   assert.equal(populated,1,language);assert.equal(failed.truncated,true,language);assert.deepEqual(failed.sites,[]);
+   assert.equal(observed.length,1,language);
+   assert.deepEqual([observed[0]!.inputKeys,observed[0]!.outputKeys],[['key_old'],['out_old']],language);
+   writeFileSync(file,source('new'));
+   const fresh=await detectProject(root,{detectors:[real]});
+   assert.equal(fresh.truncated,false,language);assert.equal(fresh.sites.length,1,language);
+   assert.deepEqual([fresh.sites[0]!.artifact.id,fresh.sites[0]!.inputKeys,fresh.sites[0]!.outputKeys],['wf_new',['key_new'],['out_new']],language);
+   assert.deepEqual([observed[0]!.inputKeys,observed[0]!.outputKeys],[['key_old'],['out_old']],language);
+  }
+ } finally {rmSync(root,{recursive:true,force:true});releaseTS();releasePY();releaseJava();releaseParsedSource();}
 });
