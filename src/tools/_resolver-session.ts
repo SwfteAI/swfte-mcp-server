@@ -3,7 +3,8 @@ import { z } from 'zod';
 // Scalar admission mirrors SetupContractValues and ResolverSession; additive wire data is retained.
 const javaBlank=(value:string)=>/^[\u0009-\u000d\u001c-\u0020\u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]*$/u.test(value);
 export const resolverSessionIdSchema=z.string().min(1).max(4096).refine(value=>!javaBlank(value)&&!/[\u0000-\u001f\u007f]/u.test(value));
-const text=resolverSessionIdSchema;
+export const setupContractText=resolverSessionIdSchema;
+const text=setupContractText;
 // Exact ISO_INSTANT parser retained from the independently reviewed prove.ts scalar implementation.
 const instantValue=(value:string):bigint|null=>{
   const match=/^(\d{4}|-\d{4,10}|\+\d{5,10})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?([Zz]|[+-]\d{2}:\d{2}(?::\d{2})?)$/.exec(value);
@@ -21,7 +22,8 @@ const instantValue=(value:string):bigint|null=>{
   return epoch< -31557014167219200000000000n||epoch>31556889864403199999999999n?null:epoch;
 };
 
-const timestamp=text.refine(value=>instantValue(value)!==null);
+export const setupContractInstant=text.refine(value=>instantValue(value)!==null);
+const timestamp=setupContractInstant;
 const integer=z.number().int().min(0).max(2147483647);
 const budget=z.object({maxSteps:integer,maxWallSeconds:integer,maxSpendUsd:z.number().finite().nonnegative()}).passthrough();
 export const resolverSessionSchema=z.object({

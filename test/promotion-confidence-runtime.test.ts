@@ -157,7 +157,7 @@ test('approved TREE upload uses exactly one actual source request',()=>fixture(a
   await uploadIntake(client,intake,'person-approved');
   assert.equal(calls.length,1);assert.equal(calls[0]!.path,'/v2/confidence/bundles');assert.deepEqual(calls[0]!.body,{...intake,approvalActionId:'person-approved'});
 },()=>({status:201,body:{id:'bundle'}})));
-const entry={task:{key:'node-key',artifactKind:'workflow',artifactId:'owned',blocksSandbox:true,state:'NEEDS_USER',resolutionOptions:[{id:'key',type:'API_KEY',label:'Choose existing key'}]},contentHash:hash,revision:2,updatedAt:'2026-10-01T00:00:00Z'};
+const entry={task:{key:'node-key',kind:'record',required:true,derived:true,artifactKind:'workflow',artifactId:'owned',blocksSandbox:true,state:'NEEDS_USER',resolutionOptions:[{id:'key',type:'API_KEY',label:'Choose existing key'}]},contentHash:hash,revision:2,updatedAt:'2026-10-01T00:00:00Z'};
 test('stale task revision cannot produce a resolve effect',()=>fixture(async(client,calls)=>{
   await assert.rejects(tool('swfte_resolve_setup_task',{artifact:{kind:'workflow',id:'owned'},taskKey:'node-key',optionId:'key',environment:'SANDBOX',value:{handle:'secret-handle'},expectedContentHash:hash,expectedRevision:1},client),/STALE_CONTENT/);
   assert.equal(calls.length,1);assert.equal(calls[0]!.method,'GET');
@@ -322,7 +322,7 @@ test('actual setup authentication and outage refusals never fallback or replay',
   },()=>({status,body:{code:'SETUP_AUTHORITY_OR_PROVIDER_UNAVAILABLE'}}));
 });
 test('actual setup unresolved connection and additive Task data remain explicit without OAuth effects',()=>{
-  const entries=[{task:{key:'native-task',kind:'connection',artifactKind:'workflow',artifactId:'owned',state:'NEEDS_USER',provider:'slack',resolutionOptions:[],future:{source:'actual-server-additive'}},contentHash:hash,revision:4,updatedAt:'2026-10-02T12:00:00Z'}];
+  const entries=[{task:{key:'native-task',kind:'connection',required:true,derived:true,blocksSandbox:true,artifactKind:'workflow',artifactId:'owned',state:'NEEDS_USER',provider:'slack',resolutionOptions:[],future:{source:'actual-server-additive'}},contentHash:hash,revision:4,updatedAt:'2026-10-02T12:00:00Z'}];
   return fixture(async(client,calls)=>{
     const result:any=await tool('swfte_connections_check',{workflowId:'owned',artifact:{kind:'workflow',id:'owned'},connect:true},client);
     assert.equal(result.source,'server-setup');assert.equal(result.ok,false);assert.deepEqual(result.missing,['slack']);assert.deepEqual(result.setupTasks,entries);assert.equal(result.requires[0].connected,false);assert.equal(calls.length,1);

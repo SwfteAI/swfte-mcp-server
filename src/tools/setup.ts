@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ToolDefinition } from './_types.js';
-import type { SetupTaskEntry, ProofRecord, ResolverSession } from '../contracts/setup-proof-v1.js';
+import type { ProofRecord, ResolverSession } from '../contracts/setup-proof-v1.js';
+import {ownedSetupTaskEntries,resolvedSetupTaskEntry} from './_setup-task.js';
 import {resolverEvents} from './_resolver-events.js';
 import {ownedResolverSession,cancelledResolverSession,resolverTerminal,resolverSessionIdSchema} from './_resolver-session.js';
 
@@ -28,14 +29,14 @@ export const setupTools: ToolDefinition[] = [
     name:'swfte_setup', title:'Read current setup tasks', readOnly:true,
     description:'Read server-owned, current-content setup tasks for any supported artifact. Entries include authoritative content hash and revision. Missing runtime and authorization failures remain explicit.',
     inputSchema:z.object({ artifact:SetupArtifactSchema }).strict(),
-    execute: (input,{client}) => client.request<SetupTaskEntry[]>({method:'GET',path:`${artifactPath(input.artifact)}/setup`}),
+    execute: async(input,{client}) => ownedSetupTaskEntries(await client.request({method:'GET',path:`${artifactPath(input.artifact)}/setup`,retries:0}),input.artifact,client.configuredWorkspaceId),
   },
   {
     name:'swfte_resolve_setup_task', title:'Resolve one current setup task',
     description:'Resolve through one advertised server option, with current hash and revision CAS. Secret values must already be server-owned handles. This cannot waive missing probe evidence or promote anything.',
     inputSchema:z.object({ artifact:SetupArtifactSchema, taskKey:z.string().min(1).max(400), optionId:z.string().min(1).max(200), environment:z.string().regex(/^(SANDBOX|LIVE:[A-Za-z0-9_.:-]+)$/), value:value.optional(), expectedContentHash:hash, expectedRevision:z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict(),
     execute:async(input,{client}) => {
-      const entries=await client.request<SetupTaskEntry[]>({method:'GET',path:`${artifactPath(input.artifact)}/setup`});
+      const entries=ownedSetupTaskEntries(await client.request({method:'GET',path:`${artifactPath(input.artifact)}/setup`,retries:0}),input.artifact,client.configuredWorkspaceId);
       if (!Array.isArray(entries)) throw new Error('SETUP_RESPONSE_INVALID');
       const matches=entries.filter(entry=>entry?.task?.key===input.taskKey);
       if(matches.length>1)throw new Error('SETUP_RESPONSE_INVALID');
@@ -49,7 +50,7 @@ export const setupTools: ToolDefinition[] = [
       if(task.task.capability==='managed_database.read.provision'&&(input.artifact.kind!=='workflow'||input.environment!=='SANDBOX'
         ||option.id!=='provision-read'||option.type!=='PROVISION'||!input.value||!('handle' in input.value)
         ||!/^managed:action:act_[0-9a-f]{32}$/.test(input.value.handle)))throw new Error('MANAGED_READ_APPROVED_ACTION_REQUIRED');
-      return client.request<SetupTaskEntry>({method:'POST',path:`${artifactPath(input.artifact)}/setup/${encodeURIComponent(input.taskKey)}/resolve`,body:{optionId:input.optionId,environment:input.environment,value:input.value,expectedContentHash:input.expectedContentHash,expectedRevision:input.expectedRevision},retries:0});
+      return resolvedSetupTaskEntry(await client.request({method:'POST',path:`${artifactPath(input.artifact)}/setup/${encodeURIComponent(input.taskKey)}/resolve`,body:{optionId:input.optionId,environment:input.environment,value:input.value,expectedContentHash:input.expectedContentHash,expectedRevision:input.expectedRevision},retries:0}),input.artifact,task,client.configuredWorkspaceId);
     },
   },
   {
