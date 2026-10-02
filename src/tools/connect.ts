@@ -235,7 +235,7 @@ export const connectTools: ToolDefinition[] = [
         const unresolved=connections.filter(entry=>entry.task.state!=='RESOLVED'&&entry.task.state!=='AUTO_BOUND');
         return {workflowId:input.workflowId,artifact,source:'server-setup',setupTasks,requires:connections.map(entry=>({provider:entry.task.provider,taskKey:entry.task.key,connected:entry.task.state==='RESOLVED'||entry.task.state==='AUTO_BOUND',resolutionOptions:entry.task.resolutionOptions})),missing:unresolved.map(entry=>entry.task.provider),ok:unresolved.length===0,nextStep:unresolved.length?'Use the current server resolution option and swfte_resolve_setup_task. OAuth still requires the user to finish provider sign-in.':undefined};
       } catch(error) {
-        if(!(error instanceof SwfteApiError)||error.status!==404)throw error;
+        if(input.artifact!==undefined || !(error instanceof SwfteApiError)||error.status!==404)throw error;
       }
       const workflow = await getAdapter('workflow').get!(client, input.workflowId);
       const required = await requiredConnections(client, workflow);

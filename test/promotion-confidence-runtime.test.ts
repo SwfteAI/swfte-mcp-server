@@ -292,3 +292,39 @@ test('durable bundle deletion matching configured workspace retains server actor
  assert.equal(receipt.identity.workspaceId,'ws');assert.equal(receipt.identity.actorId,'actor');assert.deepEqual(receipt,deletionReceipt());
  assert.equal(calls.length,3);assert.deepEqual(calls[2]!.body,{snapshotHash:hash});
 },deletionReply,'ws'));
+
+// Actual client HTTP artifact refusal controls; no legacy provider lookup may replace explicit identity.
+for(const kind of ['workflow','agent','chatflow','widget','application','journey','mcp','finetune'])
+  test(`explicit ${kind} setup404 cannot fallback to a different workflow`,()=>fixture(async(client,calls)=>{
+    await assert.rejects(tool('swfte_connections_check',{workflowId:'different-workflow',artifact:{kind,id:'owned/artifact'},connect:true},client),error=>error instanceof SwfteApiError&&error.status===404);
+    assert.equal(calls.length,1);assert.equal(calls[0]!.method,'GET');assert.equal(calls[0]!.path,`/v2/artifacts/${kind}/owned%2Fartifact/setup`);assert.equal(calls[0]!.authorization,'Bearer pat_test');assert.equal(calls[0]!.body,undefined);
+  },()=>({status:404,body:{code:'CURRENT_ARTIFACT_UNAVAILABLE'}})));
+test('explicit same workflow setup404 stays a refusal rather than legacy readiness',()=>fixture(async(client,calls)=>{
+  await assert.rejects(tool('swfte_connections_check',{workflowId:'owned',artifact:{kind:'workflow',id:'owned'}},client),error=>error instanceof SwfteApiError&&error.status===404);
+  assert.equal(calls.length,1);assert.equal(calls[0]!.path,'/v2/artifacts/workflow/owned/setup');
+},()=>({status:404,body:{code:'SETUP_DISABLED'}})));
+test('omitted legacy defaultworkflow fallback retains actual native workflow catalog and connection reads',()=>fixture(async(client,calls)=>{
+  const result:any=await tool('swfte_connections_check',{workflowId:'legacy'},client);
+  assert.equal(result.source,'older-server-local-fallback');assert.equal(result.workflowId,'legacy');assert.equal(result.ok,true);assert.deepEqual(result.missing,[]);assert.equal(result.requires[0].provider,'slack');
+  assert.equal(calls.length,4);assert.equal(calls[0]!.path,'/v2/artifacts/workflow/legacy/setup');assert.equal(calls[1]!.path,'/v2/workflows/legacy');
+  assert.ok(calls.some(c=>c.path==='/v2/workflows/nodes/catalog'));assert.ok(calls.some(c=>c.path==='/v1/secrets/oauth/integrations'));assert.ok(calls.every(c=>c.method==='GET'&&c.authorization==='Bearer pat_test'&&c.body===undefined));
+},call=>{
+  if(call.path.endsWith('/setup'))return{status:404,body:{code:'OLDER_SERVER_SETUP_ABSENT'}};
+  if(call.path==='/v2/workflows/legacy')return{body:{workflowId:'legacy',nodes:[{id:'node',type:'SLACK'}]}};
+  if(call.path==='/v2/workflows/nodes/catalog')return{body:[{type:'SLACK',oauthProvider:'slack'}]};
+  if(call.path==='/v1/secrets/oauth/integrations')return{body:{integrations:{Slack:[{provider:'slack'}]}}};
+  throw new Error(`Unexpected fallback effect or route ${call.path}`);
+}));
+test('actual setup authentication and outage refusals never fallback or replay',async()=>{
+  for(const status of [401,403,503])for(const explicit of [false,true])await fixture(async(client,calls)=>{
+    await assert.rejects(tool('swfte_connections_check',{workflowId:'owned',...(explicit?{artifact:{kind:'workflow',id:'owned'}}:{})},client),error=>error instanceof SwfteApiError&&error.status===status);
+    assert.equal(calls.length,1);assert.equal(calls[0]!.path,'/v2/artifacts/workflow/owned/setup');assert.equal(calls[0]!.method,'GET');
+  },()=>({status,body:{code:'SETUP_AUTHORITY_OR_PROVIDER_UNAVAILABLE'}}));
+});
+test('actual setup unresolved connection and additive Task data remain explicit without OAuth effects',()=>{
+  const entries=[{task:{key:'native-task',kind:'connection',artifactKind:'workflow',artifactId:'owned',state:'NEEDS_USER',provider:'slack',resolutionOptions:[],future:{source:'actual-server-additive'}},contentHash:hash,revision:4,updatedAt:'2026-10-02T12:00:00Z'}];
+  return fixture(async(client,calls)=>{
+    const result:any=await tool('swfte_connections_check',{workflowId:'owned',artifact:{kind:'workflow',id:'owned'},connect:true},client);
+    assert.equal(result.source,'server-setup');assert.equal(result.ok,false);assert.deepEqual(result.missing,['slack']);assert.deepEqual(result.setupTasks,entries);assert.equal(result.requires[0].connected,false);assert.equal(calls.length,1);
+  },()=>({body:entries}));
+});
