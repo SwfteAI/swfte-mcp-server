@@ -32,7 +32,7 @@ export interface CatalogProofView {
   deviations: Array<{ scenarioIds: string[]; reason: string; declaredBy: string; declaredAt: string }>;
   parentEvidence: unknown | null; parentSuiteOnCopy: ForkProofResult | null;
   ownEvidence: EvidenceSummary; confidence: unknown | null;
-  bundle: { entryRef: string; contentHash: string; bundleDigest: string; signatureValid: boolean; downloadPath: string } | null;
+  bundle: { entryRef: string; contentHash: string; suiteHash: string; bundleDigest: string; signatureValid: boolean; downloadPath: string } | null;
   dependencyGaps: string[];
 }
 export interface ShelfPage {
@@ -56,7 +56,9 @@ export async function getCatalogProof(client: SwfteClient, catalogRef: string, c
   const view = await client.request<CatalogProofView>({ method: 'GET', path: `${catalogPath(ref)}/proof-suite`, query: { contentHash } });
   if (!view || view.entryRef !== ref.ref || view.contentHash !== contentHash) throw new CatalogProofBindingError();
   boundSuite(view.suite, ref.ref);
-  if (view.bundle && (view.bundle.entryRef !== ref.ref || view.bundle.contentHash !== contentHash)) throw new CatalogProofBindingError();
+  if (view.bundle && (view.bundle.entryRef !== ref.ref || view.bundle.contentHash !== contentHash
+      || view.bundle.suiteHash !== view.suite.suiteHash || view.bundle.signatureValid !== true
+      || !ContentHash.safeParse(view.bundle.bundleDigest).success)) throw new CatalogProofBindingError();
   return view;
 }
 export async function getCatalogDelta(client: SwfteClient, catalogRef: string, contentHash: string): Promise<CatalogDeltaView> {

@@ -1,6 +1,6 @@
 # Tool reference
 
-`@swfte/mcp-server` exposes **239 tools**, of which a curated **105** are
+`@swfte/mcp-server` exposes **250 tools**, of which a curated **105** are
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
 
 Tools that take a `workspaceId` only honour it for **API-key** credentials. A
@@ -53,6 +53,17 @@ with `kind:"agent"`), `swfte_connect_status` (same endpoint as
 loop over `swfte_verify`), `swfte_workflows_validate` (covered by
 `swfte_validate` with `kind:"workflow"`) and `swfte_agents_wizard_quick`
 (covered by `swfte_build` + `swfte_create`, with a review step).
+
+`swfte_prove_verdict` also uses `extras`. It reads the current tree's authoritative
+proving verdict; a local label or an unavailable verifier cannot supply proof.
+
+### Private evidence groups
+
+`codemap` advertises `swfte_code_map`, `swfte_code_impact` and `swfte_code_fix`.
+`twins` advertises `swfte_twins_push` and `swfte_twins_status`. Source upload
+requires explicit consent and the shared intake service. `marketplace` includes
+`swfte_catalog_proof`, `swfte_catalog_shelves`, `swfte_extend_proof_suite`,
+`swfte_declare_deviation` and `swfte_rerun_parent_suite`.
 
 ## Compliance control plane (core)
 

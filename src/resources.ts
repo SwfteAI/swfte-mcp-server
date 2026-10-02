@@ -18,6 +18,7 @@ import {
   parseCatalogRef,
 } from './catalog.js';
 import type { ToolDefinition } from './tools/_types.js';
+import { CODEMAP_LENS_TEMPLATE, lensEnabled, parseLensUri, readCodeMapLens } from './codemap/lens.js';
 
 export const CAPABILITIES_URI = 'swfte://capabilities';
 export const CATALOG_TEMPLATE = 'swfte://catalog/{kind}/{id}';
@@ -41,6 +42,8 @@ export const RESOURCE_TEMPLATES = [
       `${CATALOG_KINDS.join(', ')}.`,
     mimeType: 'application/json',
   },
+  ...(lensEnabled() ? [{ uriTemplate: CODEMAP_LENS_TEMPLATE, name: 'Private code-map lens',
+    description: 'Read-only authenticated call-site metadata for a file or keyed path hash; no source text.', mimeType: 'application/json' }] : []),
 ];
 
 export class ResourceNotFoundError extends Error {}
@@ -83,6 +86,12 @@ export async function readResource(
       },
       ...(local && typeof local === 'object' ? (local as Record<string, unknown>) : {}),
     };
+    return { uri, mimeType: 'application/json', text: JSON.stringify(body, null, 2) };
+  }
+  if (lensEnabled() && uri.startsWith('swfte://codemap/')) {
+    const query = parseLensUri(uri);
+    if (!query) throw new ResourceNotFoundError('Invalid code-map lens URI.');
+    const body = await readCodeMapLens(await ctx.client(), query);
     return { uri, mimeType: 'application/json', text: JSON.stringify(body, null, 2) };
   }
   const ref = catalogRefFromUri(uri);

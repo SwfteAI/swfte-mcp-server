@@ -4,6 +4,8 @@ import { assertLocalFilesystem, confineDirectory, confinementRoot, confinePath, 
 import { z } from 'zod';
 import { unzipSync, zipSync } from 'fflate';
 import type { ToolDefinition } from './_types.js';
+import type { PlannedWrite } from '../fsguard.js';
+import { recordMcpWrittenFiles } from '../codemap/provenance.js';
 
 const EXEC = '/v2/workflows/execution';
 
@@ -20,6 +22,14 @@ function safeJoin(root: string, entry: string): string {
     throw new Error(`Refusing to write outside the destination: ${entry}`);
   }
   return target;
+}
+
+function exportFileState(target: string) {
+  const previous = existsSync(target) ? lstatSync(target) : null;
+  if (previous && (!previous.isFile() || previous.nlink !== 1)) {
+    throw new PathConfinementError('Refusing export to a non-regular or hardlinked destination file.');
+  }
+  return previous;
 }
 
 function walk(dir: string, root = dir, acc: string[] = []): string[] {
@@ -44,8 +54,8 @@ function walk(dir: string, root = dir, acc: string[] = []): string[] {
 export const EXPORT_MARKER = '.swfte-export.json';
 
 function hasExportMarker(dir: string): boolean {
-  const marker = join(dir, EXPORT_MARKER);
-  if (!existsSync(marker) || !lstatSync(marker).isFile()) return false;
+  const marker = confinePath(join(dir, EXPORT_MARKER));
+  if (!exportFileState(marker)) return false;
   try {
     return JSON.parse(readFileSync(marker, 'utf8'))?.writtenBy === 'swfte_export_src';
   } catch {
@@ -54,7 +64,7 @@ function hasExportMarker(dir: string): boolean {
 }
 
 /** Resolve an export destination under the working directory and clear it only if we own it. */
-export function prepareExportDest(destDir: string, overwrite: boolean | undefined): string {
+function validateExportDest(destDir: string, overwrite: boolean | undefined): string {
   const dest = confinePath(destDir);
   if (dest === resolve(confinementRoot())) {
     throw new PathConfinementError('Refusing to export into the working directory itself: pass a subdirectory as destDir.');
@@ -69,9 +79,16 @@ export function prepareExportDest(destDir: string, overwrite: boolean | undefine
             'so it is not deleted. Choose a new destDir, or remove the directory yourself.'
         );
       }
-      rmSync(dest, { recursive: true, force: true });
     }
   }
+  // Even a non-overwriting export must refuse a linked ownership marker before download.
+  exportFileState(confinePath(join(dest, EXPORT_MARKER)));
+  return dest;
+}
+
+export function prepareExportDest(destDir: string, overwrite: boolean | undefined): string {
+  const dest = validateExportDest(destDir, overwrite);
+  if (overwrite && existsSync(dest)) rmSync(dest, { recursive: true, force: true });
   mkdirSync(dest, { recursive: true });
   return dest;
 }
@@ -113,25 +130,46 @@ export const codeTools: ToolDefinition[] = [
     execute: async (input, { client, localFilesystem }) => {
       assertLocalFilesystem(localFilesystem, 'swfte_export_src');
       // Validate the destination before downloading anything.
-      confinePath(input.destDir);
+      const admittedDest = validateExportDest(input.destDir, input.overwrite);
       const { bytes, headers } = await client.getBinary(
         `${EXEC}/${encodeURIComponent(input.workflowId)}/download-src`,
         { timeoutMs: 180_000 }
       );
 
-      const dest = prepareExportDest(input.destDir, input.overwrite);
-
       const files = unzipSync(bytes);
+      // Validate the entire archive before preparing (and potentially clearing) the destination.
+      // These are path admissions, not a descriptor/ancestor-race guarantee.
+      const archiveEntries = Object.entries(files).filter(([name]) => !name.endsWith('/') && name !== EXPORT_MARKER);
+      for (const name of Object.keys(files)) {
+        const target = confinePath(safeJoin(admittedDest, name));
+        if (!name.endsWith('/') && name !== EXPORT_MARKER) exportFileState(target);
+      }
+      const dest = prepareExportDest(input.destDir, input.overwrite);
       const written: string[] = [];
+      const committed: PlannedWrite[] = [];
+      const root = confinementRoot();
       const steps: Array<{ file: string; stepId?: string; stepType?: string; userRegions: string[] }> = [];
+      const marker = confinePath(safeJoin(dest, EXPORT_MARKER));
+      exportFileState(marker);
 
-      for (const [name, data] of Object.entries(files)) {
-        if (name.endsWith('/') || name === EXPORT_MARKER) continue;
+      // Validate every destination before the first source write so a later forbidden entry
+      // cannot leave earlier source writes with an apparently successful local receipt.
+      const planned = archiveEntries
+        .map(([name, data]) => {
+          const target = confinePath(safeJoin(dest, name));
+          return { name, data, target, previous: exportFileState(target) };
+        });
+
+      for (const { name, data, target, previous } of planned) {
         // Re-confined per entry: a symlink already inside dest must not carry a write out of it.
-        const target = confinePath(safeJoin(dest, name));
+        confinePath(target);
+        exportFileState(target);
+        const unchanged = previous !== null && readFileSync(target).equals(Buffer.from(data));
         mkdirSync(dirname(target), { recursive: true });
-        writeFileSync(target, data);
+        if (!unchanged) writeFileSync(target, data);
         written.push(name);
+        committed.push({ path: relative(root, target).split(sep).join('/'),
+          action: unchanged ? 'unchanged' : previous ? 'overwrite' : 'create', bytes: data.byteLength });
 
         if (name.startsWith('src/steps/') && name.endsWith('.rs') && !name.endsWith('mod.rs')) {
           const parsed = stepHeader(Buffer.from(data).toString('utf8'));
@@ -139,10 +177,14 @@ export const codeTools: ToolDefinition[] = [
         }
       }
 
+      // Re-admit immediately before the marker write; path races still need shared primitive repair.
+      confinePath(marker);
+      exportFileState(marker);
       writeFileSync(
-        join(dest, EXPORT_MARKER),
+        marker,
         JSON.stringify({ writtenBy: 'swfte_export_src', workflowId: input.workflowId }, null, 2) + '\n'
       );
+      recordMcpWrittenFiles({ root, inline: false }, committed);
 
       return {
         workflowId: input.workflowId,

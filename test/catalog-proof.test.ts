@@ -27,6 +27,14 @@ test('delta response itself is bound to exact entry, content and suite', async (
   await assert.rejects(getCatalogDelta(fixture({ ...response, contentHash: suiteHash }).client, suite.entryRef, hash), CatalogProofBindingError);
   await assert.rejects(getCatalogDelta(fixture({ ...response, entryRef: 'workflow:sibling' }).client, suite.entryRef, hash), CatalogProofBindingError);
 });
+test('signed bundle response must bind the current suite as well as the same artifact', async () => {
+  const bundle = { entryRef: suite.entryRef, contentHash: hash, suiteHash, bundleDigest: 'c'.repeat(64), signatureValid: true, downloadPath: '/bundle' };
+  const response = { entryRef: suite.entryRef, contentHash: hash, suite, bundle };
+  assert.strictEqual(await getCatalogProof(fixture(response).client, suite.entryRef, hash), response);
+  for (const changed of [{ suiteHash: 'd'.repeat(64) }, { suiteHash: undefined }, { signatureValid: false }, { bundleDigest: 'unsigned' }]) {
+    await assert.rejects(getCatalogProof(fixture({ ...response, bundle: { ...bundle, ...changed } }).client, suite.entryRef, hash), CatalogProofBindingError);
+  }
+});
 test('definitions accept node references but reject claimed measured coverage, PASS or inherited authority', async () => {
   const f = fixture(suite); const definition = { scenarioId: 'delta', definition: { input: {} }, severity: 'MAJOR' as const, nodeIds: ['changed'] };
   await extendCatalogSuite(f.client, suite.entryRef, { expectedContentHash: hash, expectedSuiteHash: suiteHash, scenarios: [definition] });

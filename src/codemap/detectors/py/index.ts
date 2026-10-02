@@ -13,6 +13,11 @@ interface Analysis {
 const EMPTY: Analysis = { sites: [], implementations: [], envVarNames: [] };
 let last: { relPath: string; text: string; ctx: DetectContext; generation: number; result: Analysis } | null = null;
 
+/** End the file dispatch without retaining its customer source text or analysis. */
+export function releaseAnalysis(): void {
+  last = null;
+}
+
 /** One parse per file, shared by the four detectors (they run back to back on the same file). */
 function analyze(file: SourceFile, ctx: DetectContext): Analysis {
   if (last && last.relPath === file.relPath && last.text === file.text && last.ctx === ctx && last.generation === grammarGeneration) return last.result;

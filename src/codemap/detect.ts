@@ -5,6 +5,10 @@
  * manifest serializer (manifest.ts) is the allowlist that decides that.
  */
 import { DETECTORS } from './detectors/index.js';
+import { releaseParsedSource } from './detectors/ts/parse.js';
+import { releaseAnalysis as releaseTypeScriptAnalysis } from './detectors/ts/index.js';
+import { releaseAnalysis as releasePythonAnalysis } from './detectors/py/index.js';
+import { releaseAnalysis as releaseJavaAnalysis } from './detectors/java/index.js';
 import { cmp } from './fingerprint.js';
 import type { DetectedSite, Detector, Implementation, SourceFile } from './types.js';
 import {
@@ -43,7 +47,23 @@ export interface DetectOutcome {
 
 const ENV_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
 
+function releaseSourceCaches(): void {
+  releaseParsedSource();
+  releaseTypeScriptAnalysis();
+  releasePythonAnalysis();
+  releaseJavaAnalysis();
+}
+
 export async function detectProject(root: string, opts: DetectOptions = {}): Promise<DetectOutcome> {
+  try {
+    return scanProject(root, opts);
+  } finally {
+    // Empty scans and failures before the first detector are also privacy boundaries.
+    releaseSourceCaches();
+  }
+}
+
+function scanProject(root: string, opts: DetectOptions): DetectOutcome {
   const detectors = opts.detectors ?? DETECTORS;
   const walkOpts = {
     skipDirs: opts.skipDirs ?? [...DEFAULT_SKIP_DIRS],
@@ -64,35 +84,39 @@ export async function detectProject(root: string, opts: DetectOptions = {}): Pro
   let order = 0;
 
   for (const entry of walked.files) {
-    const read = readSource(reader, entry, walkOpts);
-    if (!('text' in read)) {
-      // A file that became unreadable or oversized after the walk leaves the map incomplete.
-      if (read.skipped === 'unreadable') truncated = true;
-      continue;
-    }
-    let file: SourceFile = { relPath: entry.relPath, language: entry.language, text: read.text };
-    if (opts.preprocess) {
-      const p = opts.preprocess(file);
-      // A preprocessor may rewrite the text, never which file or language it is.
-      file = { relPath: entry.relPath, language: entry.language, text: p.text };
-    }
-    const ctx = contextOf(entry.relPath, walked.locks);
-    filesScanned++;
-    packages.set(entry.relPath, packageOf(entry.relPath, walked.packages));
-    for (const d of detectors) {
-      if (!d.languages.includes(file.language)) continue;
-      let res;
-      try {
-        res = d.detect(file, ctx);
-      } catch {
-        // One file a detector cannot handle must not end the scan, but the map is then incomplete.
-        truncated = true;
+    try {
+      const read = readSource(reader, entry, walkOpts);
+      if (!('text' in read)) {
+        // A file that became unreadable or oversized after the walk leaves the map incomplete.
+        if (read.skipped === 'unreadable') truncated = true;
         continue;
       }
-      // A detector reports on the file it was given; relPath is pinned to it.
-      for (const s of res.sites) sites.push({ site: { ...s, relPath: entry.relPath }, order: order++ });
-      for (const i of res.implementations) implementations.push({ relPath: entry.relPath, line: i.line, alias: i.alias });
-      for (const n of res.envVarNames) if (ENV_NAME.test(n)) envVarNames.add(n);
+      let file: SourceFile = { relPath: entry.relPath, language: entry.language, text: read.text };
+      if (opts.preprocess) {
+        const p = opts.preprocess(file);
+        // A preprocessor may rewrite the text, never which file or language it is.
+        file = { relPath: entry.relPath, language: entry.language, text: p.text };
+      }
+      const ctx = contextOf(entry.relPath, walked.locks);
+      filesScanned++;
+      packages.set(entry.relPath, packageOf(entry.relPath, walked.packages));
+      for (const d of detectors) {
+        if (!d.languages.includes(file.language)) continue;
+        let res;
+        try {
+          res = d.detect(file, ctx);
+        } catch {
+          // One file a detector cannot handle must not end the scan, but the map is then incomplete.
+          truncated = true;
+          continue;
+        }
+        // A detector reports on the file it was given; relPath is pinned to it.
+        for (const s of res.sites) sites.push({ site: { ...s, relPath: entry.relPath }, order: order++ });
+        for (const i of res.implementations) implementations.push({ relPath: entry.relPath, line: i.line, alias: i.alias });
+        for (const n of res.envVarNames) if (ENV_NAME.test(n)) envVarNames.add(n);
+      }
+    } finally {
+      releaseSourceCaches();
     }
   }
 

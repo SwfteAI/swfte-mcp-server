@@ -5,6 +5,7 @@
  * folding to one) is reported unresolved; it is never guessed.
  */
 import ts from 'typescript';
+import { numericVersion, literalRevision } from '../../revisions.js';
 import { GENERATED_MARKER } from '../../../codegen.js';
 import { isGeneratedByOtherTool } from '../../walk.js';
 import type { DetectContext, DetectedSite, DetectResult, Implementation, LockBinding, Op, SourceFile } from '../../types.js';
@@ -21,13 +22,14 @@ const KIND: Record<Resource, string> = { workflows: 'workflow', agents: 'agent',
 
 /** SDK methods that name an artifact in their first argument, and what they do. */
 const SDK_OPS: Record<Resource, Record<string, Op>> = {
-  workflows: { invoke: 'run', invokeAndWait: 'run', execute: 'run', invokeStream: 'stream', stream: 'stream', getExecutionHistory: 'read-output' },
+  workflows: { invoke: 'run', invokeAndWait: 'run', invokeVersion: 'run', invokeVersionAndWait: 'run', execute: 'run', invokeStream: 'stream', stream: 'stream', getExecutionHistory: 'read-output' },
   agents: { chat: 'chat', chatStream: 'stream', streamChat: 'stream', stream: 'stream' },
   chatflows: { startSession: 'chat', stats: 'read-output', listSessions: 'read-output' },
 };
 /** SDK methods whose second argument is the artifact input object. */
 const INPUT_ARG: Partial<Record<Resource, Set<string>>> = {
-  workflows: new Set(['invoke', 'invokeAndWait', 'execute', 'invokeStream', 'stream']),
+  workflows: new Set(['invoke', 'invokeAndWait', 'invokeVersion', 'invokeVersionAndWait', 'execute', 'invokeStream', 'stream']),
+  chatflows: new Set(['test']),
 };
 
 function splitRef(ref: string): { kind: string; id: string } | null {
@@ -223,8 +225,12 @@ function receiverOk(root: ts.Expression, imports: ImportMap, depth = 0): boolean
 }
 
 /** `X.<resource>` or an identifier destructured from `X.<resource>` / `X`: the resource and the client root. */
-function resourceOf(recv: ts.Expression): { resource: Resource; root: ts.Expression } | null {
+function resourceOf(recv: ts.Expression): { resource: Resource; root: ts.Expression; builder?: boolean } | null {
   const x = unwrap(recv);
+  if (ts.isPropertyAccessExpression(x) && x.name.text === 'builder') {
+    const owner = resourceOf(x.expression);
+    return owner?.resource === 'chatflows' && !owner.builder ? { ...owner, builder: true } : null;
+  }
   if (ts.isPropertyAccessExpression(x) && (x.name.text === 'workflows' || x.name.text === 'agents' || x.name.text === 'chatflows')) {
     return { resource: x.name.text as Resource, root: x.expression };
   }
@@ -238,31 +244,40 @@ function resourceOf(recv: ts.Expression): { resource: Resource; root: ts.Express
   return null;
 }
 
+function literalVersion(expression: ts.Expression | undefined): string | null {
+  if (!expression) return null;
+  const value = unwrap(expression);
+  if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) return literalRevision(value.text);
+  return ts.isNumericLiteral(value) ? numericVersion(Number(value.text)) : null;
+}
+
 function sdkSites(file: SourceFile, sf: ts.SourceFile, imports: ImportMap, out: DetectedSite[]): void {
   const visit = (n: ts.Node): void => {
     if (ts.isCallExpression(n)) {
       const callee = unwrap(n.expression);
       if (ts.isPropertyAccessExpression(callee)) {
         const rc = resourceOf(callee.expression);
-        const op = rc ? SDK_OPS[rc.resource][callee.name.text] : undefined;
+        const name = callee.name.text;
+        const op = rc?.builder ? name === 'test' ? 'chat' : undefined : rc ? SDK_OPS[rc.resource][name] : undefined;
         if (rc && op && receiverOk(rc.root, imports)) {
           const r = resolveId(n.arguments[0]);
-          const unresolved = r.id === null;
-          const name = callee.name.text;
+          const versioned = name === 'invokeVersion' || name === 'invokeVersionAndWait';
+          const pin = versioned ? literalVersion(n.arguments[1]) : null;
+          const unresolved = r.id === null || versioned && pin === null;
           out.push({
             ...siteBase(file, sf, n),
             category: unresolved ? 'dynamic' : 'managed',
             op,
             artifact: {
               kind: KIND[rc.resource],
-              id: r.id,
+              id: unresolved ? null : r.id,
               unresolved,
               ...(r.envVarName ? { envVarName: r.envVarName } : {}),
-              pinnedVersion: null,
+              pinnedVersion: pin,
               alias: null,
             },
             contractHash: null,
-            inputKeys: INPUT_ARG[rc.resource]?.has(name) ? inputKeysOf(n.arguments[1]) : [],
+            inputKeys: INPUT_ARG[rc.resource]?.has(name) ? inputKeysOf(n.arguments[versioned ? 2 : 1]) : [],
             outputKeys: op === 'read-output' ? [] : outputKeysOf(n),
           });
         }

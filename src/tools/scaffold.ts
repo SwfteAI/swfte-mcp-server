@@ -21,6 +21,7 @@ import { scanInline, scanProject, unavailableScan } from '../compliance.js';
 import { FRAMEWORKS } from '../stack.js';
 import { emitTelemetry } from '../telemetry.js';
 import type { ToolDefinition } from './_types.js';
+import { recordMcpWrittenFiles } from '../codemap/provenance.js';
 
 export { LOCK_FILE } from '../lock.js';
 export { CLIENT_ENV } from '../bake.js';
@@ -64,6 +65,7 @@ export const scaffoldTools: ToolDefinition[] = [
         force: input.force,
         pin: input.pin,
       });
+      recordMcpWrittenFiles(writer, res.files);
       // Counts only: this codebase is now bound to the hosted artifact. No path, framework or code.
       emitTelemetry({ client, config }, { event: 'scaffold', catalogRef: r.ref });
       // Scan what was just written (code only), like `swfte add`. Advisory: a
@@ -116,7 +118,7 @@ export const scaffoldTools: ToolDefinition[] = [
     execute: async (input, { client, config, localFilesystem }) => {
       assertLocalFilesystem(localFilesystem, 'swfte_sync', LOCAL_ONLY);
       const writer = new ConfinedWriter({ forbidden: [config.credential] });
-      return syncProject(
+      const result = await syncProject(
         { client, config, writer },
         {
           aliases: input.aliases,
@@ -126,6 +128,8 @@ export const scaffoldTools: ToolDefinition[] = [
           force: input.force,
         }
       );
+      recordMcpWrittenFiles(writer, result.files);
+      return result;
     },
   },
   {
@@ -175,7 +179,9 @@ export const scaffoldTools: ToolDefinition[] = [
         writer.assertNoSecrets('embed markup', content);
         if (!target) return { catalogRef: r.ref, embeddable: true, html: content, written: [], ...extra };
         writer.create(target, content, input.force);
-        return { catalogRef: r.ref, embeddable: true, html: content, written: writer.commit(), ...extra };
+        const written = writer.commit();
+        recordMcpWrittenFiles(writer, written);
+        return { catalogRef: r.ref, embeddable: true, html: content, written, ...extra };
       };
 
       if (r.kind === 'agent') {

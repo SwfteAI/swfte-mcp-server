@@ -591,6 +591,8 @@ ${chat ? `  /** The reply text: \`content\`, falling back to the legacy \`respon
 }
 
 export interface ClientOptions {
+  /** Explicit private code-map attribution; invalid IDs are omitted. */
+  callsite?: string;
   /** Defaults to process.env.SWFTE_API_KEY. A PAT (pat_…) or API key (sk-swfte-…). */
   apiKey?: string;
   /** Defaults to process.env.SWFTE_BASE_URL, then ${JSON.stringify(spec.defaultBaseUrl)}. */
@@ -628,10 +630,11 @@ function fill(path: string, values: Record<string, string>): string {
   });
 }
 
-async function call(opts: ClientOptions, method: string, path: string, body: unknown, deadline: number): Promise<any> {
+async function call(opts: ClientOptions, method: string, path: string, body: unknown, deadline: number, attribute = false): Promise<any> {
   const f = opts.fetch ?? fetch;
   const baseUrl = (opts.baseUrl ?? env('SWFTE_BASE_URL') ?? ${JSON.stringify(spec.defaultBaseUrl)}).replace(/\\/+$/, '');
   const headers: Record<string, string> = { Accept: 'application/json', 'X-Swfte-Client': SWFTE_CLIENT };
+  if (attribute && /^cs_[0-9a-f]{24}$/.test(opts.callsite ?? '')) headers['X-Swfte-Callsite'] = opts.callsite!;
   if (INVOKE.auth !== 'public') {
     const key = opts.apiKey ?? env('SWFTE_API_KEY');
     if (!key) throw new Error('SWFTE_API_KEY is not set (see .env.example).');
@@ -681,7 +684,7 @@ const outputOf = (s: any): unknown => s?.execution?.outputData ?? s?.outputData 
 export async function ${fn}(input: ${base}Input, opts: ClientOptions${optsRequired ? '' : ' = {}'}): Promise<InvokeResult<${base}Output>> {
   const deadline = Date.now() + (opts.timeoutMs ?? 300_000);
   const path = fill(INVOKE.path, { ${hasUserId ? "userId: opts.userId ?? 'swfte-client', " : ''}${placeholders.length ? '...opts.pathParams' : ''} });
-  const started = await call(opts, INVOKE.method, path, input, deadline);
+  const started = await call(opts, INVOKE.method, path, input, deadline, true);
   if (!INVOKE.async) {
 ${chat ? `    const reply = started?.content ?? started?.response;
     return { ok: true, status: 'COMPLETED', output: started as ${base}Output, reply: typeof reply === 'string' ? reply : undefined, raw: started };` : `    return { ok: true, status: 'COMPLETED', output: started as ${base}Output, raw: started };`}
@@ -808,9 +811,11 @@ def _fill(path: str, values: Dict[str, str]) -> str:
     return re.sub(r"\\{([A-Za-z_][A-Za-z0-9_]*)\\}", repl, path)
 
 
-def _call(method: str, path: str, body: Any, api_key: Optional[str], base_url: Optional[str], workspace_id: Optional[str], timeout_s: float) -> Any:
+def _call(method: str, path: str, body: Any, api_key: Optional[str], base_url: Optional[str], workspace_id: Optional[str], timeout_s: float, callsite: Optional[str] = None) -> Any:
     base = (base_url or os.environ.get("SWFTE_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
     headers = {"Accept": "application/json", "X-Swfte-Client": SWFTE_CLIENT}
+    if callsite is not None and re.fullmatch(r"cs_[0-9a-f]{24}", callsite):
+        headers["X-Swfte-Callsite"] = callsite
     if INVOKE_AUTH != "public":
         key = api_key or os.environ.get("SWFTE_API_KEY")
         if not key:
@@ -872,13 +877,14 @@ def ${fn}(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     workspace_id: Optional[str] = None,
+    callsite: Optional[str] = None,
     timeout_s: float = 300.0,
     poll_interval_s: float = 2.0,
 ) -> InvokeResult:
     """${pyComment(spec.description || `Call ${spec.name}.`).replace(/\\/g, '\\\\').replace(/"/g, "'")}"""
     deadline = time.monotonic() + timeout_s
     path = _fill(INVOKE_PATH, {${fillValues}})
-    started = _call(INVOKE_METHOD, path, inputs, api_key, base_url, workspace_id, timeout_s)
+    started = _call(INVOKE_METHOD, path, inputs, api_key, base_url, workspace_id, timeout_s, callsite)
     if not INVOKE_ASYNC:
         reply = None
         if ${chat ? 'True' : 'False'} and isinstance(started, dict):

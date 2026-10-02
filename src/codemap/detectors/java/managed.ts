@@ -4,6 +4,7 @@
  * SDK site (`alias: null`). An id that is not a literal or a same-file constant is unresolved, never guessed.
  */
 import type { DetectedSite, Op } from '../../types.js';
+import { numericVersion, literalRevision } from '../../revisions.js';
 import { inputKeys, outputKeys } from './keys.js';
 import { argsOf, evalPieces, isBroken, lineOf, literalOf, nameOf, symbolOf, walk, type JNode, type Piece } from './parse.js';
 
@@ -33,12 +34,15 @@ interface SdkMethod {
   op: Op;
   /** index of the inputs argument, null when the call takes none */
   inputAt: number | null;
+  versioned?: boolean;
 }
 
 const SDK_METHODS: Record<string, Record<string, SdkMethod>> = {
   workflows: {
     invoke: { kind: 'workflow', op: 'run', inputAt: 1 },
     invokeAndWait: { kind: 'workflow', op: 'run', inputAt: 1 },
+    invokeVersion: { kind: 'workflow', op: 'run', inputAt: 2, versioned: true },
+    invokeVersionAndWait: { kind: 'workflow', op: 'run', inputAt: 2, versioned: true },
     invokeAsync: { kind: 'workflow', op: 'run', inputAt: 1 },
     execute: { kind: 'workflow', op: 'run', inputAt: 1 },
     executeAsync: { kind: 'workflow', op: 'run', inputAt: 1 },
@@ -60,6 +64,11 @@ const SDK_METHODS: Record<string, Record<string, SdkMethod>> = {
 function sdkShape(call: JNode): SdkMethod | null {
   const recv = call.childForFieldName('object');
   if (!recv || recv.type !== 'method_invocation' || argsOf(recv).length !== 0 || !recv.childForFieldName('object')) return null;
+  if (nameOf(recv) === 'builder' && nameOf(call) === 'test') {
+    const group = recv.childForFieldName('object');
+    return group?.type === 'method_invocation' && nameOf(group) === 'chatflows' && argsOf(group).length === 0
+      && group.childForFieldName('object') ? { kind: 'chatflow', op: 'chat', inputAt: 1 } : null;
+  }
   return SDK_METHODS[nameOf(recv)]?.[nameOf(call)] ?? null;
 }
 
@@ -74,17 +83,21 @@ export function detectManaged(root: JNode, swfteImported: boolean): JavaSite[] {
     const idExpr = args[0];
     if (!idExpr) return undefined;
     const info = idFromPieces(evalPieces(idExpr));
+    const version = args[1];
+    const numeric = version?.type === 'decimal_integer_literal' && /^[1-9][0-9]*$/.test(version.text) ? Number(version.text) : NaN;
+    const pin = m.versioned ? numericVersion(numeric) ?? (version ? literalRevision(literalOf(evalPieces(version))) : null) : null;
+    const unresolved = info.unresolved || Boolean(m.versioned && pin === null);
     const inKeys = m.inputAt === null ? [] : args[m.inputAt] ? inputKeys(args[m.inputAt]!) : [];
     sites.push({
       source: 'managed',
       line: lineOf(call),
       symbol: symbolOf(call),
       language: 'java',
-      category: info.unresolved ? 'dynamic' : 'managed',
+      category: unresolved ? 'dynamic' : 'managed',
       sdk: 'java',
       op: m.op,
       managed: 'typed-client',
-      artifact: { kind: m.kind, id: info.id, unresolved: info.unresolved, ...(info.envVarName ? { envVarName: info.envVarName } : {}), pinnedVersion: null, alias: null },
+      artifact: { kind: m.kind, id: unresolved ? null : info.id, unresolved, ...(info.envVarName ? { envVarName: info.envVarName } : {}), pinnedVersion: pin, alias: null },
       contractHash: null,
       inputKeys: inKeys,
       outputKeys: m.op === 'read-output' ? [] : outputKeys(call),

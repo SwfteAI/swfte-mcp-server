@@ -52,7 +52,12 @@ export function withTree<T>(text: string, fn: (root: PyNode) => T): T | null {
   } catch {
     return null;
   } finally {
-    tree?.delete();
+    if (tree) {
+      // Cached Nodes reference this Tree and its source callback. Their lifetime ends here.
+      NAMED_CHILDREN_CACHE.delete(tree);
+      BINDINGS_CACHE.delete(tree);
+      tree.delete();
+    }
   }
 }
 
@@ -96,22 +101,35 @@ export function isBroken(n: PyNode): boolean {
 
 export const lineOf = (n: PyNode): number => n.startPosition.row + 1;
 
-export function children(n: PyNode): PyNode[] {
+const EMPTY_NAMED_CHILDREN: readonly PyNode[] = Object.freeze([] as PyNode[]);
+const NAMED_CHILDREN_CACHE = new WeakMap<Tree, Map<number, readonly PyNode[]>>();
+
+/** Native getters create fresh wrappers; detector passes share immutable vectors inside one tree. */
+function namedChildren(n: PyNode): readonly PyNode[] {
+  let nodes = NAMED_CHILDREN_CACHE.get(n.tree);
+  const cached = nodes?.get(n.id);
+  if (cached) return cached;
+  const count = n.namedChildCount;
+  if (count === 0) return EMPTY_NAMED_CHILDREN;
   const out: PyNode[] = [];
-  for (let i = 0; i < n.namedChildCount; i++) {
+  for (let i = 0; i < count; i++) {
     const c = n.namedChild(i);
     if (c) out.push(c);
   }
-  return out;
+  if (!nodes) { nodes = new Map(); NAMED_CHILDREN_CACHE.set(n.tree, nodes); }
+  const vector = Object.freeze(out);
+  nodes.set(n.id, vector);
+  return vector;
+}
+
+export function children(n: PyNode): PyNode[] {
+  return [...namedChildren(n)];
 }
 
 /** Depth-first walk over named nodes; `visit` returning false prunes the subtree. */
 export function walk(n: PyNode, visit: (n: PyNode) => boolean | void): void {
   if (visit(n) === false) return;
-  for (let i = 0; i < n.namedChildCount; i++) {
-    const c = n.namedChild(i);
-    if (c) walk(c, visit);
-  }
+  for (const child of namedChildren(n)) walk(child, visit);
 }
 
 /** `Class.method`, `func`, `outer.inner`, `<module>`; lambdas and comprehensions add nothing (D2). */

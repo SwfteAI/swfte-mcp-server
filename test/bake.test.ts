@@ -28,6 +28,7 @@ import { clientHeaderValue, diffShapes, inspectGenerated } from '../src/codegen.
 import { runCli, parseArgs } from '../src/cli.js';
 import { PACKAGE_VERSION } from '../src/version.js';
 import { getPrompt } from '../src/prompts.js';
+import { isPinnable, isSafeVersionPin, lookupPinnedVersion, versionedInvokePath } from '../src/bake.js';
 
 const CREDENTIAL = 'pat_supersecretcredential123';
 // Telemetry off: these suites pin each tool's own requests; test/telemetry.test.ts covers the events.
@@ -36,6 +37,7 @@ const config = () => loadConfig({ SWFTE_PAT: CREDENTIAL, SWFTE_TELEMETRY: '0' } 
 /* ── mocked fetch ────────────────────────────────────────────────────────── */
 
 interface Seen {
+  url: string;
   method: string;
   path: string;
   query: Record<string, string>;
@@ -57,6 +59,7 @@ function installFetch() {
     const url = new URL(String(input));
     const path = url.pathname.replace(/^\/agents/, '');
     const req: Seen = {
+      url: url.toString(),
       method: String(init.method ?? 'GET'),
       path,
       query: Object.fromEntries(url.searchParams.entries()),
@@ -578,6 +581,257 @@ describe('swfte.json v1', () => {
 });
 
 /* ── verify (CI gate) ────────────────────────────────────────────────────── */
+
+describe('exact recorded workflow pin boundaries', () => {
+  const unsafe = ['', '.', '..', '...', '-', '+', ':', '@', ' ', 'not a version', ' v3', 'v3 ', 'v3\n', 'v3\r', 'v3\t', 'v3\0', '%2e%2e', '%76%33', 'v3%2Fnext', 'v3/next', 'v3?live=1', 'v3#live', 'v3\\next', 'v'.repeat(129)];
+
+  async function baked(pin = true) {
+    catalogRoutes();
+    const added = await cli(['add', 'workflow:wf_1', '--framework', 'plain-ts', '--out', 'gen', '--alias', 'inv', ...(pin ? [] : ['--no-pin'])]);
+    assert.equal(added.code, 0, added.out + added.err);
+    seen = [];
+  }
+
+  function recordedPin(pin: string) {
+    const lock = JSON.parse(read('swfte.json'));
+    lock.artifacts[0].pinnedVersion = pin;
+    write('swfte.json', JSON.stringify(lock, null, 2));
+    return read('swfte.json');
+  }
+
+  test('numeric, semantic and safe legacy identities use one exact requested URL segment', async () => {
+    catalogRoutes();
+    const client = new SwfteClient(config());
+    for (const version of ['3', '2147483647', '1.0.7', '1.0.7-rc.1+build.7', 'v3', 'release@prod:7', 'latest']) {
+      contracts['workflow:wf_1'].version = version;
+      seen = [];
+      const found = await lookupPinnedVersion(client, 'workflow:wf_1', version, WF_CONTRACT as never);
+      assert.equal(found.state, 'published', version);
+      if (found.state !== 'published') assert.fail(version);
+      assert.equal(found.contract.version, version);
+      assert.equal(found.contract.invoke.path, `/v2/workflows/wf_1/versions/${encodeURIComponent(version)}/invoke`);
+      assert.deepEqual(seen.map(s => [s.method, s.url]), [['GET', `${config().baseUrl}/v2/workflows/wf_1/versions/${encodeURIComponent(version)}/schema`]]);
+      assert.ok(isPinnable('workflow:wf_1', version));
+    }
+  });
+
+  test('unsafe pin paths and lookups refuse before any request, including a live-schema trap', async () => {
+    route('GET', /^\/v2\/workflows\/wf_1\/schema$/, { body: { workflowId: 'wf_1', version: 'v3', published: true, inputSchema: {}, outputSchema: {} } });
+    const client = new SwfteClient(config());
+    for (const version of unsafe) {
+      assert.equal(isSafeVersionPin(version), false);
+      assert.throws(() => isPinnable('workflow:wf_1', version), /Invalid workflow version pin/);
+      assert.throws(() => versionedInvokePath('wf_1', version), /Invalid workflow version pin/);
+      await assert.rejects(lookupPinnedVersion(client, 'workflow:wf_1', version, WF_CONTRACT as never), /Invalid workflow version pin/);
+      assert.equal(seen.length, 0, JSON.stringify(version));
+    }
+    for (const value of [null, undefined, 3, true, {}, []]) {
+      assert.equal(isSafeVersionPin(value), false);
+      await assert.rejects(lookupPinnedVersion(client, 'workflow:wf_1', value as never, WF_CONTRACT as never), /Invalid workflow version pin/);
+      assert.equal(seen.length, 0);
+    }
+  });
+
+  test('the 128-character semantic suffix is preserved and larger raw pins have no HTTP effect', async () => {
+    const version = '1.0.7+' + 'b'.repeat(122);
+    assert.equal(version.length, 128);
+    assert.equal(versionedInvokePath('wf_1', version), `/v2/workflows/wf_1/versions/1.0.7%2B${'b'.repeat(122)}/invoke`);
+    await assert.rejects(lookupPinnedVersion(new SwfteClient(config()), 'workflow:wf_1', version + 'b', WF_CONTRACT as never), /Invalid workflow version pin/);
+    assert.equal(seen.length, 0, 'safe path eligibility is not a claim that the server published a 128-character identity');
+  });
+
+  test('actual response identity and publication metadata cannot disagree with the requested pin', async () => {
+    const client = new SwfteClient(config());
+    for (const wrong of [{ workflowId: 'wf_other' }, { version: 'v4' }, { version: null }, { published: false }]) {
+      route('GET', /^\/v2\/workflows\/wf_1\/versions\/v3\/schema$/, { body: { workflowId: 'wf_1', version: 'v3', published: true, inputSchema: {}, outputSchema: {}, ...wrong } });
+      seen = [];
+      await assert.rejects(lookupPinnedVersion(client, 'workflow:wf_1', 'v3', WF_CONTRACT as never), /pinned.version|published|identity/i);
+      assert.deepEqual(seen.map(s => s.path), ['/v2/workflows/wf_1/versions/v3/schema']);
+    }
+  });
+
+  test('live, foreign, other-version and normalized traversal invoke routes cannot acquire published status', async () => {
+    const client = new SwfteClient(config());
+    for (const path of ['/v2/workflows/wf_1/invoke', '/v2/workflows/wf_other/versions/v3/invoke', '/v2/workflows/wf_1/versions/v4/invoke', '/v2/workflows/wf_1/versions/../invoke', '/v2/workflows/wf_1/versions/v3/invoke?live=1']) {
+      route('GET', /^\/v2\/workflows\/wf_1\/versions\/v3\/schema$/, { body: { workflowId: 'wf_1', version: 'v3', published: true, inputSchema: {}, outputSchema: {}, invoke: { ...WF_CONTRACT.invoke, path } } });
+      seen = [];
+      await assert.rejects(lookupPinnedVersion(client, 'workflow:wf_1', 'v3', WF_CONTRACT as never), /pinned.version|invoke|route/i);
+      assert.deepEqual(seen.map(s => s.path), ['/v2/workflows/wf_1/versions/v3/schema']);
+    }
+  });
+
+  test('missing, null and non-schema pin schemas remain unsupported rather than substituting live schemas', async () => {
+    const client = new SwfteClient(config());
+    for (const body of [{ inputSchema: null, outputSchema: {} }, { inputSchema: {}, outputSchema: null }, { inputSchema: [], outputSchema: {} }, { inputSchema: {}, outputSchema: 3 }, { outputSchema: {} }]) {
+      route('GET', /^\/v2\/workflows\/wf_1\/versions\/v3\/schema$/, { body });
+      seen = [];
+      const found = await lookupPinnedVersion(client, 'workflow:wf_1', 'v3', WF_CONTRACT as never);
+      assert.equal(found.state, 'unsupported');
+      assert.deepEqual(seen.map(s => s.path), ['/v2/workflows/wf_1/versions/v3/schema']);
+    }
+  });
+
+  test('explicit empty and boolean version schemas stay exact instead of borrowing the live contract', async () => {
+    const client = new SwfteClient(config());
+    for (const [inputSchema, outputSchema] of [[{}, {}], [true, false]]) {
+      route('GET', /^\/v2\/workflows\/wf_1\/versions\/v3\/schema$/, { body: { workflowId: 'wf_1', version: 'v3', published: true, inputSchema, outputSchema } });
+      seen = [];
+      const found = await lookupPinnedVersion(client, 'workflow:wf_1', 'v3', WF_CONTRACT as never);
+      assert.equal(found.state, 'published');
+      if (found.state !== 'published') assert.fail('exact empty version schema was refused');
+      assert.deepEqual(found.contract.inputSchema, inputSchema);
+      assert.deepEqual(found.contract.outputSchema, outputSchema);
+      assert.deepEqual(seen.map(s => s.path), ['/v2/workflows/wf_1/versions/v3/schema']);
+    }
+  });
+
+  test('404 unpublished and unsupported pins never produce a published contract', async () => {
+    const client = new SwfteClient(config());
+    for (const [error, state] of [['VERSION_NOT_PUBLISHED', 'not-published'], ['NO_ROUTE', 'unsupported']]) {
+      route('GET', /^\/v2\/workflows\/wf_1\/versions\/v3\/schema$/, { status: 404, body: { error } });
+      seen = [];
+      assert.equal((await lookupPinnedVersion(client, 'workflow:wf_1', 'v3', WF_CONTRACT as never)).state, state);
+      assert.deepEqual(seen.map(s => s.path), ['/v2/workflows/wf_1/versions/v3/schema']);
+    }
+  });
+
+  test('online and offline verify refuse malformed recorded pins before any HTTP effect', async () => {
+    await baked();
+    for (const pin of unsafe) {
+      for (const args of [['verify'], ['verify', '--offline']]) {
+        recordedPin(pin);
+        seen = [];
+        const result = await cli(args);
+        assert.equal(result.code, 1, JSON.stringify(pin) + result.out + result.err);
+        assert.match(result.err, /Invalid workflow version pin/);
+        assert.doesNotMatch(result.out, /SWFTE_VERIFY_OK/);
+        assert.equal(seen.length, 0, 'invalid recorded pin must stop before upgrades and schema reads');
+      }
+    }
+  });
+
+  test('sync, upgrade, explicit no-pin and re-add cannot erase an invalid recorded pin', async () => {
+    await baked();
+    const clientBytes = read('gen/inv.ts');
+    for (const args of [['sync'], ['upgrade', 'inv'], ['upgrade', 'inv', '--no-pin'], ['add', 'workflow:wf_1', '--no-pin'], ['dev', '--record']]) {
+      const lockBytes = recordedPin('..');
+      seen = [];
+      const result = await cli(args);
+      assert.equal(result.code, 1, args.join(' ') + result.out + result.err);
+      assert.match(result.err, /Invalid workflow version pin/);
+      assert.equal(seen.length, 0);
+      assert.equal(read('swfte.json'), lockBytes);
+      assert.equal(read('gen/inv.ts'), clientBytes);
+      assert.equal(existsSync(join(tmp, '.swfte/fixtures/inv.ts.json')), false);
+    }
+  });
+
+  test('genuine legacy timestamp metadata deliberately remains unversioned', async () => {
+    await baked();
+    recordedPin('2026-09-01T00:00:00Z');
+    assert.equal(isPinnable('workflow:wf_1', '2026-09-01T00:00:00Z'), false);
+    seen = [];
+    const checked = await cli(['verify']);
+    assert.equal(checked.code, 0, checked.out + checked.err);
+    assert.equal(seen.some(s => s.path.includes('/versions/')), false);
+    seen = [];
+    const synced = await cli(['sync']);
+    assert.equal(synced.code, 0, synced.out + synced.err);
+    assert.equal(JSON.parse(read('swfte.json')).artifacts[0].pinnedVersion, null);
+    assert.match(read('gen/inv.ts'), /path: "\/v2\/workflows\/wf_1\/invoke"/);
+    assert.equal(seen.some(s => s.path.includes('/versions/')), false);
+  });
+
+  test('unsupported recorded pin verification is unchecked despite a current catalog hash', async () => {
+    await baked();
+    route('GET', /^\/v2\/workflows\/wf_1\/versions\/v3\/schema$/, { status: 404, body: { error: 'NO_ROUTE' } });
+    const result = await cli(['verify']);
+    assert.equal(result.code, 2, result.out + result.err);
+    assert.match(result.out, /SWFTE_VERIFY_UNCHECKED/);
+    assert.match(result.err, /\[unreachable\].*pinned version/);
+    assert.doesNotMatch(result.out, /SWFTE_VERIFY_OK/);
+  });
+
+  test('sync cannot restore a hash-equal pinned client from an unsupported or missing version', async () => {
+    await baked();
+    const lockBytes = read('swfte.json');
+    rmSync(join(tmp, 'gen/inv.ts'));
+    for (const error of ['NO_ROUTE', 'VERSION_NOT_PUBLISHED']) {
+      route('GET', /^\/v2\/workflows\/wf_1\/versions\/v3\/schema$/, { status: 404, body: { error } });
+      seen = [];
+      const result = await cli(['sync']);
+      assert.equal(result.code, 1, result.out + result.err);
+      assert.equal(existsSync(join(tmp, 'gen/inv.ts')), false);
+      assert.equal(read('swfte.json'), lockBytes);
+      assert.ok(seen.some(s => s.path === '/v2/workflows/wf_1/versions/v3/schema'));
+    }
+  });
+
+  test('upgrade cannot fall back to live when its explicit new pin cannot be confirmed', async () => {
+    await baked(false);
+    const lockBytes = read('swfte.json');
+    const clientBytes = read('gen/inv.ts');
+    contracts['workflow:wf_1'].version = 'v4';
+    contracts['workflow:wf_1'].outputSchema.properties.newField = { type: 'string' };
+    route('GET', /^\/v2\/workflows\/wf_1\/versions\/v4\/schema$/, { status: 404, body: { error: 'NO_ROUTE' } });
+    const result = await cli(['upgrade', 'inv']);
+    assert.equal(result.code, 1, result.out + result.err);
+    assert.equal(read('swfte.json'), lockBytes);
+    assert.equal(read('gen/inv.ts'), clientBytes);
+  });
+
+  test('default bake refuses unsupported pin lookup and writes no live fallback client', async () => {
+    catalogRoutes();
+    route('GET', /^\/v2\/workflows\/wf_1\/versions\/v3\/schema$/, { status: 404, body: { error: 'NO_ROUTE' } });
+    const result = await cli(['add', 'workflow:wf_1', '--framework', 'plain-ts', '--out', 'gen']);
+    assert.equal(result.code, 1, result.out + result.err);
+    assert.equal(existsSync(join(tmp, 'swfte.json')), false);
+    assert.equal(existsSync(join(tmp, 'gen/invoice-extractor.ts')), false);
+    assert.ok(seen.some(s => s.path === '/v2/workflows/wf_1/versions/v3/schema'));
+  });
+
+  test('malformed catalog version is refused before a schema request or generated file write', async () => {
+    contracts['workflow:wf_1'].version = '..';
+    catalogRoutes();
+    const result = await cli(['add', 'workflow:wf_1', '--framework', 'plain-ts', '--out', 'gen']);
+    assert.equal(result.code, 1, result.out + result.err);
+    assert.match(result.err, /Invalid workflow version pin/);
+    assert.equal(seen.some(s => s.path.startsWith('/v2/workflows/')), false);
+    assert.equal(existsSync(join(tmp, 'swfte.json')), false);
+    assert.equal(existsSync(join(tmp, 'gen/invoice-extractor.ts')), false);
+  });
+
+  test('hash-equal sync re-reads the actual pinned snapshot instead of using the live schema', async () => {
+    catalogRoutes();
+    route('GET', /^\/v2\/workflows\/wf_1\/versions\/v3\/schema$/, { body: { workflowId: 'wf_1', version: 'v3', published: true, inputSchema: WF_CONTRACT.inputSchema, outputSchema: { type: 'object', properties: { snapshotOnly: { type: 'string' } } } } });
+    assert.equal((await cli(['add', 'workflow:wf_1', '--framework', 'plain-ts', '--out', 'gen', '--alias', 'inv'])).code, 0);
+    assert.match(read('gen/inv.ts'), /snapshotOnly\?: string/);
+    rmSync(join(tmp, 'gen/inv.ts'));
+    seen = [];
+    const result = await cli(['sync']);
+    assert.equal(result.code, 0, result.out + result.err);
+    assert.ok(seen.some(s => s.path === '/v2/workflows/wf_1/versions/v3/schema'));
+    assert.match(read('gen/inv.ts'), /snapshotOnly\?: string/);
+    assert.doesNotMatch(read('gen/inv.ts'), /vendor\?: string/);
+    assert.equal(JSON.parse(read('swfte.json')).artifacts[0].pinnedVersion, 'v3');
+  });
+
+  test('a generated semantic-suffix client invokes its exact version and polls only execution status', async () => {
+    const version = '1.0.7-rc.1+build.7';
+    contracts['workflow:wf_1'].version = version;
+    await baked();
+    const mod = await import(pathToFileURL(join(tmp, 'gen/inv.ts')).href);
+    const calls: Array<[string, string]> = [];
+    const fakeFetch = (async (url: string, init: any) => {
+      calls.push([String(init.method), new URL(url).toString()]);
+      return new Response(JSON.stringify(calls.length === 1 ? { executionId: 'pin-run' } : { execution: { status: 'SUCCESS', outputData: { total: 42 } } }));
+    }) as unknown as typeof fetch;
+    const result = await mod.invokeInv({ invoiceUrl: 'https://example.test/invoice' }, { apiKey: 'sk-swfte-test', fetch: fakeFetch, baseUrl: 'https://api.example', pollIntervalMs: 1 });
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls, [['POST', 'https://api.example/v2/workflows/wf_1/versions/1.0.7-rc.1%2Bbuild.7/invoke'], ['GET', 'https://api.example/v2/workflows/executions/pin-run/status']]);
+    assert.equal(JSON.parse(read('swfte.json')).artifacts[0].pinnedVersion, version);
+  });
+});
 
 describe('swfte verify', () => {
   async function baked() {
