@@ -35,6 +35,20 @@ export interface NativeReplace {
   policy: 'create-only' | 'authorized-replace' | 'merge';
 }
 
+export interface NativeDirectoryEntry {
+  readonly name: string;
+  readonly kind: 'file' | 'directory' | 'symlink' | 'other';
+  readonly identity: NativeIdentity;
+}
+export interface NativeDirectorySnapshot {
+  readonly identity: NativeIdentity;
+  readonly entries: readonly NativeDirectoryEntry[];
+}
+export interface NativeListLimits { maxEntries?: number; maxBytes?: number }
+export interface NativeUnlink { rel: string; expected: NativeSnapshot }
+export interface NativeUnlinkResult { readonly removed: boolean }
+const NATIVE_LIST_ENTRIES_LIMIT = 20_000;
+
 function glibcVersion(): string | undefined {
   const report = process.report?.getReport();
   return report && typeof report === 'object' ? (report as { header?: { glibcVersionRuntime?: string } }).header?.glibcVersionRuntime : undefined;
@@ -183,19 +197,28 @@ export class NativeFilesystem {
     const path = parts.flatMap(part => { const size = Buffer.alloc(2); size.writeUInt16BE(part.length); return [size, part]; });
     const input = Buffer.concat([header, ...path, tail]);
     if (input.length > 2 * NATIVE_FILE_LIMIT + 65536) throw new NativeFilesystemError('SIZE_LIMIT');
+    const mutating = op === 2 || op === 3 || op === 5;
     const result = spawnSync(this.artifact.executable, [], { shell: false, input,
       stdio: ['pipe', 'pipe', 'pipe', this.fd], timeout: 30_000, maxBuffer: NATIVE_FILE_LIMIT + 4096,
       env: { LANG: 'C', LC_ALL: 'C' } });
     if (result.error || result.status !== 0 || result.signal) {
       // Unknown after launch: never report a failed mutator as zero physical effects.
-      throw new NativeFilesystemError(op === 0 ? 'NATIVE_ARTIFACT_MISSING_OR_INVALID' : op >= 2 ? 'PARTIAL_COMMIT' : 'IO_ERROR', op >= 2);
+      throw new NativeFilesystemError(op === 0 ? 'NATIVE_ARTIFACT_MISSING_OR_INVALID' : mutating ? 'PARTIAL_COMMIT' : 'IO_ERROR', mutating);
     }
     const out = result.stdout;
-    if (out.length < 16 || !out.subarray(0, 8).equals(MAGIC)) throw new NativeFilesystemError('PROTOCOL_INVALID', op >= 2);
+    if (out.length < 16 || !out.subarray(0, 8).equals(MAGIC)) throw new NativeFilesystemError('PROTOCOL_INVALID', mutating);
     const status = out.readUInt16BE(8), committed = out[10] === 1;
-    if (status > 1 || out[10]! > 1 || out[11] !== 0 || out.readUInt32BE(12) !== out.length - 16) throw new NativeFilesystemError('PROTOCOL_INVALID', op >= 2);
+    if (status > 1 || out[10]! > 1 || out[11] !== 0 || out.readUInt32BE(12) !== out.length - 16) throw new NativeFilesystemError('PROTOCOL_INVALID', mutating);
+    if (!mutating && committed) throw new NativeFilesystemError('PROTOCOL_INVALID');
     const payload = out.subarray(16);
-    if (status) { const code = payload.toString('ascii'); throw new NativeFilesystemError(ERRORS.has(code) ? code : 'PROTOCOL_INVALID', committed); }
+    if (status) {
+      const code = payload.toString('ascii');
+      // Unknown/malformed launched-mutator errors cannot certify zero effects. The C producer
+      // converts every acknowledged-effect error to PARTIAL_COMMIT; other typed refusals are pre-effect.
+      if (!Buffer.from(code, 'ascii').equals(payload) || !ERRORS.has(code)
+        || committed !== (code === 'PARTIAL_COMMIT')) throw new NativeFilesystemError('PROTOCOL_INVALID', mutating);
+      throw new NativeFilesystemError(code, committed);
+    }
     return { payload, committed };
   }
 
@@ -210,6 +233,61 @@ export class NativeFilesystem {
     if (present !== 1 || response.committed) throw new NativeFilesystemError('PROTOCOL_INVALID', response.committed);
     const identity = decode.identity(), bytes = decode.content(identity); decode.end();
     return Object.freeze({ ...identity, bytes });
+  }
+
+  /** One bounded directory observation. This is not an immutable tree snapshot. */
+  list(rel = '', limits: NativeListLimits = {}): NativeDirectorySnapshot | null {
+    const parts = rel === '' ? [] : components(rel);
+    if (!limits || typeof limits !== 'object' || Array.isArray(limits)) throw new NativeFilesystemError('PROTOCOL_INVALID');
+    const maxEntries = limits.maxEntries === undefined ? NATIVE_LIST_ENTRIES_LIMIT : limits.maxEntries;
+    const maxBytes = limits.maxBytes === undefined ? NATIVE_FILE_LIMIT : limits.maxBytes;
+    if (!Number.isSafeInteger(maxEntries) || maxEntries < 1 || maxEntries > NATIVE_LIST_ENTRIES_LIMIT
+      || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > NATIVE_FILE_LIMIT) throw new NativeFilesystemError('SIZE_LIMIT');
+    const tail = Buffer.alloc(8); tail.writeUInt32BE(maxEntries); tail.writeUInt32BE(maxBytes, 4);
+    const response = this.invoke(4, parts, tail);
+    if (response.committed || response.payload.length > maxBytes) throw new NativeFilesystemError('PROTOCOL_INVALID');
+    const decode = new Decoder(response.payload, false), present = decode.take(1)[0];
+    if (present === 0) { decode.end(); return null; }
+    if (present !== 1) throw new NativeFilesystemError('PROTOCOL_INVALID');
+    const identity = decode.identity();
+    if ((identity.mode & 0o170000) !== 0o040000 || BigInt(identity.nlink) < 1n) throw new NativeFilesystemError('PROTOCOL_INVALID');
+    if (parts.length === 0 && (identity.dev !== this.identity.dev || identity.ino !== this.identity.ino)) throw new NativeFilesystemError('PROTOCOL_INVALID');
+    const count = decode.take(4).readUInt32BE();
+    if (count > maxEntries || count > Math.floor((response.payload.length - 65) / 64)) throw new NativeFilesystemError('PROTOCOL_INVALID');
+    const entries: NativeDirectoryEntry[] = [], names = new Set<string>();
+    const kinds = ['file', 'directory', 'symlink', 'other'] as const;
+    for (let i = 0; i < count; i++) {
+      const length = decode.take(2).readUInt16BE();
+      if (length < 1 || length > 255) throw new NativeFilesystemError('PROTOCOL_INVALID');
+      const bytes = decode.take(length), name = bytes.toString('utf8');
+      // Round-trip rejects malformed UTF-8; component parsing rejects separators/dot/control names.
+      if (!Buffer.from(name, 'utf8').equals(bytes)) throw new NativeFilesystemError('PROTOCOL_INVALID');
+      let valid = false;
+      try { const parsed = components(name); valid = parsed.length === 1 && parsed[0]!.equals(bytes); } catch { /* refused below */ }
+      if (!valid || names.has(name)) throw new NativeFilesystemError('PROTOCOL_INVALID');
+      names.add(name);
+      const kind = decode.take(1)[0], entry = decode.identity(), mode = entry.mode & 0o170000;
+      const actualKind = mode === 0o100000 ? 1 : mode === 0o040000 ? 2 : mode === 0o120000 ? 3 : 4;
+      if (!kind || kind > 4 || kind !== actualKind || BigInt(entry.nlink) < 1n) throw new NativeFilesystemError('PROTOCOL_INVALID');
+      entries.push(Object.freeze({ name, kind: kinds[kind - 1]!, identity: Object.freeze(entry) }));
+    }
+    decode.end();
+    entries.sort((a,b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    return Object.freeze({ identity: Object.freeze(identity), entries: Object.freeze(entries) });
+  }
+
+  /** Expected bytes/identity are checked before unlinkat, without a kernel target-CAS guarantee. */
+  unlink(input: NativeUnlink): NativeUnlinkResult {
+    const parts = components(input.rel), snapshot = input.expected;
+    if (!snapshot || !(snapshot.bytes instanceof Uint8Array) || snapshot.bytes.length > NATIVE_FILE_LIMIT
+      || String(snapshot.bytes.length) !== snapshot.size || snapshot.nlink !== '1'
+      || !Number.isInteger(snapshot.mode) || (snapshot.mode & 0o170000) !== 0o100000) throw new NativeFilesystemError('PROTOCOL_INVALID');
+    const expected = Buffer.from(snapshot.bytes), length = Buffer.alloc(4); length.writeUInt32BE(expected.length);
+    const response = this.invoke(5, parts, Buffer.concat([metaBytes(snapshot), length, expected]));
+    // Malformed launched mutator payloads cannot certify zero effects, even without an acknowledgement.
+    const decode = new Decoder(response.payload, true), removed = decode.take(1)[0]; decode.end();
+    if ((removed !== 0 && removed !== 1) || response.committed !== (removed === 1)) throw new NativeFilesystemError('PROTOCOL_INVALID', true);
+    return Object.freeze({ removed: removed === 1 });
   }
 
   replace(input: NativeReplace): NativeCommit {

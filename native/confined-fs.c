@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <dirent.h>
 
 #if !defined(O_NOFOLLOW) || !defined(O_DIRECTORY) || !defined(O_CLOEXEC) || !defined(AT_SYMLINK_NOFOLLOW)
 #error "Descriptor confinement primitives are required; no weaker fallback."
@@ -25,6 +26,7 @@
 #define COMPONENT_CAP 64u
 #define PATH_CAP 4096u
 #define META_SIZE 60u
+#define LIST_ENTRIES_CAP 20000u
 static const unsigned char MAGIC[8] = {'S','W','F','T','E','C','F','1'};
 
 typedef struct { const unsigned char *data; size_t size, at; int bad; } Cursor;
@@ -39,7 +41,7 @@ typedef struct {
   unsigned char op, policy, has_expected;
   uint64_t root_dev, root_ino;
   Path path;
-  uint32_t cap, length;
+  uint32_t cap, length, entry_cap;
   Meta expected_meta;
   const unsigned char *expected_bytes, *bytes;
   uint32_t expected_length;
@@ -116,10 +118,10 @@ static const char *parse_request(const unsigned char *data, size_t length, Reque
   const unsigned char *magic = take_bytes(&c,8);
   if (!magic || memcmp(magic,MAGIC,8) || take(&c,4) != 1) return "PROTOCOL_INVALID";
   r->op = (unsigned char)take(&c,1);
-  if (take(&c,1) || take(&c,2) || r->op > 3) return "PROTOCOL_INVALID";
+  if (take(&c,1) || take(&c,2) || r->op > 5) return "PROTOCOL_INVALID";
   r->root_dev = take(&c,8); r->root_ino = take(&c,8);
   r->path.count = (uint16_t)take(&c,2);
-  if (r->path.count > COMPONENT_CAP || (!r->op && r->path.count) || (r->op && !r->path.count)) return "PATH_REFUSED";
+  if (r->path.count > COMPONENT_CAP || (!r->op && r->path.count) || (r->op && r->op != 4 && !r->path.count)) return "PATH_REFUSED";
   size_t path_bytes = 0;
   for (uint16_t i = 0; i < r->path.count; ++i) {
     size_t n = (size_t)take(&c,2); const unsigned char *part = take_bytes(&c,n);
@@ -146,6 +148,17 @@ static const char *parse_request(const unsigned char *data, size_t length, Reque
     if (c.bad) return "PROTOCOL_INVALID";
     if (r->length > FILE_CAP) return "SIZE_LIMIT";
     r->bytes = take_bytes(&c,r->length);
+  } else if (r->op == 4) {
+    r->entry_cap = (uint32_t)take(&c,4); r->cap = (uint32_t)take(&c,4);
+    if (c.bad) return "PROTOCOL_INVALID";
+    if (!r->entry_cap || r->entry_cap > LIST_ENTRIES_CAP || !r->cap || r->cap > FILE_CAP) return "SIZE_LIMIT";
+  } else if (r->op == 5) {
+    r->expected_meta = parse_meta(&c); r->expected_length = (uint32_t)take(&c,4);
+    if (c.bad) return "PROTOCOL_INVALID";
+    if (r->expected_length > FILE_CAP || r->expected_meta.size != r->expected_length
+      || r->expected_meta.nlink != 1 || !S_ISREG((mode_t)r->expected_meta.mode)
+      || r->expected_meta.mtime_ns >= 1000000000u || r->expected_meta.ctime_ns >= 1000000000u) return "PROTOCOL_INVALID";
+    r->expected_bytes = take_bytes(&c,r->expected_length);
   }
   return c.bad || c.at != c.size ? "PROTOCOL_INVALID" : NULL;
 }
@@ -229,6 +242,100 @@ static int expected_matches(const Request *r, const Snapshot *s) {
   return same_meta(&r->expected_meta,&s->meta) && r->expected_length == s->length
     && (!s->length || !memcmp(r->expected_bytes,s->bytes,s->length));
 }
+/* One directory observation. A fresh open file description prevents a DIR stream from
+ * changing the inherited capability's shared directory offset across subprocesses. */
+static const char *list_directory(const Request *r, unsigned char **output, uint32_t *length) {
+  int parent = -1, missing = 0, stream_fd = -1;
+  DIR *stream = NULL;
+  unsigned char *buffer = NULL;
+  const char *error = directory(&r->path,r->path.count,0,&parent,&missing);
+  if (error) return error;
+  if (missing) {
+    buffer = malloc(1);
+    if (!buffer) return "IO_ERROR";
+    buffer[0] = 0; *output = buffer; *length = 1; return NULL;
+  }
+  if (r->cap < 1u + META_SIZE + 4u) { error = "SIZE_LIMIT"; goto done; }
+  stream_fd = openat(parent,".",O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (stream_fd < 0) { error = "IO_ERROR"; goto done; }
+  stream = fdopendir(stream_fd);
+  if (!stream) { error = "IO_ERROR"; goto done; }
+  stream_fd = -1; /* closedir owns it now. */
+  struct stat before, after;
+  if (fstat(dirfd(stream),&before) || !S_ISDIR(before.st_mode)) { error = "PATH_REFUSED"; goto done; }
+  uint32_t capacity = r->cap < 1024u ? r->cap : 1024u;
+  buffer = malloc(capacity);
+  if (!buffer) { error = "IO_ERROR"; goto done; }
+  uint32_t used = 1u + META_SIZE + 4u, count = 0;
+  for (;;) {
+    errno = 0;
+    struct dirent *entry = readdir(stream);
+    if (!entry) { if (errno) error = "IO_ERROR"; break; }
+    if (!strcmp(entry->d_name,".") || !strcmp(entry->d_name,"..")) continue;
+    size_t name_length = strlen(entry->d_name);
+    if (!valid_component((const unsigned char *)entry->d_name,name_length)) { error = "PATH_REFUSED"; break; }
+    uint32_t record_length = 2u + (uint32_t)name_length + 1u + META_SIZE;
+    if (count >= r->entry_cap || record_length > r->cap - used) { error = "SIZE_LIMIT"; break; }
+    struct stat named;
+    if (fstatat(dirfd(stream),entry->d_name,&named,AT_SYMLINK_NOFOLLOW)) {
+      error = errno == ENOENT ? "STALE_CONTENT" : "IO_ERROR"; break;
+    }
+    if (used + record_length > capacity) {
+      uint32_t next = capacity;
+      while (next < used + record_length) next = next > r->cap / 2u ? r->cap : next * 2u;
+      unsigned char *grown = realloc(buffer,next);
+      if (!grown) { error = "IO_ERROR"; break; }
+      buffer = grown; capacity = next;
+    }
+    unsigned char *at = buffer + used;
+    put(&at,name_length,2); memcpy(at,entry->d_name,name_length); at += name_length;
+    unsigned kind = S_ISREG(named.st_mode) ? 1u : S_ISDIR(named.st_mode) ? 2u : S_ISLNK(named.st_mode) ? 3u : 4u;
+    Meta meta = stat_meta(&named); put(&at,kind,1); put_meta(&at,&meta);
+    used += record_length; count++;
+  }
+  if (!error) {
+    if (fstat(dirfd(stream),&after)) error = "IO_ERROR";
+    else {
+      Meta first = stat_meta(&before), last = stat_meta(&after);
+      if (!same_meta(&first,&last)) error = "STALE_CONTENT";
+      else { unsigned char *at = buffer; put(&at,1,1); put_meta(&at,&last); put(&at,count,4); *length = used; }
+    }
+  }
+done:
+  if (stream && closedir(stream) && !error) error = "IO_ERROR";
+  if (stream_fd >= 0) close(stream_fd);
+  if (parent >= 0) close(parent);
+  if (error) free(buffer);
+  else *output = buffer;
+  return error;
+}
+
+/* This comparison is NOT kernel compare-and-unlink. Same-UID/name substitution
+ * after the final check remains outside the capability's concurrency guarantee. */
+static const char *unlink_file(const Request *r, unsigned char *removed) {
+  int parent = -1, missing = 0, exists = 0;
+  Snapshot current = {0};
+  const char *error = directory(&r->path,(uint16_t)(r->path.count - 1),0,&parent,&missing);
+  if (error || missing) return error;
+  const char *leaf = r->path.part[r->path.count - 1];
+  error = read_snapshot(parent,leaf,FILE_CAP,&current,&exists);
+  if (error || !exists) goto done;
+  if (!expected_matches(r,&current)) { error = "STALE_CONTENT"; goto done; }
+  struct stat named;
+  if (fstatat(parent,leaf,&named,AT_SYMLINK_NOFOLLOW)) { error = errno == ENOENT ? "STALE_CONTENT" : "IO_ERROR"; goto done; }
+  if (S_ISLNK(named.st_mode)) { error = "SYMLINK_REFUSED"; goto done; }
+  if (!S_ISREG(named.st_mode)) { error = "PATH_REFUSED"; goto done; }
+  if (named.st_nlink != 1) { error = "HARDLINK_REFUSED"; goto done; }
+  Meta entry = stat_meta(&named);
+  if (!same_meta(&entry,&current.meta)) { error = "STALE_CONTENT"; goto done; }
+  if (unlinkat(parent,leaf,0)) { error = errno == ENOENT ? "STALE_CONTENT" : "IO_ERROR"; goto done; }
+  published = 1; *removed = 1;
+  if (!fstatat(parent,leaf,&named,AT_SYMLINK_NOFOLLOW) || errno != ENOENT) { error = "STALE_CONTENT"; goto done; }
+  if (fsync(parent)) error = "IO_ERROR";
+done:
+  free(current.bytes); close(parent); return error;
+}
+
 static const char *random_name(char name[48]) {
   unsigned char random[16]; size_t at = 0;
   int fd = open("/dev/urandom",O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
@@ -347,6 +454,17 @@ int main(int argc, char **argv) {
   struct stat root;
   if (!error && (fstat(3,&root) || !S_ISDIR(root.st_mode) || (uint64_t)root.st_dev != r.root_dev || (uint64_t)root.st_ino != r.root_ino)) error = "PATH_REFUSED";
   if (error) { free(input); return response(error,NULL,0); }
+  if (r.op == 4 || r.op == 5) {
+    unsigned char *output = NULL, removed = 0;
+    uint32_t output_length = 0;
+    if (r.op == 4) error = list_directory(&r,&output,&output_length);
+    else {
+      error = unlink_file(&r,&removed);
+      if (!error) { output = malloc(1); if (!output) error = "IO_ERROR"; else { output[0] = removed; output_length = 1; } }
+    }
+    int result = response(error,output,output_length);
+    free(output); free(input); return result;
+  }
   Snapshot s = {0}; unsigned char action = 0; int exists = 0, parent = -1, missing = 0;
   if (!r.op) s.meta = stat_meta(&root);
   else if (r.op == 1) {
