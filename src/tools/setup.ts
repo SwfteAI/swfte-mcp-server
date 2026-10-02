@@ -21,14 +21,22 @@ export const setupTools: ToolDefinition[] = [
   {
     name:'swfte_resolve_setup_task', title:'Resolve one current setup task',
     description:'Resolve through one advertised server option, with current hash and revision CAS. Secret values must already be server-owned handles. This cannot waive missing probe evidence or promote anything.',
-    inputSchema:z.object({ artifact:SetupArtifactSchema, taskKey:z.string().min(1).max(400), optionId:z.string().min(1).max(200), environment:z.string().regex(/^(SANDBOX|LIVE:[A-Za-z0-9_.:-]+)$/), value:value.optional(), expectedContentHash:hash, expectedRevision:z.number().int().nonnegative() }).strict(),
+    inputSchema:z.object({ artifact:SetupArtifactSchema, taskKey:z.string().min(1).max(400), optionId:z.string().min(1).max(200), environment:z.string().regex(/^(SANDBOX|LIVE:[A-Za-z0-9_.:-]+)$/), value:value.optional(), expectedContentHash:hash, expectedRevision:z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict(),
     execute:async(input,{client}) => {
       const entries=await client.request<SetupTaskEntry[]>({method:'GET',path:`${artifactPath(input.artifact)}/setup`});
-      const task=entries.find(entry=>entry.task.key===input.taskKey);
+      if (!Array.isArray(entries)) throw new Error('SETUP_RESPONSE_INVALID');
+      const matches=entries.filter(entry=>entry?.task?.key===input.taskKey);
+      if(matches.length>1)throw new Error('SETUP_RESPONSE_INVALID');
+      const task=matches[0];
+      if(task&&(task.task.artifactKind!==input.artifact.kind||task.task.artifactId!==input.artifact.id
+        ||!Number.isSafeInteger(task.revision)||task.revision<1||!hash.safeParse(task.contentHash).success))throw new Error('SETUP_RESPONSE_INVALID');
       const option=task?.task.resolutionOptions?.find(candidate=>candidate.id===input.optionId);
       if (!task || !option) throw new Error('The current task does not advertise that resolution option.');
       if (task.contentHash!==input.expectedContentHash || task.revision!==input.expectedRevision) throw new Error('STALE_CONTENT: read current tasks before resolving.');
       if (option.type==='API_KEY' && input.value && 'literal' in input.value) throw new Error('Secret values require a server-owned handle.');
+      if(task.task.capability==='managed_database.read.provision'&&(input.artifact.kind!=='workflow'||input.environment!=='SANDBOX'
+        ||option.id!=='provision-read'||option.type!=='PROVISION'||!input.value||!('handle' in input.value)
+        ||!/^managed:action:act_[0-9a-f]{32}$/.test(input.value.handle)))throw new Error('MANAGED_READ_APPROVED_ACTION_REQUIRED');
       return client.request<SetupTaskEntry>({method:'POST',path:`${artifactPath(input.artifact)}/setup/${encodeURIComponent(input.taskKey)}/resolve`,body:{optionId:input.optionId,environment:input.environment,value:input.value,expectedContentHash:input.expectedContentHash,expectedRevision:input.expectedRevision},retries:0});
     },
   },

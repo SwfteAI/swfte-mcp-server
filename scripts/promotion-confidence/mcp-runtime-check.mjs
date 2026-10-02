@@ -35,11 +35,18 @@ const requiredControls=[
   'resolver journal rejects truncated final frame from actual HTTP',
   'resolver journal rejects a chunked response over its actual byte cap',
   'resolver invalid resume cursors refuse before HTTP dispatch',
+  'managed READ uses the existing approval capability and exact task revision',
+  'managed READ resolves through the actual approved action handle',
+  'managed READ cannot resolve using owner credentials',
+  'foreign and duplicate current task rows refuse',
+  'duplicate task keys never pick the first',
+  'zero and unsafe setup revisions refuse',
+  'uncertain managed READ approval is not automatically retried',
 ];
 const missingControls=requiredControls.filter(label=>!tap.includes(label));
 const after=fingerprint();
 const passed=checks.length===2&&checks.every(check=>check.exitCode===0)&&before.hash===after.hash
-  &&tests.tests>=855&&tests.pass===tests.tests&&tests.fail===0&&tests.cancelled===0&&tests.skipped===0&&tests.todo===0&&missingControls.length===0;
+  &&tests.tests>=862&&tests.pass===tests.tests&&tests.fail===0&&tests.cancelled===0&&tests.skipped===0&&tests.todo===0&&missingControls.length===0;
 writeFileSync(`${directory}/result.json`,JSON.stringify({at:new Date().toISOString(),sourceBefore:before,sourceAfter:after,checks,tests,missingControls,passed,
   acceptance:'MCP client/local HTTP controls only; actual backend/provider/runtime and visual acceptance remain separate'},null,2)+'\n');
 if(!passed)process.exit(1);

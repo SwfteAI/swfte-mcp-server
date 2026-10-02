@@ -45,6 +45,7 @@ export const ACTION_CAPABILITIES = [
   'analytics.enable',
   'workflow.promote',
   'cloud.provision',
+  'managed_database.read.provision',
   'confidence.upload_code',
 ] as const;
 export type ActionCapability = (typeof ACTION_CAPABILITIES)[number];

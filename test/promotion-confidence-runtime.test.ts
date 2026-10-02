@@ -8,6 +8,7 @@ import { proveTools } from '../src/tools/prove.js';
 import { promotionTools } from '../src/tools/promotion.js';
 import { cloudLinkTools } from '../src/tools/cloud-link.js';
 import { connectTools } from '../src/tools/connect.js';
+import { actionTools } from '../src/tools/actions.js';
 import { prepareIntake,canonicalJson } from '../src/intake/levels.js';
 import { requestIntakeConsent } from '../src/intake/consent.js';
 import { uploadIntake } from '../src/intake/upload.js';
@@ -23,7 +24,7 @@ async function fixture<T>(run:(client:SwfteClient,calls:Call[])=>Promise<T>,repl
   const config=loadConfig({SWFTE_PAT:'pat_test',SWFTE_BASE_URL:`http://127.0.0.1:${address.port}`,SWFTE_TELEMETRY:'0'} as never);
   try{return await run(new SwfteClient(config),calls)}finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()))}
 }
-async function tool(name:string,input:unknown,client:SwfteClient){const definition=[...setupTools,...proveTools,...promotionTools,...cloudLinkTools,...connectTools].find(candidate=>candidate.name===name) as ToolDefinition;assert.ok(definition);return definition.execute(definition.inputSchema.parse(input),{client,config:loadConfig({SWFTE_PAT:'pat_test'} as never)})}
+async function tool(name:string,input:unknown,client:SwfteClient){const definition=[...setupTools,...proveTools,...promotionTools,...cloudLinkTools,...connectTools,...actionTools].find(candidate=>candidate.name===name) as ToolDefinition;assert.ok(definition);return definition.execute(definition.inputSchema.parse(input),{client,config:loadConfig({SWFTE_PAT:'pat_test'} as never)})}
 for(const kind of ['workflow','agent','chatflow','widget','application','journey','mcp','finetune']) {
   test(`setup reads actual ${kind} server route with session credential`,()=>fixture(async(client,calls)=>{await tool('swfte_setup',{artifact:{kind,id:'owned'}},client);assert.equal(calls.length,1);assert.equal(calls[0]!.path,`/v2/artifacts/${kind}/owned/setup`);assert.equal(calls[0]!.authorization,'Bearer pat_test')}));
 }
@@ -52,7 +53,7 @@ test('approved TREE upload uses exactly one actual source request',()=>fixture(a
   await uploadIntake(client,intake,'person-approved');
   assert.equal(calls.length,1);assert.equal(calls[0]!.path,'/v2/confidence/bundles');assert.deepEqual(calls[0]!.body,{...intake,approvalActionId:'person-approved'});
 },()=>({status:201,body:{id:'bundle'}})));
-const entry={task:{key:'node-key',blocksSandbox:true,state:'NEEDS_USER',resolutionOptions:[{id:'key',type:'API_KEY',label:'Choose existing key'}]},contentHash:hash,revision:2,updatedAt:'2026-10-01T00:00:00Z'};
+const entry={task:{key:'node-key',artifactKind:'workflow',artifactId:'owned',blocksSandbox:true,state:'NEEDS_USER',resolutionOptions:[{id:'key',type:'API_KEY',label:'Choose existing key'}]},contentHash:hash,revision:2,updatedAt:'2026-10-01T00:00:00Z'};
 test('stale task revision cannot produce a resolve effect',()=>fixture(async(client,calls)=>{
   await assert.rejects(tool('swfte_resolve_setup_task',{artifact:{kind:'workflow',id:'owned'},taskKey:'node-key',optionId:'key',environment:'SANDBOX',value:{handle:'secret-handle'},expectedContentHash:hash,expectedRevision:1},client),/STALE_CONTENT/);
   assert.equal(calls.length,1);assert.equal(calls[0]!.method,'GET');
@@ -82,3 +83,37 @@ test('connections consult actual server tasks before legacy provider lookup',()=
 test('server task authorization failure does not fall through to legacy connections',()=>fixture(async(client,calls)=>{
   await assert.rejects(tool('swfte_connections_check',{workflowId:'owned'},client),SwfteApiError);assert.equal(calls.length,1);assert.equal(calls[0]!.path,'/v2/artifacts/workflow/owned/setup');
 },()=>({status:403,body:{code:'FORBIDDEN'}})));
+
+const managedEntry={...entry,task:{...entry.task,capability:'managed_database.read.provision',recordType:'managed_postgresql_read_role',resolutionOptions:[{id:'provision-read',type:'PROVISION',label:'Provision restricted read role'}]}};
+const managedResolve={artifact:{kind:'workflow',id:'owned'},taskKey:'node-key',optionId:'provision-read',environment:'SANDBOX',value:{handle:`managed:action:act_${'1'.repeat(32)}`},expectedContentHash:hash,expectedRevision:2};
+test('managed READ uses the existing approval capability and exact task revision, never a role password',()=>fixture(async(client,calls)=>{
+  await tool('swfte_request_approval',{capability:'managed_database.read.provision',target:'workflow:owned',environment:'development',params:{taskKey:'node-key',expectedRevision:'2'}},client);
+  assert.equal(calls.length,1);assert.equal(calls[0]!.path,'/v2/actions');
+  assert.deepEqual(calls[0]!.body,{capability:'managed_database.read.provision',target:{kind:'workflow',id:'owned'},environment:'development',params:{taskKey:'node-key',expectedRevision:'2'}});
+},()=>({body:{id:`act_${'1'.repeat(32)}`,status:'PROPOSED',capability:'managed_database.read.provision',target:{kind:'workflow',id:'owned'},environment:'development',requiresApproval:true}})));
+test('managed READ resolves through the actual approved action handle after current task read',()=>fixture(async(client,calls)=>{
+  await tool('swfte_resolve_setup_task',managedResolve,client);
+  assert.equal(calls.length,2);assert.equal(calls[0]!.method,'GET');assert.equal(calls[1]!.method,'POST');
+  assert.equal(calls[1]!.path,'/v2/artifacts/workflow/owned/setup/node-key/resolve');
+  assert.deepEqual(calls[1]!.body,{optionId:'provision-read',environment:'SANDBOX',value:managedResolve.value,expectedContentHash:hash,expectedRevision:2});
+},call=>({body:call.method==='GET'?[managedEntry]:managedEntry})));
+test('managed READ cannot resolve using owner credentials, literal SQL, Live or client action labels',()=>fixture(async(client,calls)=>{
+  for(const change of [{value:{handle:'secret://managed_db_owner'}},{value:{literal:'password'}},{environment:'LIVE:target'},{value:{handle:'managed:action:client-label'}}])
+    await assert.rejects(tool('swfte_resolve_setup_task',{...managedResolve,...change},client),/MANAGED_READ_APPROVED_ACTION_REQUIRED/);
+  assert.equal(calls.length,4);assert.ok(calls.every(call=>call.method==='GET'));
+},()=>({body:[managedEntry]})));
+test('foreign and duplicate current task rows refuse before resolution effects',()=>fixture(async(client,calls)=>{
+  await assert.rejects(tool('swfte_resolve_setup_task',managedResolve,client),/SETUP_RESPONSE_INVALID/);
+  assert.equal(calls.length,1);assert.equal(calls[0]!.method,'GET');
+},()=>({body:[{...managedEntry,task:{...managedEntry.task,artifactId:'foreign'}}]})));
+test('duplicate task keys never pick the first advertised managed READ option',()=>fixture(async(client,calls)=>{
+  await assert.rejects(tool('swfte_resolve_setup_task',managedResolve,client),/SETUP_RESPONSE_INVALID/);assert.equal(calls.length,1);
+},()=>({body:[managedEntry,managedEntry]})));
+test('zero and unsafe setup revisions refuse before any server request',()=>fixture(async(client,calls)=>{
+  for(const expectedRevision of [0,-1,Number.MAX_SAFE_INTEGER+1])await assert.rejects(tool('swfte_resolve_setup_task',{...managedResolve,expectedRevision},client));
+  assert.equal(calls.length,0);
+}));
+test('uncertain managed READ approval is not automatically retried or resolved',()=>fixture(async(client,calls)=>{
+  await assert.rejects(tool('swfte_request_approval',{capability:'managed_database.read.provision',target:'workflow:owned',environment:'development',params:{taskKey:'node-key',expectedRevision:'2'}},client),SwfteApiError);
+  assert.equal(calls.length,1);assert.equal(calls[0]!.path,'/v2/actions');
+},()=>({status:503,body:{error:'UNCONFIRMED'}})));
