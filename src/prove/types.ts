@@ -18,11 +18,13 @@ export interface ProvingRunRequest {
   trigger: 'verified_edit' | 'stop' | 'handoff' | 'cli' | 'mcp' | 'ci';
   manifest: ProofManifest; payload_ref: string | null; requested_checks: string[];
 }
+export type ProofTrace = { category: 'proof_admission'; record_id?: null; content_hash: string }
+  | { category: string; record_id: string; content_hash: string };
 export interface ProvingRunResult {
   schema: 'nexus.proof.v1'; run_id: string; run_key: string; level: ProofLevel;
   status: 'PENDING' | 'COMPLETE'; verdict: ProofVerdict; checks: ProofCheck[];
   findings: ProofFinding[]; dependency_gaps: string[];
-  behavior_trace: Array<{ category: string; record_id: string; content_hash: string }>;
+  behavior_trace: ProofTrace[];
   explained: string[]; confidence?: number; report_url?: string; evidence_record_id?: string;
   review_packet_url?: string;
 }

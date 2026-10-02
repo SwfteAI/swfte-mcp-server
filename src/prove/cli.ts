@@ -2,14 +2,31 @@ import { resolve } from 'node:path';
 import type { ProofLearningBoundary, ProofLevel, SourceIntake } from './types.js';
 import { PROOF_LEVELS } from './types.js';
 import { treeKey } from './treekey.js';
-import { readVerdict, verdictLine, type ProvingClient } from './verdict.js';
+import { readVerdict, readPendingRun, verdictLine, type ProvingClient } from './verdict.js';
 import { installProvingGate } from './gate.js';
-import { runSourceProof } from './source.js';
-import { readCollectorActivity, watchProof } from './watch.js';
+import { runSourceProof, type SourceProofResult } from './source.js';
+import { readCollectorActivity, watchProof, watchAttempt, type WatchAttempt } from './watch.js';
 
 export interface ProveCliContext {
   cwd: string; client?: ProvingClient; intake?: SourceIntake; learning?: ProofLearningBoundary;
   output(line: string): void; signal?: AbortSignal;
+}
+/** A completed server run is deduplicated even when its separate signature verification is unavailable. */
+export async function reportWatchAttempt(client: ProvingClient | undefined, result: SourceProofResult,
+  output: (line: string) => void, signal?: AbortSignal): Promise<WatchAttempt> {
+  const outcome = watchAttempt(result);
+  if (signal?.aborted) return outcome;
+  if (!('token' in result) && result.status === 'COMPLETE' && result.verdict === 'PASS') {
+    const verified = await readVerdict(client, result.run_key, result.level);
+    if (!signal?.aborted) output(verdictLine(verified));
+  } else if ('token' in result) {
+    output(`${result.token} unproven: ${result.dependency_gaps.join(', ')}`);
+  } else if (result.status === 'PENDING') {
+    output(`PROOF_PENDING · tree ${result.run_key.slice(0, 12)}`);
+  } else {
+    output(`swfte · ${result.verdict} · tree ${result.run_key.slice(0, 12)}${result.report_url ? ` · report: ${result.report_url}` : ''}`);
+  }
+  return outcome;
 }
 /** Coordinator calls this from the shared CLI dispatcher; no module installs hooks or auto-starts. */
 export async function handleProveCommand(args: string[], context: ProveCliContext): Promise<number> {
@@ -50,14 +67,19 @@ export async function handleProveCommand(args: string[], context: ProveCliContex
       activity: id => readCollectorActivity(id), snapshot: treeKey, output: context.output,
       prove: async (snapshot, resolvedLevel, session) => {
         const result = await runSourceProof(context.client, { path: snapshot.root, level: resolvedLevel, sessionId: session,
-          trigger: 'verified_edit' }, { intake: context.intake, learning: context.learning });
-        context.output(`swfte · ${result.verdict} · tree ${result.run_key.slice(0, 12)}${'report_url' in result && result.report_url ? ` · report: ${result.report_url}` : ''}`);
+          trigger: 'verified_edit', expectedRunKey: snapshot.run_key, signal: context.signal }, { intake: context.intake, learning: context.learning });
+        return reportWatchAttempt(context.client, result, context.output, context.signal);
+      },
+      reread: async (runId, snapshot, resolvedLevel) => {
+        const result = await readPendingRun(context.client!, runId, snapshot.run_key, resolvedLevel);
+        return reportWatchAttempt(context.client, result, context.output, context.signal);
       },
     });
     return 0;
   }
   try {
-    const result = await runSourceProof(context.client, { path, level, trigger: 'cli' }, { intake: context.intake, learning: context.learning });
+    const result = await runSourceProof(context.client, { path, level, trigger: 'cli', signal: context.signal }, { intake: context.intake, learning: context.learning });
+    if (context.signal?.aborted) return 1;
     if (!('token' in result) && result.verdict === 'PASS') {
       const verified = await readVerdict(context.client, result.run_key, result.level);
       context.output(verdictLine(verified)); return verified.exitCode;

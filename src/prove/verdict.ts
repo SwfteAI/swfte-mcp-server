@@ -7,13 +7,18 @@ export interface ProvingClient {
   request<T = unknown>(options: RequestOptions): Promise<T>;
 }
 const Check = z.object({ name: z.string().min(1), ok: z.boolean().nullable(), detail: z.string(), evidence_ref: z.string().nullable().optional() });
+const Hash = z.string().regex(/^[a-f0-9]{64}$/u);
+const Trace = z.union([
+  z.object({ category: z.literal('proof_admission'), record_id: z.null().optional(), content_hash: Hash }),
+  z.object({ category: z.string().min(1).refine(value => value !== 'proof_admission'), record_id: z.string().min(1), content_hash: Hash }),
+]);
 const Result = z.object({
   schema: z.literal('nexus.proof.v1'), run_id: z.string().regex(/^pr_[a-f0-9]{64}$/u), run_key: z.string().regex(/^[a-f0-9]{64}$/u),
   level: z.enum(['local', 'manifest', 'diff', 'tree']), status: z.enum(['PENDING', 'COMPLETE']),
   verdict: z.enum(['PASS', 'FAIL', 'PARTIAL', 'UNAVAILABLE']), checks: z.array(Check),
   findings: z.array(z.object({ rule_id: z.string(), severity: z.string(), file: z.string(), line: z.number().int(),
     message: z.string(), remediation: z.string(), evidence_ref: z.string().nullable().optional() })),
-  dependency_gaps: z.array(z.string()), behavior_trace: z.array(z.object({ category: z.string(), record_id: z.string(), content_hash: z.string().regex(/^[a-f0-9]{64}$/u) })),
+  dependency_gaps: z.array(z.string()), behavior_trace: z.array(Trace),
   explained: z.array(z.string()), confidence: z.number().finite().optional(), report_url: z.string().optional(),
   evidence_record_id: z.string().optional(), review_packet_url: z.string().optional(),
 });
@@ -25,9 +30,29 @@ export function assertProvingDestination(baseUrl: string): void {
     throw new Error('Proving requires HTTPS off-machine');
   }
 }
-export function parseRun(value: unknown, runKey: string, level: ProofLevel): ProvingRunResult {
+export function parseRun(value: unknown, runKey: string, level: ProofLevel, expectedAdmissionHash?: string): ProvingRunResult {
   const result = Result.parse(value);
   if (result.run_key !== runKey || result.level !== level) throw new Error('STALE_CONTENT: result belongs to another tree');
+  const admissions = result.behavior_trace.filter(trace => trace.category === 'proof_admission');
+  const unmeasured = result.behavior_trace.length === 0 && result.verdict === 'UNAVAILABLE'
+    && result.dependency_gaps.length > 0 && result.checks.every(check => check.ok === null && !check.evidence_ref)
+    && !result.evidence_record_id;
+  if (admissions.length > 1 || (result.status === 'COMPLETE' && !unmeasured && admissions.length !== 1)
+    || (expectedAdmissionHash !== undefined && (!/^[a-f0-9]{64}$/u.test(expectedAdmissionHash)
+      || admissions.length !== 1 || admissions[0]!.content_hash !== expectedAdmissionHash))) {
+    throw new Error('Invalid sealed proof admission');
+  }
+  // The server canonical seal binds this hash. A client cannot recompute it from result fields alone.
+  return result;
+}
+
+/** Read only the accepted run identity; never starts/uploads another run when polling. */
+export async function readPendingRun(client: ProvingClient, runId: string, runKey: string, level: ProofLevel): Promise<ProvingRunResult> {
+  if (!/^pr_[a-f0-9]{64}$/u.test(runId)) throw new Error('Invalid pending run identity');
+  assertProvingDestination(client.baseUrl);
+  const result = parseRun(await client.request({ method: 'GET', path: `/v2/proving/runs/${runId}`,
+    retries: 0, timeoutMs: 5_000 }), runKey, level);
+  if (result.run_id !== runId) throw new Error('STALE_CONTENT: pending run identity changed');
   return result;
 }
 
@@ -46,7 +71,7 @@ export async function readVerdict(client: ProvingClient | undefined, runKey: str
       || run.findings.some(finding => ['CRITICAL', 'HIGH'].includes(finding.severity))) {
       return { token: 'PROOF_UNPROVEN', exitCode: 1, reason: run.dependency_gaps.join(', ') || 'checks or signed evidence incomplete', run };
     }
-    if (!/^[A-Za-z0-9._:-]{1,200}$/u.test(run.evidence_record_id)) throw new Error('Invalid evidence record reference');
+    if (['.', '..'].includes(run.evidence_record_id) || !/^[A-Za-z0-9._:-]{1,200}$/u.test(run.evidence_record_id)) throw new Error('Invalid evidence record reference');
     const verification = await client.request<unknown>({ method: 'GET',
       path: `/v2/compliance/evidence-records/${encodeURIComponent(run.evidence_record_id)}/verify`, retries: 0, timeoutMs: 5_000 });
     const record = z.object({ recordId: z.string(), signatureValid: z.literal(true), status: z.literal('VALID'),

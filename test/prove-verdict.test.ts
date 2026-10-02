@@ -5,13 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { readVerdict, assertProvingDestination, parseRun } from '../src/prove/verdict.js';
+import { readVerdict, assertProvingDestination, parseRun, readPendingRun } from '../src/prove/verdict.js';
 import type { ProvingRunResult } from '../src/prove/types.js';
 
 const hash = 'a'.repeat(64);
 const positive = (): ProvingRunResult => ({ schema: 'nexus.proof.v1', run_id: `pr_${hash}`, run_key: hash, level: 'diff',
   status: 'COMPLETE', verdict: 'PASS', checks: [{ name: 'scan', ok: true, detail: 'fixture measurement', evidence_ref: 'scan_fixture' }],
-  findings: [], dependency_gaps: [], behavior_trace: [{ category: 'scan', record_id: 'scan_fixture', content_hash: hash }], explained: [],
+  findings: [], dependency_gaps: [], behavior_trace: [{ category: 'proof_admission', record_id: null, content_hash: hash }, { category: 'scan', record_id: 'scan_fixture', content_hash: hash }], explained: [],
   evidence_record_id: 'cer_fixture' });
 const verification = () => ({ recordId: 'cer_fixture', signatureValid: true, status: 'VALID', fresh: true,
   recordedContentHash: hash, currentContentHash: hash });
@@ -88,4 +88,50 @@ test('executable verdict mutants are killed by assertions after clean positive a
     }
     assert.equal(await readFile(new URL('../src/prove/verdict.ts', import.meta.url), 'utf8'), original, 'original source remains byte-identical');
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('backend sealed admission null and omitted identity parse without inventing evidence', () => {
+  for (const trace of [{ category: 'proof_admission', record_id: null, content_hash: hash },
+    { category: 'proof_admission', content_hash: hash }]) {
+    const serialized = JSON.parse(JSON.stringify({ ...positive(), behavior_trace: [trace, positive().behavior_trace[1]] }));
+    const parsed = parseRun(serialized, hash, 'diff', hash);
+    assert.equal(parsed.behavior_trace[0]!.record_id, 'record_id' in trace ? null : undefined);
+    assert.equal(Object.hasOwn(parsed.behavior_trace[0]!, 'record_id'), Object.hasOwn(trace, 'record_id'));
+    assert.equal(parsed.behavior_trace[0]!.content_hash, hash);
+  }
+  const admission = { category: 'proof_admission', record_id: null, content_hash: hash };
+  for (const traces of [[], [admission, admission], [{ ...admission, content_hash: 'b'.repeat(64) }],
+    [{ ...admission, content_hash: 'invalid' }], [admission, { category: 'run_ledger', record_id: null, content_hash: hash }],
+    [admission, { category: 'scan', content_hash: hash }], [admission, { category: 'bundle_deleted', record_id: '', content_hash: hash }]]) {
+    assert.throws(() => parseRun({ ...positive(), behavior_trace: traces }, hash, 'diff', hash));
+  }
+});
+test('dot evidence reference is refused before verification transport', async () => {
+  for (const id of ['.', '..']) {
+    const paths: string[] = [];
+    const verdict = await readVerdict({ baseUrl: 'https://api.example.invalid', request: async <T>(options: { path: string }) => {
+      paths.push(options.path); return { ...positive(), evidence_record_id: id } as T;
+    } }, hash, 'diff');
+    assert.equal(verdict.token, 'PROOF_UNPROVEN'); assert.deepEqual(paths, ['/v2/proving/runs/verdict']);
+  }
+});
+test('pending reader uses exact owned run id and rejects substituted identity', async () => {
+  const paths: string[] = [];
+  const client = { baseUrl: 'https://api.example.invalid', request: async <T>(options: { path: string }) => {
+    paths.push(options.path); return positive() as T;
+  } };
+  assert.equal((await readPendingRun(client, `pr_${hash}`, hash, 'diff')).status, 'COMPLETE');
+  assert.deepEqual(paths, [`/v2/proving/runs/pr_${hash}`]);
+  await assert.rejects(readPendingRun(client, '.', hash, 'diff')); assert.equal(paths.length, 1);
+  await assert.rejects(readPendingRun(client, `pr_${'b'.repeat(64)}`, hash, 'diff'), /STALE_CONTENT/);
+});
+
+test('unmeasured backend terminal unavailable remains readable but cannot satisfy a gate', async () => {
+  const unavailable = { ...positive(), status: 'COMPLETE', verdict: 'UNAVAILABLE',
+    checks: [{ name: 'scan', ok: null, detail: 'Not run: capacity', evidence_ref: null }],
+    dependency_gaps: ['PROVING_CAPACITY_UNAVAILABLE'], behavior_trace: [], evidence_record_id: undefined };
+  assert.equal(parseRun(unavailable, hash, 'diff').status, 'COMPLETE');
+  assert.equal((await readVerdict({ baseUrl: 'https://api.example.invalid', request: async <T>() => unavailable as T }, hash, 'diff')).token, 'PROOF_UNPROVEN');
+  assert.throws(() => parseRun({ ...unavailable, verdict: 'PASS' }, hash, 'diff'));
+  assert.throws(() => parseRun({ ...unavailable, checks: positive().checks }, hash, 'diff'));
 });
