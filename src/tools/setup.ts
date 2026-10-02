@@ -1,10 +1,9 @@
 import { z } from 'zod';
 import type { ToolDefinition } from './_types.js';
-import type { ResolverSession } from '../contracts/setup-proof-v1.js';
 import {ownedSetupTaskEntries,resolvedSetupTaskEntry} from './_setup-task.js';
 import {ownedProofRecord,currentProofRecord} from './_proof-record.js';
 import {resolverEvents} from './_resolver-events.js';
-import {ownedResolverSession,cancelledResolverSession,resolverTerminal,resolverSessionIdSchema} from './_resolver-session.js';
+import {ownedResolverSession,cancelledResolverSession,resolverTerminal,resolverSessionIdSchema,resolverSessionSchema} from './_resolver-session.js';
 
 export const SetupArtifactSchema = z.object({
   kind: z.enum(['workflow','chatflow','agent','widget','application','journey','mcp','finetune']),
@@ -70,14 +69,24 @@ export const setupTools: ToolDefinition[] = [
     name:'swfte_resolve', title:'Start governed prove or fix resolver',
     description:'Start the bounded server resolver using current content and existing tool/model guards. Unavailable governed execution returns NEEDS_USER; no client planner replaces it.',
     inputSchema:z.object({ artifact:SetupArtifactSchema, intent:z.enum(['prove','fix']), expectedContentHash:hash, budget:z.object({maxSteps:z.number().int().min(1).max(40),maxWallSeconds:z.number().int().min(1).max(600),maxSpendUsd:z.number().finite().min(0).max(50)}).strict().optional() }).strict(),
-    execute:(input,{client})=>client.request<ResolverSession>({method:'POST',path:'/v2/resolver/sessions',body:input,retries:0}),
+    execute:async(input,{client})=>{
+      const session=resolverSessionSchema.parse(await client.request({method:'POST',path:'/v2/resolver/sessions',body:input,retries:0}));
+      const asked=input.budget??{maxSteps:3,maxWallSeconds:120,maxSpendUsd:0};
+      if(client.configuredWorkspaceId!==undefined&&session.workspaceId!==client.configuredWorkspaceId
+        ||session.artifact.kind!==input.artifact.kind||session.artifact.id!==input.artifact.id
+        ||session.contentHash!==input.expectedContentHash||session.intent!==(input.intent==='prove'?'PROVE':'FIX')
+        ||session.budget.maxSteps!==Math.min(12,asked.maxSteps)||session.budget.maxWallSeconds!==Math.min(120,asked.maxWallSeconds)
+        ||session.budget.maxSpendUsd!==Math.min(1,asked.maxSpendUsd)||session.startedAt==null)
+        throw new Error('RESOLVER_START_RESPONSE_BINDING_MISMATCH');
+      return session;
+    },
   },
   {
     name:'swfte_resolver_status', title:'Read resolver execution records', readOnly:true,
     description:'Read the actual owned resolver session or a bounded window of its redacted canonical journal. Events resume after the actual Last-Event-ID; reported tool success does not substitute for verification.',
     inputSchema:z.object({ sessionId:z.string().min(1).max(200), events:z.boolean().default(false),after:z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER-128).default(-1) }).strict(),
     execute:async(input,{client})=>{
-      if(!input.events)return client.request({method:'GET',path:`/v2/resolver/sessions/${encodeURIComponent(input.sessionId)}`});
+      if(!input.events)return ownedResolverSession(await client.request({method:'GET',path:`/v2/resolver/sessions/${encodeURIComponent(input.sessionId)}`,retries:0}),input.sessionId,client.configuredWorkspaceId);
       const wire=await client.request<unknown>({method:'GET',path:`/v2/resolver/sessions/${encodeURIComponent(input.sessionId)}/events`,
         headers:{Accept:'text/event-stream',...(input.after>=0?{'Last-Event-ID':String(input.after)}:{})},retries:0,maxResponseBytes:256*1024,timeoutMs:35_000});
       return resolverEvents(wire===undefined?'':wire,input.sessionId,input.after,client.configuredWorkspaceId);
