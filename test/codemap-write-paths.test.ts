@@ -208,3 +208,22 @@ test('actual MCP sync receipts follow physical restored writes only, never dry-r
     assert.equal(readFileSync(join(root, receiptPath), 'utf8'), receipts);
   } finally { process.chdir(old); rmSync(root, { recursive: true, force: true }); }
 });
+
+test('mounted embed ledger failure reports source already committed and closes capability', async () => {
+  const { NativeFilesystem, NativeFilesystemError } = await import('../src/native-filesystem.js');
+  const { NativeWriterCommitError } = await import('../src/fsguard.js');
+  const root = project({}), cwd = process.cwd(), replace = NativeFilesystem.prototype.replace;
+  NativeFilesystem.prototype.replace = function(input) {
+    if (input.rel === receiptPath) throw new NativeFilesystemError('IO_ERROR');
+    return replace.call(this, input);
+  };
+  process.chdir(root);
+  try {
+    const embed = scaffoldTools.find(tool => tool.name === 'swfte_embed_widget')!;
+    await assert.rejects(embed.execute({ catalogRef: 'widget:wd_owned', targetFile: 'written.html' },
+      { client: { request: async () => ({ embed: { html } }) }, config: { credential: 'fixture-local-credential' }, localFilesystem: true } as never),
+      (err: unknown) => err instanceof NativeWriterCommitError && err.confirmedFiles.some(file => file.path === 'written.html'));
+    assert.match(readFileSync(join(root, 'written.html'), 'utf8'), /iframe/);
+    assert.equal(existsSync(join(root, receiptPath)), false);
+  } finally { process.chdir(cwd); NativeFilesystem.prototype.replace = replace; rmSync(root, { recursive: true, force: true }); }
+});

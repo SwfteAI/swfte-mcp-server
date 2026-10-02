@@ -30,7 +30,7 @@ import { FRAMEWORKS, type Framework } from './stack.js';
 import { PACKAGE_NAME, PACKAGE_VERSION } from './version.js';
 import { scanRepository } from './codemap/scan.js';
 import { reportVerification, verifyProjectWithSnapshot } from './codemap/report.js';
-import { recordWrittenFiles } from './codemap/provenance.js';
+import { recordNativeWrittenFiles } from './codemap/provenance.js';
 import { handleProveCommand } from './prove/cli.js';
 
 export interface CliIO {
@@ -185,7 +185,16 @@ function projectRoot(io: CliIO, p: Parsed): string {
 }
 
 /** swfte.json's baseUrl, read before credentials so a repo pinned to a non-default API needs no extra env. */
-function peekBaseUrl(root: string): string | undefined {
+function peekBaseUrl(root: string, owner?: ConfinedWriter): string | undefined {
+  if (owner?.native) {
+    try {
+      const loaded = loadLock(owner, { baseUrl: '' });
+      return loaded.exists && loaded.lock.baseUrl ? loaded.lock.baseUrl : undefined;
+    } catch (error) {
+      if (error instanceof LockError) return undefined;
+      throw error; // Native admission/confinement errors must never become the default base URL.
+    }
+  }
   try {
     const loaded = loadLock(new ConfinedWriter({ root }), { baseUrl: '' });
     return loaded.exists && loaded.lock.baseUrl ? loaded.lock.baseUrl : undefined;
@@ -256,14 +265,17 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
   // Everything credential-valued this run knows about; error text is scrubbed of all of it (BT-N8).
   const secrets = [io.env.SWFTE_API_KEY, io.env.SWFTE_PAT].map((v) => v?.trim()).filter((v): v is string => Boolean(v));
 
+  let ownedWriter: ConfinedWriter | undefined;
   try {
     const root = projectRoot(io, p);
+    const selectedNative = ['add', 'sync', 'upgrade'].includes(p.command);
+    const writer = ownedWriter = new ConfinedWriter({ root, forbidden: secrets, native: selectedNative });
     const needsNetwork =
       p.command === 'add' || p.command === 'sync' || p.command === 'upgrade' || (p.command === 'scan' && !flag(p, 'offline')) || (p.command === 'verify' && !flag(p, 'offline')) || (p.command === 'dev' && flag(p, 'record'));
     let config: ServerConfig | null = null;
     if (needsNetwork) {
       try {
-        config = cliConfig(io.env, peekBaseUrl(root));
+        config = cliConfig(io.env, peekBaseUrl(root, writer));
       } catch (err) {
         if (!(err instanceof ConfigError)) throw err;
         if (p.command !== 'verify') throw err;
@@ -271,7 +283,6 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       }
     }
     if (config) secrets.push(config.credential);
-    const writer = new ConfinedWriter({ root, forbidden: config ? [config.credential] : [] });
     const client = config ? new SwfteClient(config) : null;
     const env = io.env;
 
@@ -307,9 +318,10 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         );
         // Scan what was just written (code only: the lock and env examples are not code).
         const written = res.files.filter((f) => f.action !== 'unchanged' && f.path !== 'swfte.json' && !/(^|\/)\.env[^/]*$/.test(f.path)).map((f) => f.path);
-        recordWrittenFiles(root, res.files, 'human', 'cli');
+        recordNativeWrittenFiles(writer, res.files, 'human', 'cli');
         const compliance = written.length && !flag(p, 'no-compliance') ? await scanProject(client, root, written) : null;
         const strict = flag(p, 'strict');
+        writer.close();
         if (json) emit({ ...res, compliance });
         else {
           io.out(`Added ${res.catalogRef} as "${res.alias}" (${res.framework}${res.detection ? `, detected: ${res.detection.signals[0] ?? res.detection.detected}` : ''}).`);
@@ -331,6 +343,8 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       case 'sync': {
         if (p.positionals.length) throw new UsageError('swfte sync takes no positional arguments (use --alias).');
         const res = await syncProject({ client: client!, config: config!, writer, env }, { aliases: p.flags.get('alias'), dryRun: flag(p, 'dry-run'), force: flag(p, 'force') });
+        recordNativeWrittenFiles(writer, res.files, 'human', 'cli');
+        writer.close();
         if (json) emit(res);
         else printSync(io, res);
         // Held because the change could not be vetted (BT-N4) is "could not check": non-zero, distinct from an error.
@@ -345,6 +359,8 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
           pin: !flag(p, 'no-pin'),
           dryRun: flag(p, 'dry-run'),
         });
+        recordNativeWrittenFiles(writer, res.files, 'human', 'cli');
+        writer.close();
         if (json) emit(res);
         else printSync(io, res);
         return res.entries.some((e) => e.status === 'error' || e.status.startsWith('blocked')) ? 1 : 0;
@@ -438,7 +454,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       return await client.withDeadline(Date.now() + budget, exec);
     } catch (err) {
       if (err instanceof OperationDeadlineError) {
-        io.err(`Gave up after ${Math.round(budget / 1000)} s without an answer from Swfte (SWFTE_TIMEOUT_MS). Nothing further was written.`);
+        io.err(`Gave up after ${Math.round(budget / 1000)} s without an answer from Swfte (SWFTE_TIMEOUT_MS). Any completed local writes remain; no rollback was attempted.`);
         return 2;
       }
       throw err;
@@ -467,6 +483,8 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
     }
     io.err(redact(err instanceof Error ? err.message : String(err)));
     return 1;
+  } finally {
+    ownedWriter?.close();
   }
 }
 

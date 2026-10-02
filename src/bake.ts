@@ -1,3 +1,4 @@
+import { NativeFilesystemError } from './native-filesystem.js';
 /**
  * Bake-in (CONTRACT rev 4): the one implementation behind both the MCP tools
  * (swfte_scaffold_client, swfte_sync, swfte_check_upgrades) and the `swfte`
@@ -9,7 +10,6 @@
  * framework adapter (owned by the developer, never rewritten), and a row in
  * swfte.json pinning the contract hash it was generated against.
  */
-import { existsSync, readFileSync } from 'node:fs';
 import { posix } from 'node:path';
 import {
   effectiveContractHash,
@@ -285,7 +285,7 @@ export interface BakeResult {
  * alias, paths) first, so a bad path or alias fails before any request.
  */
 function planTarget(writer: ConfinedWriter, input: BakeInput, fallbackName: string | null) {
-  const detection = writer.inline ? null : detectStack(writer.root);
+  const detection = writer.inline ? null : detectStack(writer.root, writer);
   let framework: Framework = input.framework ?? detection?.framework ?? (input.language === 'python' ? 'plain-python' : 'plain-ts');
   // An explicit language that disagrees with the detected framework wins, with the plain adapter for that language.
   if (input.language && languageOf(framework) !== input.language) framework = input.language === 'python' ? 'plain-python' : 'plain-ts';
@@ -361,8 +361,8 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
   const clientAbs = writer.resolve(clientRel);
   // A client this tool generated for this artifact, unedited, is ours to regenerate; anything else needs force.
   const ours = (() => {
-    if (writer.inline || !existsSync(clientAbs)) return false;
-    const info = inspectGenerated(readFileSync(clientAbs, 'utf8'));
+    if (writer.inline || !writer.existsFile(clientAbs)) return false;
+    const info = inspectGenerated(writer.readText(clientAbs)!);
     return info.generated && info.catalogRef === r.ref && info.intact === true;
   })();
   writer.create(clientAbs, render(spec, language), input.force || ours);
@@ -380,7 +380,7 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
   const adapterPaths: string[] = [];
   for (const f of adapter.files) {
     const abs = writer.resolve(f.path);
-    if (f.ifMissing && !writer.inline && existsSync(abs)) continue;
+    if (f.ifMissing && !writer.inline && writer.existsFile(abs)) continue;
     writer.create(abs, f.content, input.force);
     adapterPaths.push(normalizeRel(f.path));
   }
@@ -434,8 +434,9 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
 }
 
 function safeExists(writer: ConfinedWriter, rel: string): boolean {
+  if (writer.native) return writer.existsFile(writer.resolve(rel));
   try {
-    return existsSync(writer.resolve(rel));
+    return writer.existsFile(writer.resolve(rel));
   } catch {
     return false;
   }
@@ -570,10 +571,11 @@ function clientFileOf(writer: ConfinedWriter, a: LockArtifact): ClientFileState 
     try {
       abs = writer.resolve(rel);
     } catch (err) {
+      if (writer.native) throw err;
       return { rel, exists: false, content: null, error: err instanceof Error ? err.message : String(err) };
     }
-    if (!existsSync(abs)) continue;
-    const content = readFileSync(abs, 'utf8');
+    if (!writer.existsFile(abs)) continue;
+    const content = writer.readText(abs)!;
     const info = inspectGenerated(content);
     if (info.generated && (info.catalogRef === null || info.catalogRef === a.catalogRef)) return { rel, exists: true, content };
   }
@@ -967,6 +969,7 @@ export async function syncProject(ctx: BakeContext, opts: SyncOptions = {}): Pro
                 : `Regenerated ${rel}${pinText || ' (generator output changed; contract unchanged)'}.`,
       });
     } catch (err) {
+      if (writer.native && err instanceof NativeFilesystemError) throw err;
       entries.push({ ...base, status: 'error', to: null, diff: null, breakingReasons: [], capabilityChanges: [], message: err instanceof Error ? err.message : String(err) });
     }
   }

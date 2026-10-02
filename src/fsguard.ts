@@ -27,8 +27,8 @@
  *      secret-shaped tokens before it touches disk. Generated code reads
  *      credentials from the environment; it never carries one.
  *
- * Writes are planned first and committed only when the whole plan is clean, so
- * a refused file does not leave half a scaffold behind.
+ * Writes are planned first. Conflicts and secrets are checked before effects;
+ * runtime failures can leave a partial scaffold, reported without rollback.
  *
  * Inline mode (a hosted server, whose disk is not the caller's project) plans
  * against an empty virtual tree and returns the files' contents from commit()
@@ -36,6 +36,8 @@
  */
 
 import { closeSync, constants as FS, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, writeSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { NativeFilesystem, NativeFilesystemError, NATIVE_FILE_LIMIT, type NativeSnapshot } from './native-filesystem.js';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
@@ -191,6 +193,20 @@ export interface PlannedWrite {
   content?: string;
 }
 
+export interface NativeWriteReceipt {
+  readonly rootDev: string; readonly rootIno: string; readonly path: string;
+  readonly action: PlannedWrite['action']; readonly dev: string; readonly ino: string;
+  readonly hash: string; readonly bytes: number;
+}
+export class NativeWriterCommitError extends Error {
+  constructor(readonly confirmedFiles: PlannedWrite[], readonly uncertainPaths: string[],
+    readonly directoriesMayExist: boolean, readonly code: string) {
+    super(`Native write failed (${code}); confirmed files: ${confirmedFiles.map(file => file.path).join(', ') || 'none'}; ` +
+      `uncertain paths: ${uncertainPaths.join(', ') || 'none'}; directories may exist: ${directoriesMayExist}. No rollback was attempted.`);
+    this.name = 'NativeWriterCommitError';
+  }
+}
+
 type Op = { abs: string; content: string; action: PlannedWrite['action'] };
 
 export class ConfinedWriter {
@@ -201,9 +217,63 @@ export class ConfinedWriter {
 
   readonly inline: boolean;
   private readonly forbidden: string[];
+  readonly native: boolean;
+  #capability: NativeFilesystem | undefined;
+  private closed = false;
+  private failed = false;
+  readonly #preimages = new Map<string, NativeSnapshot | null>();
+  readonly #receipts = new WeakMap<PlannedWrite, NativeWriteReceipt>();
 
-  constructor(opts: { root?: string; forbidden?: string[]; inline?: boolean } = {}) {
+  private cap(): NativeFilesystem {
+    if (this.closed) throw new NativeFilesystemError('ROOT_CLOSED');
+    return this.#capability ??= NativeFilesystem.openRoot(this.root);
+  }
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.#capability?.close();
+  }
+  private snapshot(abs: string, maxBytes = NATIVE_FILE_LIMIT): NativeSnapshot | null {
+    if (this.closed) throw new NativeFilesystemError('ROOT_CLOSED');
+    if (this.failed) throw new Error('Native plan was consumed after a failed commit; use a new writer.');
+    abs = this.resolve(abs);
+    if (!this.#preimages.has(abs)) {
+      const snapshot = this.cap().read(this.rel(abs), maxBytes);
+      this.#preimages.set(abs, snapshot ? Object.freeze({ ...snapshot, bytes: Buffer.from(snapshot.bytes) }) : null);
+    }
+    const snapshot = this.#preimages.get(abs)!;
+    if (snapshot && snapshot.bytes.length > maxBytes) throw new NativeFilesystemError('SIZE_LIMIT');
+    return snapshot;
+  }
+  /** Explicit current descriptor observation; never replaces a planning preimage. */
+  readCurrentSnapshot(abs: string, maxBytes = NATIVE_FILE_LIMIT): NativeSnapshot | null {
+    if (!this.native || this.inline) return null;
+    const value = this.cap().read(this.rel(this.resolve(abs)), maxBytes);
+    return value ? Object.freeze({ ...value, bytes: Buffer.from(value.bytes) }) : null;
+  }
+  readText(abs: string, maxBytes = NATIVE_FILE_LIMIT): string | null {
+    if (this.inline) return null;
+    if (this.native) return this.snapshot(abs, maxBytes)?.bytes.toString('utf8') ?? null;
+    abs = this.resolve(abs);
+    try {
+      const bytes = readFileSync(abs);
+      if (bytes.length > maxBytes) throw new Error('File exceeds read limit.');
+      return bytes.toString('utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+  existsFile(abs: string, maxBytes = NATIVE_FILE_LIMIT): boolean { return this.readText(abs, maxBytes) !== null; }
+  nativeReceipt(write: PlannedWrite): NativeWriteReceipt | null {
+    const receipt = this.#receipts.get(write);
+    return receipt && receipt.path === write.path && receipt.action === write.action && receipt.bytes === write.bytes
+      && write.content === undefined ? receipt : null;
+  }
+
+  constructor(opts: { root?: string; forbidden?: string[]; inline?: boolean; native?: boolean } = {}) {
     this.inline = Boolean(opts.inline);
+    this.native = Boolean(opts.native) && !this.inline;
     this.forbidden = opts.forbidden ?? [];
     // Same root rule as the read side: a cwd of / or $HOME confines nothing.
     this.root = this.inline ? resolve(sep, 'swfte-inline-project') : confinementRoot(opts.root ?? process.cwd());
@@ -228,10 +298,10 @@ export class ConfinedWriter {
           'Pass a path inside the project; `..` traversal and absolute paths elsewhere are rejected.'
       );
     }
-    if (!this.inline && !isInside(this.realRoot, nearestExistingReal(abs))) {
+    if (!this.inline && !this.native && !isInside(this.realRoot, nearestExistingReal(abs))) {
       throw new PathConfinementError(`Refusing path "${p}": a symlink along it leads outside the working directory.`);
     }
-    if (!this.inline) this.assertNoSymlink(abs, p);
+    if (!this.inline && !this.native) this.assertNoSymlink(abs, p);
     return abs;
   }
 
@@ -270,6 +340,7 @@ export class ConfinedWriter {
 
   private checkTarget(abs: string): 'missing' | 'file' {
     if (this.inline) return 'missing';
+    if (this.native) return this.snapshot(abs) ? 'file' : 'missing';
     this.assertNoSymlink(abs);
     let st;
     try {
@@ -287,7 +358,7 @@ export class ConfinedWriter {
   create(abs: string, content: string, force = false): void {
     const state = this.checkTarget(abs);
     if (state === 'file') {
-      const current = readFileSync(abs, 'utf8');
+      const current = this.readText(abs)!;
       if (current === content) return void this.ops.set(abs, { abs, content, action: 'unchanged' });
       if (!force) {
         this.conflicts.push(this.rel(abs));
@@ -311,7 +382,8 @@ export class ConfinedWriter {
   ): { added: string[]; kept: string[]; changed: string[] } {
     const state = this.checkTarget(abs);
     const planned = this.ops.get(abs)?.content;
-    let text = planned ?? (state === 'file' ? readFileSync(abs, 'utf8') : '');
+    let text = planned ?? (state === 'file' ? this.readText(abs)! : '');
+    const originalText = text;
     const added: string[] = [];
     const kept: string[] = [];
     const changed: string[] = [];
@@ -335,7 +407,8 @@ export class ConfinedWriter {
       toAppend.push(`${e.key}=${e.value}`);
       added.push(e.key);
     }
-    text = lines.join('\n');
+    // A kept-only merge is a byte-preserving no-op, including prior planned content.
+    text = added.length || changed.length ? lines.join('\n') : originalText;
     if (toAppend.length) {
       const needsGap = text.length > 0 && !text.endsWith('\n') ? '\n' : '';
       const header = opts.header && !text.includes(opts.header) ? [`# ${opts.header}`] : [];
@@ -362,9 +435,10 @@ export class ConfinedWriter {
   mergeJson(abs: string, update: (current: Record<string, unknown>) => Record<string, unknown>, force = false): void {
     const state = this.checkTarget(abs);
     let current: Record<string, unknown> = {};
-    if (state === 'file') {
+    const planned = this.native ? this.ops.get(abs)?.content : undefined;
+    if (state === 'file' || planned !== undefined) {
       try {
-        const parsed = JSON.parse(readFileSync(abs, 'utf8'));
+        const parsed = JSON.parse(planned ?? this.readText(abs)!);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) current = parsed;
         else throw new Error('not an object');
       } catch {
@@ -389,12 +463,13 @@ export class ConfinedWriter {
     if (m) throw new Error(`Refusing to write ${label}: it contains a secret-shaped token (${m[0].slice(0, 6)}…).`);
   }
 
-  /** Commit the plan. Throws, having written nothing, if any conflict or secret was found. */
+  /** Refusals precede effects; native multi-file failures report confirmed/uncertain effects without rollback. */
   commit(): PlannedWrite[] {
     if (this.conflicts.length) {
       throw new OverwriteRefusedError(this.conflicts);
     }
     for (const op of this.ops.values()) this.assertNoSecrets(this.rel(op.abs), op.content);
+    if (this.native) return this.commitNative();
     const out: PlannedWrite[] = [];
     for (const op of this.ops.values()) {
       if (this.inline) {
@@ -417,6 +492,68 @@ export class ConfinedWriter {
       out.push({ path: this.rel(op.abs), action: op.action, bytes: Buffer.byteLength(op.content) });
     }
     return out;
+  }
+  private commitNative(): PlannedWrite[] {
+    if (this.failed) throw new Error('Native plan was consumed after a failed commit; use a new writer.');
+    if (this.closed) throw new NativeFilesystemError('ROOT_CLOSED');
+    if (!this.ops.size) return [];
+    // Validate every payload and original preimage before any directory/file effect.
+    // The producer checks again at each publication; this is not a namespace CAS.
+    const cap = this.cap(), out: PlannedWrite[] = [];
+    try {
+      for (const op of this.ops.values()) {
+        if (Buffer.byteLength(op.content) > NATIVE_FILE_LIMIT) throw new NativeFilesystemError('SIZE_LIMIT');
+        const expected = this.snapshot(op.abs), current = cap.read(this.rel(op.abs));
+        const fields = ['dev', 'ino', 'mode', 'nlink', 'size', 'mtimeSec', 'mtimeNsec', 'ctimeSec', 'ctimeNsec'] as const;
+        if ((expected === null) !== (current === null) || (expected && current
+          && (!expected.bytes.equals(current.bytes) || fields.some(field => expected[field] !== current[field])))) {
+          throw new NativeFilesystemError('STALE_CONTENT');
+        }
+      }
+    } catch (error) {
+      this.failed = true; this.ops.clear(); this.#preimages.clear();
+      throw new NativeWriterCommitError([], [], false, error instanceof NativeFilesystemError ? error.code : 'IO_ERROR');
+    }
+    let directoriesMayExist = false, current: string | undefined, replacing = false, acknowledgedPublication = false;
+    try {
+      for (const op of this.ops.values()) {
+        current = this.rel(op.abs);
+        replacing = false;
+        acknowledgedPublication = false;
+        const expected = this.#preimages.get(op.abs)!;
+        if (op.action === 'unchanged' && expected === null) {
+          // There is no file to read back or publish. Do not create parents or seal intended bytes.
+          out.push({ path: current, action: 'unchanged', bytes: 0 });
+          continue;
+        }
+        const parent = current.split('/').slice(0, -1);
+        if (parent.length && op.action !== 'unchanged') {
+          // mkdir does not expose an acknowledged-created flag; conservatively report possible effects.
+          directoriesMayExist = true;
+          for (let depth = 1; depth <= parent.length; depth++) cap.mkdir(parent.slice(0, depth).join('/'));
+        }
+        replacing = true;
+        // The unchanged branch uses raw preimage bytes, never a lossy UTF8 round trip.
+        // The actual producer checks the snapshot and returns genuine unchanged descriptor readback.
+        const result = cap.replace({ rel: current, expected, bytes: op.action === 'unchanged' ? expected!.bytes : Buffer.from(op.content),
+          policy: expected === null ? 'create-only' : op.action === 'merge' ? 'merge' : 'authorized-replace' });
+        // Preserve physical acknowledgment before metadata construction/hashing can throw.
+        acknowledgedPublication = result.action !== 'unchanged';
+        const write: PlannedWrite = { path: current, action: result.action, bytes: result.bytesReadBack.length };
+        this.#receipts.set(write, Object.freeze({ rootDev: cap.identity.dev, rootIno: cap.identity.ino,
+          path: current, action: result.action, dev: result.dev, ino: result.ino,
+          hash: createHash('sha256').update(result.bytesReadBack).digest('hex'), bytes: result.bytesReadBack.length }));
+        out.push(write);
+      }
+      // Source plan is consumed before the same capability plans a provenance ledger.
+      this.ops.clear(); this.#preimages.clear();
+      return out;
+    } catch (error) {
+      this.failed = true; this.ops.clear(); this.#preimages.clear();
+      throw new NativeWriterCommitError(out.filter(write => write.action !== 'unchanged'), current && (acknowledgedPublication
+        || (replacing && error instanceof NativeFilesystemError && error.committed)) ? [current] : [],
+        directoriesMayExist, error instanceof NativeFilesystemError ? error.code : 'IO_ERROR');
+    }
   }
 }
 

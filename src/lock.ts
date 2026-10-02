@@ -12,10 +12,10 @@
  * (`source: "swfte-studio"`, per-artifact `languages[]`, `scaffoldedAt`, lock
  * next to the generated code) is read and migrated forward on the next write.
  */
-import { readFileSync } from 'node:fs';
 import { posix } from 'node:path';
 import { kebab } from './codegen.js';
-import type { ConfinedWriter } from './fsguard.js';
+import { PathConfinementError, type ConfinedWriter } from './fsguard.js';
+import { NativeFilesystemError } from './native-filesystem.js';
 import { FRAMEWORKS, type Framework, type Language } from './stack.js';
 
 export const LOCK_FILE = 'swfte.json';
@@ -213,13 +213,8 @@ export function loadLock(
   const read = (rel: string): unknown | undefined => {
     if (writer.inline) return undefined;
     const abs = writer.resolve(rel);
-    let text: string;
-    try {
-      text = readFileSync(abs, 'utf8');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-      throw err;
-    }
+    const text = writer.readText(abs, 2 * 1024 * 1024);
+    if (text === null) return undefined;
     if (/^(<<<<<<<|=======|>>>>>>>)( |$)/m.test(text)) {
       throw new LockError(`${rel} contains merge-conflict markers. Resolve the conflict (keep both sides' artifacts), then run \`swfte sync\`.`);
     }
@@ -250,7 +245,8 @@ export function loadLock(
     let raw: unknown;
     try {
       raw = read(rel);
-    } catch {
+    } catch (error) {
+      if (writer.native && (error instanceof NativeFilesystemError || error instanceof PathConfinementError)) throw error;
       continue; // a broken legacy file is left alone, not fatal
     }
     if (raw === undefined) continue;
