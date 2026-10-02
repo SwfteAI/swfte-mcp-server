@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ToolDefinition } from './_types.js';
 import type { SetupTaskEntry, ProofRecord, ResolverSession } from '../contracts/setup-proof-v1.js';
 import {resolverEvents} from './_resolver-events.js';
+import {ownedResolverSession,cancelledResolverSession,resolverTerminal,resolverSessionIdSchema} from './_resolver-session.js';
 
 export const SetupArtifactSchema = z.object({
   kind: z.enum(['workflow','chatflow','agent','widget','application','journey','mcp','finetune']),
@@ -12,6 +13,17 @@ const hash = z.string().regex(/^[0-9a-f]{64}$/);
 const value = z.union([z.object({ handle: z.string().min(1).max(400) }).strict(), z.object({ literal: z.string().min(1).max(4096) }).strict()]);
 
 export const setupTools: ToolDefinition[] = [
+  {
+    name:'swfte_resolver_cancel', title:'Cancel an owned resolver session',
+    description:'Read the current owned session, then cancel once through the server. Terminal readbacks and cleanup warnings retain their actual state; unavailable or uncertain cancellation is never replayed.',
+    inputSchema:z.object({sessionId:resolverSessionIdSchema}).strict(),
+    execute:async(input,{client})=>{
+      const path=`/v2/resolver/sessions/${encodeURIComponent(input.sessionId)}`;
+      const prior=ownedResolverSession(await client.request({method:'GET',path,retries:0}),input.sessionId,client.configuredWorkspaceId);
+      if(resolverTerminal(prior.state))return prior;
+      return cancelledResolverSession(await client.request({method:'POST',path:`${path}/cancel`,body:{},retries:0}),prior);
+    },
+  },
   {
     name:'swfte_setup', title:'Read current setup tasks', readOnly:true,
     description:'Read server-owned, current-content setup tasks for any supported artifact. Entries include authoritative content hash and revision. Missing runtime and authorization failures remain explicit.',
