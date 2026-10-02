@@ -60,3 +60,43 @@ test('native binding handle environment and successful evidence invariants canno
  for(const mutate of mutations)await fixture(async(client,calls)=>{await assert.rejects(tool('swfte_setup',{artifact},client));assert.equal(calls.length,1);},()=>{const e=entry();mutate(e);return{body:[e]};});
  await fixture(async(client)=>{const result:any=await tool('swfte_setup',{artifact},client);assert.equal(result[0].task.values.SANDBOX.handle,'secret://owned/key');},()=>({body:[{...entry(),task:{...entry().task,values:{SANDBOX:{handle:'secret://owned/key',literal:null}}}}]}));
 });
+
+function choiceEntry():any{return{...entry(),task:{...entry().task,kind:'choice',options:['native-first','native-second'],resolutionOptions:[{id:'pick',type:'PICK_SUGGESTION',label:'Choose a value',handle:null}]}};}
+function resolvedChoice():any{return{...choiceEntry(),revision:4,task:{...choiceEntry().task,state:'RESOLVED',values:{SANDBOX:{literal:'native-second',handle:null}},resolvedBy:{option:'pick',actor:'actual-actor',at:'2026-10-02T12:01:00Z',evidence:{probeId:'literal-binding',outcome:'PASS',evidenceRefs:['setup-task://ws/workflow/owned/task-1@4']}}}};}
+const choiceInput={...resolveInput,optionId:'pick',value:{literal:'native-second'}};
+
+// Transport fixtures match the published native Task.options wire; backend IntegrationSpec controls remain separate.
+test('mounted native choice posts exact current membership and preserves returned additive record',()=>fixture(async(client,calls)=>{
+ const result:any=await tool('swfte_resolve_setup_task',choiceInput,client);
+ assert.deepEqual(result,resolvedChoice());assert.deepEqual(calls.map(call=>call.method),['GET','POST']);
+ assert.deepEqual(calls[1]!.body,{optionId:'pick',environment:'SANDBOX',value:{literal:'native-second'},expectedContentHash:hash,expectedRevision:2});
+},call=>({body:call.method==='GET'?[choiceEntry()]:resolvedChoice()})));
+
+test('out of set choice missing literal handle and freeform bypass make zero POST',async()=>{
+ for(const change of [{value:{literal:'not-native'}},{value:undefined},{value:{handle:'conn_owned'}}])await fixture(async(client,calls)=>{
+  await assert.rejects(tool('swfte_resolve_setup_task',{...choiceInput,...change},client));assert.equal(calls.length,1);assert.equal(calls[0]!.method,'GET');
+ },call=>({body:call.method==='GET'?[choiceEntry()]:resolvedChoice()}));
+ await fixture(async(client,calls)=>{await assert.rejects(tool('swfte_resolve_setup_task',{...choiceInput,optionId:'enter'},client));assert.equal(calls.length,1);},call=>{
+  const current=choiceEntry();current.task.resolutionOptions=[{id:'enter',type:'ENTER_VALUE',label:'Enter value',handle:null}];return{body:call.method==='GET'?[current]:resolvedChoice()};
+ });
+});
+
+test('missing duplicate empty and foreign native declaration cannot reach resolution POST',async()=>{
+ const mutations=[(e:any)=>e.task.options=null,(e:any)=>e.task.options=[],(e:any)=>e.task.options=['native-second','native-second'],(e:any)=>e.task.options=[' '],(e:any)=>e.task.resolutionOptions[0].handle='conn_owned',(e:any)=>e.task.resolutionOptions[0].id='foreign',(e:any)=>e.task.kind='value'];
+ for(const mutate of mutations)await fixture(async(client,calls)=>{await assert.rejects(tool('swfte_resolve_setup_task',choiceInput,client));assert.equal(calls.length,1);},call=>{
+  const current=choiceEntry();mutate(current);return{body:call.method==='GET'?[current]:resolvedChoice()};
+ });
+});
+
+test('choice return cannot substitute option value environment state or native declaration',async()=>{
+ const mutations=[(e:any)=>e.task.resolvedBy.option='enter',(e:any)=>e.task.values.SANDBOX.literal='native-first',(e:any)=>e.task.values={'LIVE:target':{literal:'native-second',handle:null}},(e:any)=>e.task.state='RESOLVING',(e:any)=>e.task.kind='value',(e:any)=>e.task.options=['native-second','native-first'],(e:any)=>e.task.options=['native-second'],(e:any)=>e.task.resolutionOptions[0].type='ENTER_VALUE'];
+ for(const mutate of mutations)await fixture(async(client,calls)=>{await assert.rejects(tool('swfte_resolve_setup_task',choiceInput,client));assert.deepEqual(calls.map(call=>call.method),['GET','POST']);},call=>{
+  if(call.method==='GET')return{body:[choiceEntry()]};const result=resolvedChoice();mutate(result);return{body:result};
+ });
+});
+
+test('ordinary literal returned option and environment value bind exact accepted request',async()=>{
+ for(const mutate of [(e:any)=>e.task.resolvedBy.option='foreign',(e:any)=>e.task.values.SANDBOX.literal='substituted',(e:any)=>e.task.values={'LIVE:target':{literal:'selected',handle:null}},(e:any)=>e.task.state='UNMET'])await fixture(async(client,calls)=>{
+  await assert.rejects(tool('swfte_resolve_setup_task',resolveInput,client));assert.deepEqual(calls.map(call=>call.method),['GET','POST']);
+ },call=>{if(call.method==='GET')return{body:[entry()]};const result=resolved();mutate(result);return{body:result};});
+});

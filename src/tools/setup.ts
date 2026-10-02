@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { ToolDefinition } from './_types.js';
-import {ownedSetupTaskEntries,resolvedSetupTaskEntry} from './_setup-task.js';
+import {ownedSetupTaskEntries,resolvedSetupTaskEntry,requireSetupResolutionInput} from './_setup-task.js';
 import {ownedProofRecord,currentProofRecord} from './_proof-record.js';
 import {resolverEvents} from './_resolver-events.js';
 import {ownedResolverSession,cancelledResolverSession,resolverTerminal,resolverSessionIdSchema,resolverSessionSchema} from './_resolver-session.js';
@@ -46,11 +46,12 @@ export const setupTools: ToolDefinition[] = [
       const option=task?.task.resolutionOptions?.find(candidate=>candidate.id===input.optionId);
       if (!task || !option) throw new Error('The current task does not advertise that resolution option.');
       if (task.contentHash!==input.expectedContentHash || task.revision!==input.expectedRevision) throw new Error('STALE_CONTENT: read current tasks before resolving.');
+      requireSetupResolutionInput(task,input);
       if (option.type==='API_KEY' && input.value && 'literal' in input.value) throw new Error('Secret values require a server-owned handle.');
       if(task.task.capability==='managed_database.read.provision'&&(input.artifact.kind!=='workflow'||input.environment!=='SANDBOX'
         ||option.id!=='provision-read'||option.type!=='PROVISION'||!input.value||!('handle' in input.value)
         ||!/^managed:action:act_[0-9a-f]{32}$/.test(input.value.handle)))throw new Error('MANAGED_READ_APPROVED_ACTION_REQUIRED');
-      return resolvedSetupTaskEntry(await client.request({method:'POST',path:`${artifactPath(input.artifact)}/setup/${encodeURIComponent(input.taskKey)}/resolve`,body:{optionId:input.optionId,environment:input.environment,value:input.value,expectedContentHash:input.expectedContentHash,expectedRevision:input.expectedRevision},retries:0}),input.artifact,task,client.configuredWorkspaceId);
+      return resolvedSetupTaskEntry(await client.request({method:'POST',path:`${artifactPath(input.artifact)}/setup/${encodeURIComponent(input.taskKey)}/resolve`,body:{optionId:input.optionId,environment:input.environment,value:input.value,expectedContentHash:input.expectedContentHash,expectedRevision:input.expectedRevision},retries:0}),input.artifact,task,client.configuredWorkspaceId,input);
     },
   },
   {

@@ -28,9 +28,35 @@ export function ownedSetupTaskEntries(wire:unknown,artifact:{kind:string;id:stri
  if(new Set(entries.map(entry=>entry.contentHash)).size>1)throw new Error('SETUP_RESPONSE_HASH_MISMATCH');
  return entries;
 }
-export function resolvedSetupTaskEntry(wire:unknown,artifact:{kind:string;id:string},prior:OwnedSetupTaskEntry,workspaceId?:string):OwnedSetupTaskEntry{
+type SetupResolutionRequest={optionId:string;environment:string;value?:{literal?:string;handle?:string}};
+function currentChoiceOptions(task:OwnedSetupTaskEntry['task']):string[]{
+ const choices=task.options,picks=task.resolutionOptions,pick=picks?.[0];
+ if(task.kind!=='choice'||!choices?.length||choices.some(value=>!text.safeParse(value).success)
+   ||new Set(choices).size!==choices.length||picks?.length!==1||!pick||pick.id!=='pick'
+   ||pick.type!=='PICK_SUGGESTION'||pick.handle!=null)throw new Error('SETUP_CHOICE_DECLARATION_INVALID');
+ return choices;
+}
+export function requireSetupResolutionInput(prior:OwnedSetupTaskEntry,request:SetupResolutionRequest):void{
+ const option=prior.task.resolutionOptions?.find(value=>value.id===request.optionId);
+ if(!option)throw new Error('SETUP_RESOLUTION_OPTION_UNAVAILABLE');
+ if(prior.task.kind==='choice'||option.type==='PICK_SUGGESTION'){
+  const choices=currentChoiceOptions(prior.task);
+  if(option.id!=='pick'||!request.value||request.value.handle!=null||request.value.literal==null
+    ||!choices.includes(request.value.literal))throw new Error('SETUP_CHOICE_VALUE_NOT_ALLOWED');
+ }
+}
+export function resolvedSetupTaskEntry(wire:unknown,artifact:{kind:string;id:string},prior:OwnedSetupTaskEntry,workspaceId?:string,request?:SetupResolutionRequest):OwnedSetupTaskEntry{
  const result=ownedSetupTaskEntries([wire],artifact,workspaceId)[0]!;
  if(result.task.key!==prior.task.key||result.contentHash!==prior.contentHash||result.revision<=prior.revision)throw new Error('SETUP_RESOLVE_RESPONSE_BINDING_MISMATCH');
+ if(request?.value?.literal!=null){
+  const binding=result.task.values?.[request.environment];
+  if(result.task.state!=='RESOLVED'||result.task.kind!==prior.task.kind||result.task.resolvedBy?.option!==request.optionId
+    ||binding?.handle!=null||binding?.literal!==request.value.literal)throw new Error('SETUP_RESOLVE_RESPONSE_VALUE_MISMATCH');
+ }
+ if(prior.task.kind==='choice'){
+  const before=currentChoiceOptions(prior.task),after=currentChoiceOptions(result.task);
+  if(before.length!==after.length||before.some((choice,index)=>choice!==after[index]))throw new Error('SETUP_RESOLVE_RESPONSE_CHOICE_MISMATCH');
+ }
  return result;
 }
 export function unknownRequiredSetupTasks(entries:OwnedSetupTaskEntry[]):OwnedSetupTaskEntry[]{
