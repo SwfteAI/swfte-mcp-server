@@ -90,6 +90,13 @@ async function main(): Promise<void> {
     // Cross-organisation delivery.
     'swfte_deliver',
     'swfte_handover_record',
+    // Code Map, twins and proving remain required when optional runtime providers are unavailable.
+    'swfte_code_map',
+    'swfte_code_impact',
+    'swfte_code_fix',
+    'swfte_twin_push',
+    'swfte_twin_status',
+    'swfte_prove_verdict',
   ];
   const names = new Set(tools.map((t) => t.name));
   for (const r of required) if (!names.has(r)) problems.push(`missing required tool: ${r}`);
