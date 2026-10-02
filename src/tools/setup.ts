@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { ToolDefinition } from './_types.js';
-import type { ProofRecord, ResolverSession } from '../contracts/setup-proof-v1.js';
+import type { ResolverSession } from '../contracts/setup-proof-v1.js';
 import {ownedSetupTaskEntries,resolvedSetupTaskEntry} from './_setup-task.js';
+import {ownedProofRecord,currentProofRecord} from './_proof-record.js';
 import {resolverEvents} from './_resolver-events.js';
 import {ownedResolverSession,cancelledResolverSession,resolverTerminal,resolverSessionIdSchema} from './_resolver-session.js';
 
@@ -57,13 +58,13 @@ export const setupTools: ToolDefinition[] = [
     name:'swfte_proof', title:'Execute artifact proof',
     description:'Run actual server proof checks against the current sandbox definition. Evidence levels derive from hash-bound execution records and readbacks; a run label alone never passes.',
     inputSchema:z.object({ artifact:SetupArtifactSchema, version:z.string().min(1).max(200), runs:z.number().int().min(1).max(20).default(3), fixtureSetId:z.string().min(1).max(200), seed:z.string().min(1).max(200), expectedContentHash:hash }).strict(),
-    execute:(input,{client})=>client.request<ProofRecord>({method:'POST',path:`/v2/proof/${encodeURIComponent(input.artifact.kind)}/${encodeURIComponent(input.artifact.id)}`,body:{version:input.version,runs:input.runs,fixtureSetId:input.fixtureSetId,seed:input.seed,expectedContentHash:input.expectedContentHash},retries:0,timeoutMs:180000}),
+    execute:async(input,{client})=>ownedProofRecord(await client.request({method:'POST',path:`/v2/proof/${encodeURIComponent(input.artifact.kind)}/${encodeURIComponent(input.artifact.id)}`,body:{version:input.version,runs:input.runs,fixtureSetId:input.fixtureSetId,seed:input.seed,expectedContentHash:input.expectedContentHash},retries:0,timeoutMs:180000}),input.artifact,client.configuredWorkspaceId,{version:input.version,contentHash:input.expectedContentHash}),
   },
   {
     name:'swfte_proof_status', title:'Read current artifact proof', readOnly:true,
     description:'Read latest owned proof for the actual current content. Stale or missing records are not relabeled as current.',
     inputSchema:z.object({ artifact:SetupArtifactSchema }).strict(),
-    execute:(input,{client})=>client.request<ProofRecord>({method:'GET',path:`/v2/proof/${encodeURIComponent(input.artifact.kind)}/${encodeURIComponent(input.artifact.id)}`}),
+    execute:async(input,{client})=>currentProofRecord(await client.request({method:'GET',path:`/v2/proof/${encodeURIComponent(input.artifact.kind)}/${encodeURIComponent(input.artifact.id)}`,retries:0}),input.artifact,client.configuredWorkspaceId),
   },
   {
     name:'swfte_resolve', title:'Start governed prove or fix resolver',

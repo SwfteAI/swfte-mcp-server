@@ -168,7 +168,7 @@ test('literal API key cannot enter the resolution request',()=>fixture(async(cli
 test('proof submits content binding and never caller identity',()=>fixture(async(client,calls)=>{
   await tool('swfte_proof',{artifact:{kind:'workflow',id:'owned'},version:'3',fixtureSetId:'smoke-v1',seed:'1',expectedContentHash:hash},client);
   assert.equal(calls.length,1);assert.equal(calls[0]!.path,'/v2/proof/workflow/owned');assert.equal(calls[0]!.body.expectedContentHash,hash);assert.equal(calls[0]!.body.runs,3);assert.equal('workspaceId' in calls[0]!.body,false);assert.equal('actorId' in calls[0]!.body,false);
-}));
+},()=>({body:{id:'proof-none',workspaceId:'ws',artifactKind:'workflow',artifactId:'owned',version:'3',contentHash:hash,level:'NONE',checks:[],executionIds:[],evidenceRefs:[],warnings:[],createdAt:'2026-10-02T12:00:00Z'}})));
 test('proving starts the actual returned run and retains UNKNOWN',()=>fixture(async(client,calls)=>{
   const result:any=await tool('swfte_prove',{artifactKind:'WORKFLOW',artifactId:'owned',expectedContentHash:hash},client);
   assert.equal(calls.length,2);assert.equal(calls[1]!.path,'/v2/confidence/runs/server-run/start');assert.equal(result.result.summary.overall,'UNKNOWN');
