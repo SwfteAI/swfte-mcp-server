@@ -1,6 +1,6 @@
 # Tool reference
 
-`@swfte/mcp-server` exposes **272 tools**, of which a curated **105** are
+`@swfte/mcp-server` exposes **274 tools**, of which a curated **105** are
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
 
 Tools that take a `workspaceId` only honour it for **API-key** credentials. A
@@ -86,6 +86,8 @@ acknowledgement establishes no termination. Tools accept no host, token, workspa
 | `swfte_runtime_file_write` | PUT | `/v2/runtime/instances/{instanceId}/files/content?path=`; raw UTF-8 with `Idempotency-Key` |
 | `swfte_runtime_upload` | POST | `/v2/runtime/instances/{instanceId}/upload?path=`; raw UTF-8 with `Idempotency-Key` |
 | `swfte_findings` | GET | `/v2/confidence/runs/{runId}/findings`; existing `swfte_prove_findings` alias retained |
+| `swfte_prove_submit` | POST | `/v2/confidence/runs/submissions/{commandId}`; exact persisted caller UUID/request, verified identity first |
+| `swfte_prove_submission` | POST | `/v2/confidence/runs/submissions/{commandId}/readback`; read-only exact receipt reconciliation |
 
 Files are limited to32768 UTF-8 bytes and stay inside the server file jail. Responses are bounded;
 mutations have no automatic retry. The matching CLI accepts the same strict inputs through

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { SwfteClient,SwfteApiError } from '../src/client.js';
 import { loadConfig } from '../src/config.js';
@@ -15,16 +16,119 @@ import { uploadIntake } from '../src/intake/upload.js';
 import type { ToolDefinition } from '../src/tools/_types.js';
 
 const hash='a'.repeat(64);
+const durableCommand='12345678-1234-1234-1234-123456789abc';
+const durableRequest={artifactKind:'WORKFLOW',artifactId:'owned',profile:'QUICK',frameworks:[],seed:0,expectedContentHash:hash,budget:{persona:1,systemUnderTest:1,report:.1,maxSteps:200}};
+// Full result derived from the unchanged backend contracts/running.json golden. Transport fixture only.
+const durableGolden={"schemaVersion":"1","run":{"runId":"server-run","workspaceId":"ws","artifactKind":"WORKFLOW","artifactId":"owned","contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","environment":"SANDBOX","profile":"QUICK","frameworks":[],"seed":0,"budget":{"persona":1,"systemUnderTest":1,"report":0.1,"maxSteps":200},"status":"RUNNING","engineVersion":"confidence-contract-fixture-v1","modelSnapshot":[{"role":"REPORT","modelId":"synthetic-unpriced-model","priced":false}],"cassetteHead":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","startedAt":"2026-10-01T12:00:00Z"},"claims":[{"dimension":"FUNCTION","elementId":"node:article","verdict":"PASS","evidenceRefs":[{"kind":"CAPTURE","hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],"dependsOn":["node:article"],"stale":false},{"dimension":"COMPLETENESS","elementId":"node:article","verdict":"PASS","evidenceRefs":[{"kind":"CAPTURE","hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],"dependsOn":["node:article"],"stale":false},{"dimension":"ROBUSTNESS","elementId":"node:article","verdict":"PASS","evidenceRefs":[{"kind":"CAPTURE","hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],"dependsOn":["node:article"],"stale":false},{"dimension":"SECURITY","elementId":"node:article","verdict":"PASS","evidenceRefs":[{"kind":"CAPTURE","hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],"dependsOn":["node:article"],"stale":false},{"dimension":"COMPLIANCE","elementId":"node:article","verdict":"PASS","evidenceRefs":[{"kind":"CAPTURE","hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],"dependsOn":["node:article"],"stale":false}],"completeness":{"covered":5,"applicable":5,"uncovered":[],"inapplicable":[{"elementId":"iface:browser","dimension":"LOAD_COST","reason":"No browser interface in this synthetic artifact"}]},"findings":[],"summary":{"overall":"UNKNOWN","headline":"IN_PROGRESS","dimensions":[{"dimension":"FUNCTION","verdict":"PASS","passCount":1,"failCount":0,"unknownCount":0,"mandatory":true},{"dimension":"COMPLETENESS","verdict":"PASS","passCount":1,"failCount":0,"unknownCount":0,"mandatory":true},{"dimension":"ROBUSTNESS","verdict":"PASS","passCount":1,"failCount":0,"unknownCount":0,"mandatory":true},{"dimension":"LOAD_COST","verdict":"UNKNOWN","passCount":0,"failCount":0,"unknownCount":0,"mandatory":false},{"dimension":"SECURITY","verdict":"PASS","passCount":1,"failCount":0,"unknownCount":0,"mandatory":true},{"dimension":"PRIVACY","verdict":"UNKNOWN","passCount":0,"failCount":0,"unknownCount":0,"mandatory":false},{"dimension":"COMPLIANCE","verdict":"PASS","passCount":1,"failCount":0,"unknownCount":0,"mandatory":true},{"dimension":"BEHAVIOUR","verdict":"UNKNOWN","passCount":0,"failCount":0,"unknownCount":0,"mandatory":false}],"completenessCovered":5,"completenessApplicable":5,"unknownCount":0,"openCriticalFindings":0,"lastRunAt":"2026-10-01T12:00:00Z","evidenceLevel":"OBSERVED"}};
+function durableReceipt(){return {identity:{workspaceId:'ws',actorId:'actor',commandId:durableCommand,requestDigest:'b'.repeat(64),contentHash:hash},runId:'server-run',auditHash:'c'.repeat(64),result:structuredClone(durableGolden)};}
+function durableReply(call:Call){return {body:call.path==='/v2/confidence/identity'?{workspaceId:'ws',actorId:'actor'}:call.path.endsWith('/identity')?durableReceipt().identity:durableReceipt()};}
+
 type Call={method:string;path:string;body:any;authorization:string|undefined};
-async function fixture<T>(run:(client:SwfteClient,calls:Call[])=>Promise<T>,reply:(call:Call)=>{status?:number;body:unknown}=()=>({body:[]})) {
+async function fixture<T>(run:(client:SwfteClient,calls:Call[])=>Promise<T>,reply:(call:Call)=>{status?:number;body:unknown;rawBody?:string}=()=>({body:[]})) {
   const calls:Call[]=[];
-  const server=createServer(async(req,res)=>{let text='';for await(const chunk of req)text+=String(chunk);const call={method:req.method!,path:req.url!,body:text?JSON.parse(text):undefined,authorization:req.headers.authorization};calls.push(call);const response=reply(call);res.writeHead(response.status??200,{'content-type':'application/json'});res.end(JSON.stringify(response.body))});
+  const server=createServer(async(req,res)=>{let text='';for await(const chunk of req)text+=String(chunk);const call={method:req.method!,path:req.url!,body:text?JSON.parse(text):undefined,authorization:req.headers.authorization};calls.push(call);const response=reply(call);res.writeHead(response.status??200,{'content-type':'application/json'});res.end(response.rawBody??JSON.stringify(response.body))});
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const address=server.address();if(!address||typeof address==='string')throw new Error('Loopback bind failed');
   const config=loadConfig({SWFTE_PAT:'pat_test',SWFTE_BASE_URL:`http://127.0.0.1:${address.port}`,SWFTE_TELEMETRY:'0'} as never);
   try{return await run(new SwfteClient(config),calls)}finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()))}
 }
 async function tool(name:string,input:unknown,client:SwfteClient){const definition=[...setupTools,...proveTools,...promotionTools,...cloudLinkTools,...connectTools,...actionTools].find(candidate=>candidate.name===name) as ToolDefinition;assert.ok(definition);return definition.execute(definition.inputSchema.parse(input),{client,config:loadConfig({SWFTE_PAT:'pat_test'} as never)})}
+test('durable confidence submit binds actual identity and exact single admission request',()=>fixture(async(client,calls)=>{
+  const receipt:any=await tool('swfte_prove_submit',{commandId:durableCommand,...durableRequest},client);
+  assert.equal(receipt.runId,'server-run');assert.equal(calls.length,3);assert.equal(calls[0]!.path,'/v2/confidence/identity');
+  assert.equal(calls[2]!.path,`/v2/confidence/runs/submissions/${durableCommand}`);assert.equal(calls[2]!.method,'POST');assert.deepEqual(calls[2]!.body,durableRequest);
+  assert.equal('actorId' in calls[2]!.body,false);assert.equal('workspaceId' in calls[2]!.body,false);
+},durableReply));
+test('durable confidence readback never calls create or start',()=>fixture(async(client,calls)=>{
+  const definition=proveTools.find(value=>value.name==='swfte_prove_submission');assert.equal(definition?.readOnly,true);
+  await tool('swfte_prove_submission',{commandId:durableCommand,...durableRequest},client);
+  assert.deepEqual(calls.map(call=>call.path),['/v2/confidence/identity',`/v2/confidence/runs/submissions/${durableCommand}/identity`,`/v2/confidence/runs/submissions/${durableCommand}/readback`]);assert.deepEqual(calls[2]!.body,durableRequest);
+},durableReply));
+test('uncertain durable confidence503 never retries replaces UUID or falls back',()=>fixture(async(client,calls)=>{
+  await assert.rejects(tool('swfte_prove_submit',{commandId:durableCommand,...durableRequest},client),SwfteApiError);
+  assert.equal(calls.length,3);assert.equal(calls.filter(call=>call.method==='POST'&&!call.path.endsWith('/identity')).length,1);assert.equal(calls[2]!.path,`/v2/confidence/runs/submissions/${durableCommand}`);
+},call=>call.path.endsWith('/identity')?durableReply(call):{status:503,body:{error:'SUBMISSION_UNCONFIRMED'}}));
+test('durable confidence wrong server canonical digest refuses exact readback',()=>fixture(async(client,calls)=>{
+  await assert.rejects(tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client),/CONFIDENCE_SUBMISSION_BINDING_MISMATCH/);
+  assert.equal(calls.length,3);assert.deepEqual(calls[1]!.body,durableRequest);assert.equal(calls[2]!.path.endsWith('/readback'),true);
+},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt=durableReceipt();receipt.identity.requestDigest='e'.repeat(64);return{body:receipt}}));
+function observedUnknownReceipt():any {
+  const receipt=durableReceipt();const result:any=receipt.result;
+  // Actual shared CatalogEvidenceLadder.wilson(7,10), also retained in quick-statistical.json.
+  // This measures pass rate; no verdict probability or runtime calibration is invented.
+  result.claims[0]={...result.claims[0],verdict:'UNKNOWN',unknownReason:'NO_VERDICT',statedConfidence:null,interval:{low:.3968,high:.8922,successes:7,n:10},stale:false};
+  result.completeness.covered=4;result.completeness.uncovered=[{elementId:result.claims[0].elementId,dimension:'FUNCTION',reason:'NO_VERDICT'}];
+  result.summary.completenessCovered=4;result.summary.unknownCount=1;
+  result.summary.dimensions[0]={...result.summary.dimensions[0],verdict:'UNKNOWN',passCount:0,unknownCount:1,interval:{low:.3968,high:.8922,successes:7,n:10}};
+  return receipt;
+}
+test('durable confidence actual UNKNOWN measured Wilson interval survives without verdict confidence',()=>fixture(async(client,calls)=>{
+  const receipt:any=await tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client);
+  assert.equal(receipt.result.claims[0].verdict,'UNKNOWN');assert.equal(receipt.result.claims[0].unknownReason,'NO_VERDICT');
+  assert.equal(receipt.result.claims[0].statedConfidence,null);assert.deepEqual(receipt.result.claims[0].interval,{low:.3968,high:.8922,successes:7,n:10});assert.equal(calls.length,3);
+},call=>call.path.endsWith('/identity')?durableReply(call):{body:observedUnknownReceipt()}));
+test('durable confidence legacy statistical confidence and null point preserve v1 compatibility',async()=>{
+  for(const point of [.7,null])await fixture(async(client)=>{const receipt:any=await tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client);assert.equal(receipt.result.claims[0].statedConfidence,point);assert.equal(receipt.result.run.calibrationVersion,undefined)},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt:any=durableReceipt();const interval={low:.3968,high:.8922,successes:7,n:10};receipt.result.claims[0].interval=interval;receipt.result.claims[0].statedConfidence=point;receipt.result.summary.dimensions[0].interval=interval;return{body:receipt}});
+});
+test('durable confidence forged summary timestamps and Wilson bounds refuse',async()=>{
+  const mutations=[(r:any)=>r.result.summary.overall='PASS',(r:any)=>r.result.summary.unknownCount=99,(r:any)=>r.result.summary.dimensions[0].passCount=99,(r:any)=>r.result.summary.dimensions[0].mandatory=false,(r:any)=>r.result.run.startedAt='2026-10-01',(r:any)=>r.result.run.finishedAt='2026-10-01T12:01:00Z',(r:any)=>{r.result.run.status='COMPLETE';r.result.run.finishedAt='2026-10-01T11:59:59.999999999Z'},(r:any)=>{r.result.claims[0].interval={low:.4,high:.9,successes:7,n:10}}];
+  for(const mutation of mutations)await fixture(async(client)=>{await assert.rejects(tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client))},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt:any=durableReceipt();mutation(receipt);return{body:receipt}});
+});
+test('durable confidence exact Instant fractions offsets and calendar preserve Java time semantics',async()=>{
+  await fixture(async(client)=>{const receipt:any=await tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client);assert.equal(receipt.result.run.startedAt,'2026-10-01T14:00:00.123456789+02:00')},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt:any=durableReceipt();receipt.result.run.startedAt='2026-10-01T14:00:00.123456789+02:00';receipt.result.summary.lastRunAt='2026-10-01T12:00:00.123456789Z';return{body:receipt}});
+  for(const time of ['2026-02-30T12:00:00Z','2026-10-01T12:00:00.1234567890Z','2026-10-01T12:00:00+19:00','2026-10-01T12:60:00Z'])await fixture(async(client)=>{await assert.rejects(tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client))},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt:any=durableReceipt();receipt.result.run.startedAt=time;receipt.result.summary.lastRunAt=time;return{body:receipt}});
+});
+test('durable confidence unpriced model prices and duplicate roles refuse',async()=>{
+  for(const mutate of [(r:any)=>r.result.run.modelSnapshot[0].inputUsdPerMTok=0,(r:any)=>r.result.run.modelSnapshot.push({...r.result.run.modelSnapshot[0]})])await fixture(async(client)=>{await assert.rejects(tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client))},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt:any=durableReceipt();mutate(receipt);return{body:receipt}});
+});
+test('durable confidence exact finding fingerprint and failure evidence remain domain bound',async()=>{
+  const finding=()=>({fingerprint:createHash('sha256').update(['FUNCTION','node:article','source-gap','INFO'].join('\u001f'),'utf8').digest('hex'),dimension:'FUNCTION',elementId:'node:article',rootCauseKey:'source-gap',severity:'INFO',status:'FIXED',title:'Recorded finding',reproduction:['Inspect recorded input'],evidenceRefs:[{kind:'CAPTURE',hash:'b'.repeat(64)}],affectedElements:['node:article'],gap:false});
+  await fixture(async(client)=>{const receipt:any=await tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client);assert.equal(receipt.result.findings[0].fingerprint,finding().fingerprint)},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt:any=durableReceipt();receipt.result.findings=[finding()];return{body:receipt}});
+  for(const mutate of [(f:any)=>f.fingerprint='a'.repeat(64),(f:any)=>f.evidenceRefs=[],(f:any)=>f.reproduction=[' '],(f:any)=>f.rootCauseKey='source\u001fgap'])await fixture(async(client)=>{await assert.rejects(tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client))},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt:any=durableReceipt();const value=finding();mutate(value);receipt.result.findings=[value];return{body:receipt}});
+});
+test('durable confidence pooled intervals deduplicate actual typed claims despite additive fields',()=>fixture(async(client)=>{
+  const receipt:any=await tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client);assert.equal(receipt.result.summary.dimensions[0].interval.n,10);
+},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt=observedUnknownReceipt();const duplicate={...receipt.result.claims[0],futureField:'additive',interval:{...receipt.result.claims[0].interval,futureBound:'ignored'}};delete duplicate.statedConfidence;receipt.result.claims.push(duplicate);receipt.result.summary.dimensions[0].unknownCount=2;return{body:receipt}}));
+test('durable confidence normalized Instant boundary refuses offset and midnight overflow',async()=>{
+  for(const time of ['+1000000000-12-31T24:00:00Z','+1000000000-12-31T23:59:59-00:01','-1000000000-01-01T00:00:00+00:01'])await fixture(async(client)=>{await assert.rejects(tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client))},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt:any=durableReceipt();receipt.result.run.startedAt=time;receipt.result.summary.lastRunAt=time;return{body:receipt}});
+});
+test('durable confidence actual Java negative four digit Instant preserves complete result',async()=>{
+  await fixture(async(client)=>{const receipt:any=await tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client);assert.equal(receipt.result.run.startedAt,'-0001-01-01T00:00:00Z');assert.equal(receipt.result.summary.lastRunAt,'-0001-01-01T00:00:00Z')},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt:any=durableReceipt();receipt.result.run.startedAt='-0001-01-01T00:00:00Z';receipt.result.summary.lastRunAt='-0001-01-01T00:00:00Z';return{body:receipt}});
+  for(const time of ['-0001-02-29T00:00:00Z','-1000000000-01-01T00:00:00.000000000+00:01'])await fixture(async(client)=>{await assert.rejects(tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client))},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt:any=durableReceipt();receipt.result.run.startedAt=time;receipt.result.summary.lastRunAt=time;return{body:receipt}});
+});
+test('durable confidence Java nonblank Unicode preserves NBSP figure and narrow spaces',async()=>{
+  for(const title of ['\u00a0','\u2007','\u202f'])await fixture(async(client)=>{const receipt:any=await tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client);assert.equal(receipt.result.run.engineVersion,title)},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt:any=durableReceipt();receipt.result.run.engineVersion=title;return{body:receipt}});
+  for(const title of [' ','\u2000','\u001c','\u3000'])await fixture(async(client)=>{await assert.rejects(tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client))},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt:any=durableReceipt();receipt.result.run.engineVersion=title;return{body:receipt}});
+});
+test('durable confidence stale flag exactly matches UNKNOWN STALE reason',async()=>{
+  for(const mutate of [(r:any)=>r.result.claims[0].stale=true,(r:any)=>r.result.claims[0].unknownReason='STALE',(r:any)=>{r.result.claims[0].verdict='PASS';r.result.claims[0].unknownReason=null;r.result.claims[0].stale=true}])
+    await fixture(async(client,calls)=>{await assert.rejects(tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client));assert.equal(calls.length,3)},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt=observedUnknownReceipt();mutate(receipt);return{body:receipt}});
+  await fixture(async(client)=>{const receipt:any=await tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client);assert.equal(receipt.result.claims[0].stale,true)},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt=observedUnknownReceipt();receipt.result.claims[0].unknownReason='STALE';receipt.result.claims[0].stale=true;receipt.result.completeness.uncovered[0].reason='STALE';return{body:receipt}});
+});
+test('durable confidence every required result field and malformed claim finding coverage summary refuse',async()=>{
+  const changes=[(r:any)=>delete r.result.run.engineVersion,(r:any)=>delete r.result.run.modelSnapshot,(r:any)=>delete r.result.summary.headline,(r:any)=>delete r.result.summary.dimensions,(r:any)=>delete r.result.summary.evidenceLevel,(r:any)=>r.result.claims=[{}],(r:any)=>r.result.findings=[{}],(r:any)=>r.result.completeness.uncovered=[{}],(r:any)=>r.result.summary.dimensions=[{}]];
+  for(const change of changes)await fixture(async(client,calls)=>{await assert.rejects(tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client));assert.equal(calls.length,3)},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt=durableReceipt();change(receipt);return{body:receipt}});
+});
+test('durable confidence malformed HTTP JSON never retries mutation or creates fallback',()=>fixture(async(client,calls)=>{
+  await assert.rejects(tool('swfte_prove_submit',{...durableRequest,commandId:durableCommand},client));assert.equal(calls.length,3);
+  assert.equal(calls.filter(call=>call.method==='POST'&&!call.path.endsWith('/identity')).length,1);
+},call=>call.path.endsWith('/identity')?durableReply(call):{body:null,rawBody:'{"identity":'}));
+test('durable confidence invalid UUID missing hash and caller identity refuse before HTTP',()=>fixture(async(client,calls)=>{
+  for(const input of [{...durableRequest,commandId:durableCommand.toUpperCase()},{...durableRequest,commandId:durableCommand,expectedContentHash:undefined},{...durableRequest,commandId:durableCommand,actorId:'forged'},{...durableRequest,commandId:durableCommand,workspaceId:'foreign'}])await assert.rejects(tool('swfte_prove_submit',input,client));
+  assert.equal(calls.length,0);
+}));
+test('durable confidence Java opaque identifier parity refuses before HTTP',()=>fixture(async(client,calls)=>{
+  for(const artifactId of ['/owned','a..b','https://owned','owned?x','owned#x','owned value'])await assert.rejects(tool('swfte_prove_submit',{...durableRequest,commandId:durableCommand,artifactId},client));
+  assert.equal(calls.length,0);
+}));
+test('foreign durable confidence workspace actor command hash and run refuse',async()=>{
+  const changes=[(r:any)=>r.identity.workspaceId='foreign',(r:any)=>r.identity.actorId='foreign',(r:any)=>r.identity.commandId='87654321-1234-1234-1234-123456789abc',(r:any)=>r.identity.contentHash='d'.repeat(64),(r:any)=>r.result.run.runId='other',(r:any)=>r.result.run.workspaceId='foreign',(r:any)=>r.result.run.profile='DEEP',(r:any)=>r.result.run.budget.persona=2,(r:any)=>r.result.run.seed=9,(r:any)=>r.result.run.frameworks=['other'],(r:any)=>r.result.run.artifactId='other'];
+  for(const change of changes)await fixture(async(client,calls)=>{await assert.rejects(tool('swfte_prove_submission',{...durableRequest,commandId:durableCommand},client),/CONFIDENCE_SUBMISSION_BINDING_MISMATCH/);assert.equal(calls.length,3)},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt=durableReceipt();change(receipt);return{body:receipt}});
+});
+test('malformed durable confidence receipt and unavailable verified identity refuse',async()=>{
+  for(const mutation of [(r:any)=>r.auditHash='unverified',(r:any)=>r.identity.requestDigest='bad',(r:any)=>r.result.run.environment='LIVE',(r:any)=>r.result.summary.overall='MADE_UP',(r:any)=>delete r.result.claims])await fixture(async(client,calls)=>{await assert.rejects(tool('swfte_prove_submit',{...durableRequest,commandId:durableCommand},client));assert.equal(calls.length,3)},call=>{if(call.path.endsWith('/identity'))return durableReply(call);const receipt=durableReceipt();mutation(receipt);return{body:receipt}});
+  await fixture(async(client,calls)=>{await assert.rejects(tool('swfte_prove_submit',{...durableRequest,commandId:durableCommand},client));assert.equal(calls.length,1)},()=>({status:503,body:{error:'IDENTITY_UNAVAILABLE'}}));
+});
 for(const kind of ['workflow','agent','chatflow','widget','application','journey','mcp','finetune']) {
   test(`setup reads actual ${kind} server route with session credential`,()=>fixture(async(client,calls)=>{await tool('swfte_setup',{artifact:{kind,id:'owned'}},client);assert.equal(calls.length,1);assert.equal(calls[0]!.path,`/v2/artifacts/${kind}/owned/setup`);assert.equal(calls[0]!.authorization,'Bearer pat_test')}));
 }
