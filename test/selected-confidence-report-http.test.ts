@@ -5,6 +5,7 @@ import { SwfteClient, SwfteApiError } from '../src/client.js';
 import { loadConfig } from '../src/config.js';
 import { selectedConfidenceReportTools } from '../src/tools/selected-confidence-report.js';
 import { allTools } from '../src/tools/index.js';
+import { buildServer } from '../src/server.js';
 
 // Authenticated transport/admission fixtures only. These are not native store,
 // current artifact, calibration, canonical seal or signature execution evidence.
@@ -63,9 +64,14 @@ async function fixture(run: (client: SwfteClient, calls: Call[]) => Promise<void
   try { await run(new SwfteClient(config), calls); }
   finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
 }
-async function execute(client: SwfteClient, input: any = { runId, seq: 0 }) {
+async function executeWire(client: SwfteClient, input: any = { runId, seq: 0 }) {
   const tool = selectedConfidenceReportTools.find(t => t.name === 'swfte_prove_selected_report'); assert.ok(tool);
   return tool.execute(tool.inputSchema.parse(input), { client, config: loadConfig({ SWFTE_PAT: 'pat_test' } as never) });
+}
+async function execute(client: SwfteClient, input: any = { runId, seq: 0 }) {
+  const wire = await executeWire(client, input);
+  assert.equal(typeof wire, 'string');
+  return JSON.parse(wire as string);
 }
 const identity = { workspaceId: 'ws', actorId: 'person:7' };
 const response = (body: unknown = selected()) => (call: Call): Reply => ({ body: call.path === '/v2/confidence/identity' ? identity : body });
@@ -176,4 +182,58 @@ test('opaque native run identity and exact nonnegative safe sequence are rejecte
     ...['', ' ', '..', 'x/../y', '/absolute', 'https://external', 'x?query', 'x#fragment', 'x%2Fpath', 'x'.repeat(201)].map(id => ({ runId: id, seq: 0 })),
     { runId, seq: 0, actorId: 'person:7' }];
   await fixture(async (client, calls) => { for (const input of badInputs) await assert.rejects(execute(client, input)); assert.equal(calls.length, 0); }, response());
+});
+
+test('selected report retains exact additive numeric values and lexemes through registered tools/call', async () => {
+  const body = selected();
+  body.rawReport.precisionProbe = { integer: '__INTEGER__', decimal: '__DECIMAL__', exponent: '__EXPONENT__', stringNumber: '9223372036854775807' };
+  const raw = '\n  ' + JSON.stringify(body).replace('"__INTEGER__"', '9223372036854775807')
+    .replace('"__DECIMAL__"', '0.123456789012345678901234567890')
+    .replace('"__EXPONENT__"', '9.223372036854775807e18') + '\n';
+  // The old parse/stringify path changes numeric VALUE; the expected text comes
+  // from the HTTP bytes, never from a parsed fixture or a replacement seal.
+  const rounded = JSON.parse(raw);
+  assert.notEqual(String(rounded.rawReport.precisionProbe.integer), '9223372036854775807');
+  assert.notEqual(JSON.stringify(rounded), raw.trim());
+  await fixture(async (client, calls) => {
+    const actual = await executeWire(client);
+    assert.equal(actual, raw); assert.equal(calls.length, 2);
+    assert.ok((actual as string).includes('"integer":9223372036854775807'));
+    assert.ok((actual as string).includes('"decimal":0.123456789012345678901234567890'));
+    assert.ok((actual as string).includes('"exponent":9.223372036854775807e18'));
+    assert.ok((actual as string).includes('"stringNumber":"9223372036854775807"'));
+    assert.ok((actual as string).includes('"reportHash":"' + reportHash + '"'));
+  }, call => call.path === '/v2/confidence/identity' ? { body: identity } : { raw });
+  await fixture(async (client, calls) => {
+    const config = loadConfig({ SWFTE_PAT: 'pat_test', SWFTE_TELEMETRY: '0' } as never);
+    const server = buildServer({ config, resolveClient: () => client });
+    try {
+      const handler = (server as any)._requestHandlers.get('tools/call'); assert.ok(handler);
+      const actual = await handler({ method: 'tools/call', params: { name: 'swfte_prove_selected_report', arguments: { runId, seq: 0 } } }, {});
+      assert.equal(actual.isError, undefined); assert.equal(actual.content[0].type, 'text'); assert.equal(actual.content[0].text, raw);
+      assert.equal(calls.length, 2); assert.ok(calls.every(call => call.method === 'GET'));
+    } finally { await server.close(); }
+  }, call => call.path === '/v2/confidence/identity' ? { body: identity } : { raw });
+});
+
+test('endpoint raw transport refuses empty malformed and oversized response without retry or fallback', async () => {
+  for (const raw of ['', '{broken', '\ufeff' + JSON.stringify(selected()), JSON.stringify({ ...selected(), padding: 'x'.repeat(1024 * 1024) })]) {
+    await fixture(async (client, calls) => {
+      await assert.rejects(executeWire(client), (error: unknown) => error instanceof SwfteApiError
+        && ['SELECTED_REPORT_JSON_INVALID', 'RESPONSE_LIMIT_EXCEEDED'].includes(error.code));
+      assert.equal(calls.length, 2); assert.ok(calls.every(call => call.method === 'GET'));
+    }, call => call.path === '/v2/confidence/identity' ? { body: identity } : { raw });
+  }
+});
+
+test('ordinary JSON request behavior and parsed selected admission remain distinct from raw output', async () => {
+  await fixture(async (client, calls) => {
+    assert.deepEqual(await client.request({ method: 'GET', path: '/ordinary-json', retries: 0 }), { retained: 7 });
+    assert.equal(calls.length, 1);
+  }, () => ({ body: { retained: 7 } }));
+  const body = selected(); body.rawReport.precisionProbe = '__INTEGER__'; body.artifactId = 'other';
+  const raw = JSON.stringify(body).replace('"__INTEGER__"', '9223372036854775807');
+  await fixture(async (client, calls) => {
+    await assert.rejects(executeWire(client), /SELECTED_CONFIDENCE_BINDING_MISMATCH/); assert.equal(calls.length, 2);
+  }, call => call.path === '/v2/confidence/identity' ? { body: identity } : { raw });
 });

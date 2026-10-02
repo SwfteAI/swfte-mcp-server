@@ -33,7 +33,7 @@ const selectedSchema = z.object({
   signatureStatus: z.enum(['UNSIGNED', 'UNVERIFIED']), signatureValidation: z.literal('UNAVAILABLE'),
 }).passthrough();
 
-/** Transport admission preserves the original additive body; the server performs canonical seal/evidence verification. */
+/** The parsed projection admits known fields; the server performs canonical seal/evidence verification. */
 export function admitSelectedConfidenceReport(wire: unknown, selection: z.infer<typeof inputSchema>, client: SwfteClient, workspace: string): unknown {
   const selected = selectedSchema.parse(wire);
   const result = admitConfidenceResult(selected.result, client, selection.runId);
@@ -50,14 +50,14 @@ export function admitSelectedConfidenceReport(wire: unknown, selection: z.infer<
       || report.sections.length !== sections.length || report.sections.some((section, index) => section.id !== sections[index])) {
     throw new Error('SELECTED_CONFIDENCE_REPORT_NOT_READY');
   }
-  // Do not normalize JSON numbers, drop additive signature fields, or create a replacement seal.
-  // Java canonical raw JSON may retain numeric spellings which JSON.parse cannot recover.
+  // This projection may round additive numeric values. The tool emits the original
+  // response text after admission, preserving those values and the server seal.
   return wire;
 }
 
 export const selectedConfidenceReportTools: ToolDefinition[] = [{
   name: 'swfte_prove_selected_report', title: 'Read one selected confidence report', readOnly: true,
-  description: 'Read the actual canonical selected run and sequence through the coherent report provider. Returns the typed result, all ten sections, Unknown items and original additive raw report from one persisted revision. Server integrity admission does not establish an external signature; signature validation remains unavailable. This never issues proof, starts work or approves promotion.',
+  description: 'Read the actual canonical selected run and sequence through the coherent report provider. Returns its original JSON text, including the typed result, all ten sections, Unknown items and additive raw report from one persisted revision. Numeric values and the server seal are preserved in this text; callers parsing it choose their own numeric precision. Server integrity admission does not establish an external signature; signature validation remains unavailable. This never issues proof, starts work or approves promotion.',
   inputSchema,
   execute: async (input, { client }) => {
     const identity = z.object({ workspaceId: text, actorId: text }).strict().parse(
@@ -65,10 +65,8 @@ export const selectedConfidenceReportTools: ToolDefinition[] = [{
     if (client.configuredWorkspaceId !== undefined && identity.workspaceId !== client.configuredWorkspaceId) {
       throw new Error('SELECTED_CONFIDENCE_WORKSPACE_MISMATCH');
     }
-    const query: Record<string, string | number> = { seq: input.seq };
-    if (input.expectedContentHash !== undefined) query.expectedContentHash = input.expectedContentHash;
-    if (input.expectedAvailableVersion !== undefined) query.expectedAvailableVersion = input.expectedAvailableVersion;
-    const wire = await client.request({ method: 'GET', path: `/v2/confidence/runs/${encodeURIComponent(input.runId)}/selected-report`, query, retries: 0 });
-    return admitSelectedConfidenceReport(wire, input, client, identity.workspaceId);
+    const wire = await client.requestSelectedConfidenceReportWire(input.runId, input);
+    admitSelectedConfidenceReport(wire.parsed, input, client, identity.workspaceId);
+    return wire.text;
   },
 }];
