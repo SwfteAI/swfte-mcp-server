@@ -6,8 +6,9 @@ import { join } from 'node:path';
 import { detectProject } from '../src/codemap/detect.js';
 import { getParsed } from '../src/codemap/detectors/ts/parse.js';
 import { DETECTORS as typescriptDetectors } from '../src/codemap/detectors/ts/index.js';
-import { children as javaChildren, lookupName as javaLookup, walk as javaWalk, withTree as javaTree } from '../src/codemap/detectors/java/parse.js';
+import { children as javaChildren, fieldValues as javaFieldValues, lookupName as javaLookup, walk as javaWalk, withTree as javaTree } from '../src/codemap/detectors/java/parse.js';
 import { children as pythonChildren, lookupName as pythonLookup, walk as pythonWalk, withTree as pythonTree } from '../src/codemap/detectors/py/parse.js';
+import { detectRawHttp as javaRawHttp } from '../src/codemap/detectors/java/rawHttp.js';
 import type { Node as NativeNode, Tree as NativeTree } from 'web-tree-sitter';
 import type { DetectContext, DetectedSite, Detector, SourceFile } from '../src/codemap/types.js';
 
@@ -196,3 +197,26 @@ for (const grammar of [
     assert.equal(Object.getOwnPropertyDescriptor(nativeTree, '0')?.value, 0, 'native tree released after repeated helper walks');
   });
 }
+
+
+test('Java exported field vectors are mutable caller copies without poisoning native field lookup or client base', () => {
+  const source = 'class Main {final String target="wf_field_owned";final WebClient api=WebClient.builder().baseUrl("https://api.swfte.com/agents").build();Object run(){probe(target);return api.post().uri("/v2/workflows/wf_field_owned/invoke").retrieve();}}';
+  const observation = javaTree(source, root => {
+    let target: NativeNode | undefined, receiver: NativeNode | undefined;
+    javaWalk(root, node => { if(node.type === 'identifier' && node.text === 'target' && node.parent?.type === 'argument_list') target=node; if(node.type === 'identifier' && node.text === 'api' && node.parent?.type === 'method_invocation') receiver=node; });
+    assert(target && receiver,'real native AST must expose field use and raw HTTP receiver');
+    const original=javaFieldValues('target',target), initial=javaLookup('target',target);
+    assert.equal(original.length,1);assert(initial && typeof initial === 'object' && !('env' in initial));
+    assert.equal(initial.text,'"wf_field_owned"');
+    const expectedIds=original.map(node=>node.id), clientIds=javaFieldValues('api',receiver).map(node=>node.id);
+    const beforeSites=javaRawHttp(root);assert.deepEqual(beforeSites.map(site=>site.artifact.id),['wf_field_owned']);
+    assert.equal(Object.isFrozen(original),false,'public vector remains mutable');original.length=0;original.push(root);
+    const clientVector=javaFieldValues('api',receiver);assert.equal(Object.isFrozen(clientVector),false);clientVector.length=0;clientVector.push(root);
+    const after=javaFieldValues('target',target);assert.notEqual(after,original);assert.deepEqual(after.map(node=>node.id),expectedIds);
+    assert.deepEqual(javaFieldValues('api',receiver).map(node=>node.id),clientIds);
+    assert.equal(javaLookup('target',target),initial,'mutating the exported vector cannot alter private field bindings');
+    assert.deepEqual(javaRawHttp(root),beforeSites,'actual raw HTTP client-base result must survive exported caller mutation');
+    return true;
+  });
+  assert.equal(observation,true,'real Java grammar must execute the entire mutation control');
+});

@@ -690,7 +690,7 @@ export function declaredType(name: string, at: JNode): string | null {
 export function fieldValues(name: string, at: JNode): JNode[] {
   for (let t = enclosingType(at); t; t = enclosingType(t.parent)) {
     const fb = fieldBindings(t, name);
-    if (fb) return fb.values;
+    if (fb) return [...fb.values];
   }
   return [];
 }
