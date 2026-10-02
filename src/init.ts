@@ -16,6 +16,7 @@ import { ConfinedWriter, gitignoreCovers, type PlannedWrite } from './fsguard.js
 import { assertLockBaseUrl } from './hosts.js';
 import { loadLock, LOCK_FILE, planLockWrite } from './lock.js';
 import { detectStack, type StackDetection } from './stack.js';
+import { resolveEnvironmentFiles, type EnvironmentFiles } from './env-files.js';
 
 export const DEFAULT_BASE_URL = 'https://api.swfte.com/agents';
 
@@ -45,7 +46,8 @@ export function scopedKeyRequest(baseUrl: string, refs: string[], name: string):
   return `curl -sS -X POST "${baseUrl.replace(/\/+$/, '')}/v1/api-keys" -H "Authorization: Bearer $SWFTE_PAT" -H "Content-Type: application/json" -d '${body.replace(/'/g, "'\\''")}'`;
 }
 
-export function initProject(opts: { root: string; env: NodeJS.ProcessEnv; baseUrl?: string; workspaceId?: string; projectName?: string }): InitResult {
+export function initProject(opts: { root: string; env: NodeJS.ProcessEnv; baseUrl?: string; workspaceId?: string; projectName?: string; environmentFiles?: Partial<EnvironmentFiles> }): InitResult {
+  const environmentFiles = resolveEnvironmentFiles(opts.environmentFiles);
   const env = opts.env;
   // Anything credential-valued in the environment is forbidden content for every file written here.
   const forbidden = [env.SWFTE_PAT, env.SWFTE_API_KEY].map((v) => v?.trim()).filter((v): v is string => Boolean(v));
@@ -58,7 +60,7 @@ export function initProject(opts: { root: string; env: NodeJS.ProcessEnv; baseUr
   const loaded = loadLock(writer, { baseUrl, workspaceId: opts.workspaceId ?? env.SWFTE_WORKSPACE_ID?.trim() ?? null });
   const created = !loaded.exists;
   if (created || loaded.migrated) planLockWrite(writer, loaded.lock);
-  writer.mergeEnv(writer.resolve('.env.example'), CLIENT_ENV, { header: 'Swfte — read by generated clients (swfte add)' });
+  writer.mergeEnv(writer.resolve(environmentFiles.example), CLIENT_ENV, { header: 'Swfte — read by generated clients (swfte add)' });
   const files = writer.commit();
 
   const detection = detectStack(writer.root);
@@ -89,10 +91,10 @@ export function initProject(opts: { root: string; env: NodeJS.ProcessEnv; baseUr
     );
   }
 
-  const missing = ['.env', '.env.local'].filter((f) => !gitignoreCovers(writer.root, f));
+  const missing = [environmentFiles.plain, environmentFiles.local].filter((f) => !gitignoreCovers(writer.root, f));
   const nextSteps = [
     ...(lock.artifacts.length ? [] : ['Find something to reuse (swfte_find_existing in your MCP client, or the Studio hub), then `swfte add <kind>:<id>`.']),
-    'Commit swfte.json and .env.example; add `npx -p @swfte/mcp-server swfte verify` to CI.',
+    `Commit swfte.json and ${environmentFiles.example}; add \`npx -p @swfte/mcp-server swfte verify\` to CI.`,
     'Run the app offline against local fixtures: `swfte dev` (SWFTE_BASE_URL=http://127.0.0.1:4010).',
     ...(missing.length ? [`Add ${missing.join(' and ')} to .gitignore before putting a key in ${missing.length > 1 ? 'them' : 'it'}.`] : []),
   ];

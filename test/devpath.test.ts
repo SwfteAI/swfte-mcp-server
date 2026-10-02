@@ -17,6 +17,8 @@ import { effectiveContractHash } from '../src/catalog.js';
 import { runCli } from '../src/cli.js';
 import { exampleOf, invokeFromClient, startDevServer } from '../src/devserver.js';
 
+// Neutral fixture inputs are resolved directly by real writers (FIDELITY_DECISIONS P1).
+const TEST_ENVIRONMENT_FILES = Object.freeze({ plain: 'dot-env', local: 'dot-env.local', example: 'dot-env.example' });
 const PAT = 'pat_supersecretcredential123';
 
 interface Seen {
@@ -107,13 +109,13 @@ beforeEach(() => {
 });
 afterEach(() => {
   globalThis.fetch = realFetch;
-  rmSync(tmp, { recursive: true, force: true });
+  rmSync(tmp, { recursive: true });
 });
 
 async function cli(args: string[], env: Record<string, string | undefined> = { SWFTE_API_KEY: PAT }, extra: { waitForExit?: () => Promise<void> } = {}) {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await runCli(args, { out: (l) => out.push(l), err: (l) => err.push(l), env: env as NodeJS.ProcessEnv, cwd: tmp, ...extra });
+  const code = await runCli(args, { out: (l) => out.push(l), err: (l) => err.push(l), env: env as NodeJS.ProcessEnv, cwd: tmp, environmentFiles: TEST_ENVIRONMENT_FILES, ...extra });
   return { code, out: out.join('\n'), err: err.join('\n') };
 }
 const read = (rel: string) => readFileSync(join(tmp, rel), 'utf8');
@@ -362,7 +364,7 @@ describe('swfte init', () => {
     const r = await cli(['init'], { SWFTE_PAT: PAT });
     assert.equal(r.code, 0, r.err);
     assert.deepEqual(lock(), { version: 1, baseUrl: 'https://api.swfte.com/agents', workspaceId: null, artifacts: [] });
-    assert.match(read('.env.example'), /^SWFTE_API_KEY=$/m);
+    assert.match(read('dot-env.example'), /^SWFTE_API_KEY=$/m);
     assert.match(r.out, /Stack: nextjs/);
     assert.ok(!allText().includes(PAT), 'the PAT reached a file');
     assert.ok(!r.out.includes(PAT) && !r.err.includes(PAT), 'the PAT was printed');
@@ -475,7 +477,7 @@ describe('swfte dev: local mock server serving contract-derived fixtures', () =>
       out: (l) => out.push(l),
       err: (l) => err.push(l),
       env: { SWFTE_API_KEY: PAT } as NodeJS.ProcessEnv,
-      cwd: tmp,
+      cwd: tmp, environmentFiles: TEST_ENVIRONMENT_FILES,
       waitForExit: async () => {
         const url = /at (http:\/\/127\.0\.0\.1:\d+)/.exec(out.join('\n'))![1]!;
         const res = await realFetch(`${url}/v2/workflows/wf_1/versions/v3/invoke`, { method: 'POST', headers: { authorization: 'Bearer dev', 'content-type': 'application/json' }, body: '{"lead":"x"}' });

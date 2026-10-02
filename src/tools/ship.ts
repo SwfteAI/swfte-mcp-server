@@ -65,11 +65,19 @@ function terminalPayload(adapter: KindAdapter, snapshot: BuildSnapshot) {
   const fr = snapshot.finalResponse as any;
   const artifact = adapter.extractArtifact?.(snapshot) ?? null;
   const id = adapter.extractId?.(snapshot);
+  const outcome: Record<string, unknown> = {};
+  // Missing availability is unknown. Keep actual false/null and optional fields
+  // exactly as reported; neither a finished transport nor an artifact proves validation.
+  for (const key of ['needsInput', 'needsAttention', 'repairs', 'userMessage',
+    'validationAvailable', 'retryableReason', 'retryable']) {
+    if (fr !== null && typeof fr === 'object' && Object.hasOwn(fr, key)) outcome[key] = fr[key];
+  }
 
   return {
     done: true,
     sessionId: snapshot.sessionId,
-    status: snapshot.status,
+    status: typeof fr?.status === 'string' ? fr.status : snapshot.status,
+    ...outcome,
     ...(snapshot.error ? { error: snapshot.error } : {}),
     ...(id ? { id, persisted: true } : { persisted: false }),
     artifact,

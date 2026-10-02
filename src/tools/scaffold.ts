@@ -17,6 +17,7 @@ import { CatalogRefArg, contractHash, getContract, getEntry, parseCatalogRef } f
 import { agentEmbedHtml, EMBED_KEY_PATTERN, issueEmbedKey, publicAgentChatPath } from '../embed.js';
 import { bakeArtifact, syncProject, verifyProject } from '../bake.js';
 import { assertLocalFilesystem, ConfinedWriter, INLINE_NOTE } from '../fsguard.js';
+import { environmentSecretGlobs, isEnvironmentFile } from '../env-files.js';
 import { scanInline, scanProject, unavailableScan } from '../compliance.js';
 import { FRAMEWORKS } from '../stack.js';
 import { emitTelemetry } from '../telemetry.js';
@@ -68,13 +69,13 @@ export const scaffoldTools: ToolDefinition[] = [
       emitTelemetry({ client, config }, { event: 'scaffold', catalogRef: r.ref });
       // Scan what was just written (code only), like `swfte add`. Advisory: a
       // finding or a scan that could not run never undoes the write.
-      const code = res.files.filter((f) => f.action !== 'unchanged' && f.path !== 'swfte.json' && !/(^|\/)\.env[^/]*$/.test(f.path));
+      const code = res.files.filter((f) => f.action !== 'unchanged' && f.path !== 'swfte.json' && !isEnvironmentFile(f.path, config.environmentFiles));
       let complianceScan = null;
       if (input.complianceScan !== false && code.length) {
         try {
           complianceScan = writer.inline
-            ? await scanInline(client, code.map((f) => ({ path: f.path, content: f.content ?? '' })))
-            : await scanProject(client, writer.root, code.map((f) => f.path));
+            ? await scanInline(client, code.map((f) => ({ path: f.path, content: f.content ?? '' })), environmentSecretGlobs(config.environmentFiles))
+            : await scanProject(client, writer.root, code.map((f) => f.path), environmentSecretGlobs(config.environmentFiles));
         } catch (err) {
           complianceScan = unavailableScan(err instanceof Error ? err.message : String(err));
         }

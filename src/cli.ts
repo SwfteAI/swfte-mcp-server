@@ -28,12 +28,15 @@ import { credentialBaseUrl, UntrustedHostError } from './hosts.js';
 import { loadLock, LockError } from './lock.js';
 import { FRAMEWORKS, type Framework } from './stack.js';
 import { PACKAGE_NAME, PACKAGE_VERSION } from './version.js';
+import { environmentSecretGlobs, isEnvironmentFile, resolveEnvironmentFiles, type EnvironmentFiles } from './env-files.js';
 
 export interface CliIO {
   out: (line: string) => void;
   err: (line: string) => void;
   env: NodeJS.ProcessEnv;
   cwd: string;
+  /** Programmatic embedding layout; command-line entry point uses canonical defaults. */
+  environmentFiles?: Partial<EnvironmentFiles>;
   /** `swfte dev` runs until this resolves (default: SIGINT/SIGTERM). Tests pass their own. */
   waitForExit?: () => Promise<void>;
 }
@@ -238,12 +241,14 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
 
   try {
     const root = projectRoot(io, p);
+    const environmentFiles = resolveEnvironmentFiles(io.environmentFiles);
+    const additionalSecretGlobs = environmentSecretGlobs(environmentFiles);
     const needsNetwork =
       p.command === 'add' || p.command === 'sync' || p.command === 'upgrade' || (p.command === 'verify' && !flag(p, 'offline')) || (p.command === 'dev' && flag(p, 'record'));
     let config: ServerConfig | null = null;
     if (needsNetwork) {
       try {
-        config = cliConfig(io.env, peekBaseUrl(root));
+        config = { ...cliConfig(io.env, peekBaseUrl(root)), environmentFiles };
       } catch (err) {
         if (!(err instanceof ConfigError)) throw err;
         if (p.command !== 'verify') throw err;
@@ -272,8 +277,8 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
           { catalogRef: ref, framework: framework as Framework | undefined, language: language as 'typescript' | 'python' | undefined, outDir: value(p, 'out'), alias: value(p, 'alias'), force: flag(p, 'force'), pin: !flag(p, 'no-pin') }
         );
         // Scan what was just written (code only: the lock and env examples are not code).
-        const written = res.files.filter((f) => f.action !== 'unchanged' && f.path !== 'swfte.json' && !/(^|\/)\.env[^/]*$/.test(f.path)).map((f) => f.path);
-        const compliance = written.length ? await scanProject(client, root, written) : null;
+        const written = res.files.filter((f) => f.action !== 'unchanged' && f.path !== 'swfte.json' && !isEnvironmentFile(f.path, environmentFiles)).map((f) => f.path);
+        const compliance = written.length ? await scanProject(client, root, written, additionalSecretGlobs) : null;
         const strict = flag(p, 'strict');
         if (json) emit({ ...res, compliance });
         else {
@@ -330,7 +335,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
             // verifyProject already reported the unreadable lock.
           }
           const paths = [...new Set([...generated, ...extraPaths(p)])];
-          compliance = paths.length ? await scanProject(client, root, paths) : unavailableScan('Nothing to scan: swfte.json lists no files and no --paths were given.');
+          compliance = paths.length ? await scanProject(client, root, paths, additionalSecretGlobs) : unavailableScan('Nothing to scan: swfte.json lists no files and no --paths were given.');
         }
         const scanCode = compliance ? scanExit(compliance) : 0;
         // A real failure (1) outranks "could not check" (2): both need attention, the failure more.
@@ -350,7 +355,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       }
       case 'init': {
         if (p.positionals.length) throw new UsageError('swfte init takes no positional arguments.');
-        const res = initProject({ root, env: io.env, baseUrl: value(p, 'base-url'), workspaceId: value(p, 'workspace'), projectName: basename(root) });
+        const res = initProject({ root, env: io.env, baseUrl: value(p, 'base-url'), workspaceId: value(p, 'workspace'), projectName: basename(root), environmentFiles });
         if (json) emit(res);
         else {
           io.out(`${res.lock.created ? 'Created' : 'Kept existing'} ${res.lock.path} (baseUrl ${res.lock.baseUrl}${res.lock.workspaceId ? `, workspace ${res.lock.workspaceId}` : ''}, ${res.lock.artifacts} artifact(s)).`);

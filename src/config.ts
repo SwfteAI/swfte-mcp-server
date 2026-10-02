@@ -19,6 +19,7 @@
  */
 
 import { telemetryEnabled } from './telemetry.js';
+import type { EnvironmentFiles } from './env-files.js';
 
 /** Which credential family the configured secret belongs to. */
 export type CredentialKind = 'pat' | 'api-key';
@@ -161,6 +162,8 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
 ];
 
 export interface ServerConfig {
+  /** Explicit library file layout; no environment-variable/CLI flag overrides the production defaults. */
+  environmentFiles?: Partial<EnvironmentFiles>;
   /** The raw secret. Never logged. */
   credential: string;
   credentialKind: CredentialKind;

@@ -12,6 +12,7 @@
  * "compliant" or "tamper-proof".
  */
 import { z } from 'zod';
+import { environmentSecretGlobs } from '../env-files.js';
 import {
   assess,
   checkJsonExport,
@@ -87,12 +88,13 @@ export const complianceTools: ToolDefinition[] = [
       language: z.string().optional().describe('Hint, e.g. "typescript", "python". Default: inferred per file.'),
       retain: z.boolean().optional().describe('Keep the result (never the code) as scan evidence. Default false.'),
     }),
-    execute: async (input, { client, localFilesystem }) => {
+    execute: async (input, { client, config, localFilesystem }) => {
       const wantsDisk = Boolean(input.paths?.length || input.globs?.length);
       if (!wantsDisk && !input.files?.length && !input.snippet) throw new Error('Pass paths, globs, files (inline) or snippet.');
       if (wantsDisk) assertLocalFilesystem(localFilesystem, 'swfte_compliance_scan_code paths/globs', INLINE_ALTERNATIVE);
-      const local = wantsDisk ? collectLocalFiles({ paths: input.paths, globs: input.globs }) : { files: [], notScanned: [], notes: [] };
-      const inline = input.files?.length ? collectInlineFiles(input.files) : { files: [], notScanned: [] };
+      const additionalSecretGlobs = environmentSecretGlobs(config.environmentFiles);
+      const local = wantsDisk ? collectLocalFiles({ paths: input.paths, globs: input.globs, additionalSecretGlobs }) : { files: [], notScanned: [], notes: [] };
+      const inline = input.files?.length ? collectInlineFiles(input.files, additionalSecretGlobs) : { files: [], notScanned: [] };
       return scanFiles(client, {
         files: [...local.files, ...inline.files],
         notScanned: [...local.notScanned, ...inline.notScanned],

@@ -16,6 +16,7 @@ import type { SwfteClient } from '../client.js';
 import { CatalogRefArg, ENVIRONMENTS, parseCatalogRef, searchCatalog, type ActionCapability } from '../catalog.js';
 import { executeAction, getAction, presentAction, proposeAction, type ActionRequest } from '../actions.js';
 import { ConfinedWriter, INLINE_NOTE, gitignoreCovers } from '../fsguard.js';
+import { resolveEnvironmentFiles } from '../env-files.js';
 import type { ToolDefinition } from './_types.js';
 
 const FRAMEWORKS = ['next', 'react', 'browser', 'node'] as const;
@@ -228,6 +229,7 @@ export const wireTools: ToolDefinition[] = [
       ...Common,
     }),
     execute: async (input, { client, config, localFilesystem }) => {
+      const environmentFiles = resolveEnvironmentFiles(config.environmentFiles);
       const writer = new ConfinedWriter({ forbidden: [config.credential], inline: localFilesystem === false });
       const dir = writer.resolve(input.targetDir);
       const app = await resolveApplication(client, input);
@@ -254,7 +256,7 @@ export const wireTools: ToolDefinition[] = [
       const snippet = analyticsSnippet(framework, appId, endpoint);
       writer.create(writer.resolve(`${dir}/${snippet.file}`), snippet.content, input.force);
 
-      const envFile = framework === 'next' ? '.env.local' : '.env';
+      const envFile = framework === 'next' ? environmentFiles.local : environmentFiles.plain;
       const real = [
         { key: 'SWFTE_ANALYTICS_APP_KEY', value: appKey, comment: 'Publishable Swfte analytics key (safe for browsers).' },
         { key: 'SWFTE_ANALYTICS_ENDPOINT', value: endpoint },
@@ -267,7 +269,7 @@ export const wireTools: ToolDefinition[] = [
       ];
       const envResult = writer.mergeEnv(writer.resolve(envFile), real, { force: input.force, header: 'Swfte analytics (swfte_wire_analytics)' });
       writer.mergeEnv(
-        writer.resolve('.env.example'),
+        writer.resolve(environmentFiles.example),
         real.map((e) => ({ key: e.key, value: '', comment: e.comment })),
         { header: 'Swfte analytics (swfte_wire_analytics)' }
       );
@@ -311,6 +313,7 @@ export const wireTools: ToolDefinition[] = [
       ...Common,
     }),
     execute: async (input, { client, config, localFilesystem }) => {
+      const environmentFiles = resolveEnvironmentFiles(config.environmentFiles);
       const writer = new ConfinedWriter({ forbidden: [config.credential], inline: localFilesystem === false });
       const dir = writer.resolve(input.targetDir);
       const app = await resolveApplication(client, { catalogRef: input.catalogRef });
@@ -328,7 +331,7 @@ export const wireTools: ToolDefinition[] = [
 
       writer.create(writer.resolve(`${dir}/swfte-checkout.ts`), checkoutHelper(config.baseUrl), input.force);
       writer.mergeEnv(
-        writer.resolve('.env.example'),
+        writer.resolve(environmentFiles.example),
         [
           { key: 'SWFTE_APP_RUNTIME_TOKEN', value: '', comment: 'Secret app-runtime token from Studio → Application → Payments. Server-side only; never commit it.' },
           { key: 'SWFTE_BASE_URL', value: '' },

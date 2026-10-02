@@ -234,20 +234,24 @@ export const isSucceededRunStatus = (s: unknown): boolean =>
  * Callers distinguish those.
  */
 export function toSnapshot(raw: any, sessionId: string): BuildSnapshot {
+  const finalResponse = raw?.finalResponse ?? null;
+  const hasFinalResponse = finalResponse !== null && typeof finalResponse === 'object' &&
+    !Array.isArray(finalResponse) && Object.keys(finalResponse).length > 0;
+  const progress = Number(raw?.progress ?? 0) || 0;
   return {
     sessionId: raw?.sessionId ?? sessionId,
     wizardSessionId: raw?.wizardSessionId ?? null,
     status: String(raw?.status ?? 'UNKNOWN'),
     message: raw?.message ?? null,
-    progress: Number(raw?.progress ?? 0) || 0,
-    // `done` is authoritative: some wizards leave `status` on a stage label
-    // even after they've finished.
-    done: Boolean(raw?.done),
+    progress,
+    // Coverage can emit READY/FAILED before the authoritative validation pass.
+    // Only an actual boolean completion plus its DTO or done100 can settle a poll.
+    done: raw?.done === true && (hasFinalResponse || progress === 100),
     error: raw?.error ?? null,
     nodes: raw?.nodes ?? [],
     edges: raw?.edges ?? [],
     speculativeNodes: raw?.speculativeNodes ?? [],
-    finalResponse: raw?.finalResponse ?? null,
+    finalResponse,
     raw,
   };
 }
@@ -279,6 +283,7 @@ export function pickId(body: any): string | undefined {
     body?.modelId ??
     body?.artifactId ??
     body?.data?.id ??
+    body?.createdWorkflow?.id ??
     undefined
   );
 }

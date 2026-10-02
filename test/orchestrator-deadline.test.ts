@@ -6,6 +6,9 @@ import { orchestrateSolution } from '../src/orchestrator.js';
 import { orchestrateTools } from '../src/tools/orchestrate.js';
 const client = () => new SwfteClient(loadConfig({ SWFTE_PAT: 'pat_test' } as never));
 const plan = { name: 'bounded', components: ['first', 'second', 'third'].map(key => ({ key, kind: 'workflow' as const, prompt: key })) };
+const validDraft = { name: 'deadline fixture draft', nodes: [
+  { id: 'deadline-trigger', type: 'CRON_TRIGGER', configuration: { schedule: '0 9 * * *' } },
+], connections: [] };
 
 test('one deadline across components retains committed artifact and pending session; no later create or wire', async () => {
   const originalFetch = globalThis.fetch, originalNow = Date.now;
@@ -20,7 +23,10 @@ test('one deadline across components retains committed artifact and pending sess
     }
     if (path.endsWith('/session-1/status')) {
       now += 20;
-      return Response.json({ done: true, status: 'COMPLETED', finalResponse: { id: 'committed-1' } });
+      return Response.json({ done: true, progress: 100, status: 'COMPLETED', finalResponse: {
+        status: 'CREATED', createdWorkflow: { id: 'committed-1', status: 'DRAFT' },
+        generatedWorkflow: validDraft, validationAvailable: true, needsInput: null, needsAttention: [],
+      } });
     }
     throw new Error(`Unexpected request ${path}`);
   };
@@ -41,7 +47,9 @@ test('ambiguous create deadline does not retry or start another component and re
   globalThis.fetch = async (url, opts) => {
     const path = new URL(String(url)).pathname;
     if (path.endsWith('/generate/async')) { starts++; return Response.json({ sessionId: 'known-session' }); }
-    if (path.endsWith('/status')) return Response.json({ done: true, status: 'COMPLETED', finalResponse: { generatedWorkflow: { name: 'draft', nodes: [], connections: [] } } });
+    if (path.endsWith('/status')) return Response.json({ done: true, progress: 100, status: 'COMPLETED', finalResponse: {
+      status: 'READY', generatedWorkflow: validDraft, validationAvailable: true, needsInput: null, needsAttention: [],
+    } });
     if (opts?.method === 'POST') {
       creates++;
       return new Promise((_resolve, reject) => opts.signal?.addEventListener('abort', () => reject(opts.signal?.reason), { once: true }));
@@ -145,7 +153,7 @@ test('ordinary generation and dataset failures preserve known session and artifa
   const original = globalThis.fetch;
   globalThis.fetch = async (url) => {
     if (String(url).endsWith('/generate/async')) return Response.json({ sessionId: 'failed-session' });
-    return Response.json({ done: true, status: 'FAILED', error: 'generation failed' });
+    return Response.json({ done: true, progress: 100, status: 'FAILED', error: 'generation failed' });
   };
   try {
     const report = await orchestrateSolution(client(), { name: 'failed', components: [plan.components[0]] });

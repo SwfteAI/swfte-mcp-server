@@ -38,6 +38,7 @@ import {
 } from './codegen.js';
 import { planAdapter } from './adapters.js';
 import type { ServerConfig } from './config.js';
+import { resolveEnvironmentFiles } from './env-files.js';
 import { assertLockBaseUrl } from './hosts.js';
 import type { ConfinedWriter, PlannedWrite } from './fsguard.js';
 import {
@@ -277,6 +278,7 @@ async function resolvePin(
 
 export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<BakeResult> {
   const { client, config, writer } = ctx;
+  const environmentFiles = resolveEnvironmentFiles(config.environmentFiles);
   const r = parseCatalogRef(input.catalogRef);
   if (input.framework && !(FRAMEWORKS as readonly string[]).includes(input.framework)) {
     throw new LockError(`Unknown framework "${input.framework}". Use one of: ${FRAMEWORKS.join(', ')}.`);
@@ -338,7 +340,7 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
     adapterPaths.push(normalizeRel(f.path));
   }
 
-  const env = writer.mergeEnv(writer.resolve('.env.example'), CLIENT_ENV, { header: 'Swfte — read by generated clients (swfte add)' });
+  const env = writer.mergeEnv(writer.resolve(environmentFiles.example), CLIENT_ENV, { header: 'Swfte — read by generated clients (swfte add)' });
 
   const previousFiles = loaded.lock.artifacts.find((a) => a.alias === alias && a.language === language)?.files ?? [];
   const pinnedVersion = pin.pinnedVersion;
