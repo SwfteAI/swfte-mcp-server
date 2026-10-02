@@ -47,6 +47,7 @@ import { complianceTools } from './compliance.js';
 import { learningTools } from './learning.js';
 import { setupTools } from './setup.js';
 import { proveTools } from './prove.js';
+import { selectedConfidenceReportTools } from './selected-confidence-report.js';
 import { cloudLinkTools } from './cloud-link.js';
 import { promotionTools } from './promotion.js';
 import { runtimeExecTools } from './runtime-exec.js';
@@ -78,6 +79,7 @@ export const allTools: ToolDefinition[] = [
   ...tag('core', complianceTools),
   ...tag('runtime', setupTools),
   ...tag('runtime', proveTools),
+  ...tag('runtime', selectedConfidenceReportTools),
   ...tag('runtime', cloudLinkTools),
   ...tag('runtime', promotionTools),
   ...tag('runtime', runtimeExecTools),

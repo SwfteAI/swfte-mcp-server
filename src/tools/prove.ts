@@ -101,7 +101,7 @@ const confidenceRunIdentity=(run:AdmittedConfidenceRun)=>JSON.stringify([
   run.modelSnapshot.map(model=>[model.role,model.modelId,model.priced,model.inputUsdPerMTok??null,model.outputUsdPerMTok??null]),
 ]);
 /** Consumer admission reuses the same Java-parity result projection as durable receipts. */
-function admitConfidenceResult(wire:unknown,client:import('../client.js').SwfteClient,runId?:string,prior?:AdmittedConfidenceRun):AdmittedConfidenceResult {
+export function admitConfidenceResult(wire:unknown,client:import('../client.js').SwfteClient,runId?:string,prior?:AdmittedConfidenceRun):AdmittedConfidenceResult {
   const result=resultSchema.parse(wire);
   if(!validProjection(result))throw new Error('CONFIDENCE_RESULT_PROJECTION_INVALID');
   if(client.configuredWorkspaceId!==undefined&&result.run.workspaceId!==client.configuredWorkspaceId
