@@ -10,9 +10,19 @@ permissions:
   contents: read
 
 jobs:
-  verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  native-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            tuple: darwin-arm64
+          - runner: macos-15-intel
+            tuple: darwin-x64
+          - runner: ubuntu-22.04
+            tuple: linux-x64-glibc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,5 +31,144 @@ jobs:
           cache: npm
       - run: node scripts/check-release-version.mjs
       - run: npm ci --no-audit --no-fund
-      - name: Verify source, tests, protocol and distributable
+      - name: Require actual runner OS, CPU and libc identity
+        env:
+          EXPECTED_TUPLE: ${{ matrix.tuple }}
+        run: node --input-type=module -e "import {hostTuple} from './scripts/build-confined-fs.mjs'; if(hostTuple()!==process.env.EXPECTED_TUPLE) throw Error('RUNNER_TUPLE_MISMATCH')"
+      - name: Verify source, actual native producer, protocol and host distributable
         run: npm run verify:offline
+      - name: Preserve real executable modes in current-run transfer
+        env:
+          EXPECTED_TUPLE: ${{ matrix.tuple }}
+        run: tar -cf "native-${EXPECTED_TUPLE}.tar" ".native-artifacts/${EXPECTED_TUPLE}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.tuple }}
+          path: native-${{ matrix.tuple }}.tar
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    needs: native-build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      SWFTE_NATIVE_REQUIRE_ALL: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: .native-downloads
+          merge-multiple: true
+      - name: Extract only the three trusted current-run producer archives
+        run: |
+          tar -xf .native-downloads/native-darwin-arm64.tar
+          tar -xf .native-downloads/native-darwin-x64.tar
+          tar -xf .native-downloads/native-linux-x64-glibc.tar
+      - name: Admit all current-run assets before assembly
+        run: node scripts/build-confined-fs.mjs --validate-all
+      - name: Verify full package and repeated clean-build assembly
+        run: npm run verify:offline
+      - name: Freeze and exercise the complete tarball candidate
+        run: node scripts/package-smoke.mjs --emit-candidate .package-candidate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-candidate
+          path: .package-candidate/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  native-consumer:
+    needs: assemble
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            tuple: darwin-arm64
+          - runner: macos-15-intel
+            tuple: darwin-x64
+          - runner: ubuntu-22.04
+            tuple: linux-x64-glibc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      SWFTE_NATIVE_REQUIRE_ALL: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-candidate
+          path: .package-candidate
+      - name: Require actual consumer tuple
+        env:
+          EXPECTED_TUPLE: ${{ matrix.tuple }}
+        run: node --input-type=module -e "import {hostTuple} from './scripts/build-confined-fs.mjs'; if(hostTuple()!==process.env.EXPECTED_TUPLE) throw Error('RUNNER_TUPLE_MISMATCH')"
+      - name: Install the same complete candidate with scripts disabled and exercise its public wrapper
+        run: node scripts/package-smoke.mjs --consume-candidate .package-candidate
+
+  docker-compatibility:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: x64
+          - platform: linux/arm64
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build existing Alpine image locally without pushing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: false
+          load: true
+          tags: swfte-alpine-compat:local
+      - name: Actual unsupported container version and typed public native refusal
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          ACTUAL=$(docker run --rm --entrypoint node swfte-alpine-compat:local dist/index.js swfte --version)
+          test "$ACTUAL" = "$VERSION"
+          docker run --rm --entrypoint node -e EXPECTED_ARCH="$EXPECTED_ARCH" swfte-alpine-compat:local --input-type=module -e '
+            import assert from "node:assert/strict";
+            import { existsSync } from "node:fs";
+            import { NativeFilesystem, NativeFilesystemError, nativePlatformTuple } from "@swfte/mcp-server/native-filesystem";
+            assert.equal(process.platform, "linux");
+            assert.equal(process.arch, process.env.EXPECTED_ARCH);
+            assert(!process.report.getReport().header.glibcVersionRuntime, "must be actual unsupported musl runtime");
+            const refused = (error) => error instanceof NativeFilesystemError && error.code === "UNSUPPORTED_PLATFORM" && error.committed === false;
+            assert.throws(() => nativePlatformTuple(), refused);
+            assert.throws(() => NativeFilesystem.openRoot("/app"), refused);
+            assert(!existsSync("/app/dist/native"), "unsupported JS build must not manufacture native artifacts");
+            console.log("SWFTE_ALPINE_COMPAT_OK " + process.arch);
+          '
+
+  verify:
+    needs: [native-build, assemble, native-consumer, docker-compatibility]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Require every actual build, assembly and installed-candidate consumer
+        run: echo 'SWFTE_NATIVE_CANDIDATE_MATRIX_OK'
