@@ -1,3 +1,4 @@
+import { releaseKeyAnalysis } from './keys.js';
 import type { DetectContext, DetectResult, DetectedSite, Detector, SourceFile } from '../../types.js';
 import { detectManaged, type JavaSite } from './managed.js';
 import { envNameOf, grammarGeneration, isForeignGenerated, isIgnoredPath, swfteImports, usesMocks, valueAnnotationEnv, walk, withTree } from './parse.js';
@@ -14,6 +15,7 @@ let last: { relPath: string; text: string; ctx: DetectContext; generation: numbe
 
 /** End the file dispatch without retaining its customer source text or analysis. */
 export function releaseAnalysis(): void {
+  releaseKeyAnalysis();
   last = null;
 }
 

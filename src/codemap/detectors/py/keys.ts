@@ -70,20 +70,36 @@ class Reads {
 const literalKey = (n: PyNode | null): string | null => (n && n.type === 'string' ? plainString(n) : null);
 
 /** The names in a function scope that refer to a variable (excludes attribute names, kwargs, targets). */
-function referencesAfter(scope: PyNode, name: string, after: number): PyNode[] {
-  const refs: PyNode[] = [];
-  let cutoff = Number.POSITIVE_INFINITY;
-  const assigns: number[] = [];
-  walk(scope, (n) => {
+interface ScopeReferences {
+  refs: Map<string, PyNode[]>;
+  assignments: Map<string, number[]>;
+}
+let referenceTrees = new WeakMap<PyNode['tree'], Map<number, ScopeReferences>>();
+
+/** Private Nodes are dispatch-scoped, never part of a detector result or public cache. */
+export function releaseKeyAnalysis(): void {
+  referenceTrees = new WeakMap();
+}
+
+function add<T>(map: Map<string, T[]>, name: string, value: T): void {
+  const values = map.get(name);
+  if (values) values.push(value);
+  else map.set(name, [value]);
+}
+
+/** Keep the legacy recursive walk extent, reference inclusion and source order exactly. */
+function scopeReferences(scope: PyNode): ScopeReferences {
+  let scopes = referenceTrees.get(scope.tree);
+  if (!scopes) { scopes = new Map(); referenceTrees.set(scope.tree, scopes); }
+  const hit = scopes.get(scope.id);
+  if (hit) return hit;
+  const index: ScopeReferences = { refs: new Map(), assignments: new Map() };
+  walk(scope, n => {
     if (n.type === 'assignment') {
-      const l = n.childForFieldName('left');
-      if (l?.type === 'identifier' && l.text === name && n.startIndex > after) assigns.push(n.startIndex);
+      const left = n.childForFieldName('left');
+      if (left?.type === 'identifier') add(index.assignments, left.text, n.startIndex);
     }
-    return undefined;
-  });
-  if (assigns.length) cutoff = Math.min(...assigns);
-  walk(scope, (n) => {
-    if (n.type !== 'identifier' || n.text !== name || n.startIndex <= after || n.startIndex >= cutoff) return undefined;
+    if (n.type !== 'identifier') return undefined;
     const p = n.parent;
     if (!p) return undefined;
     if (p.type === 'attribute' && p.childForFieldName('attribute')?.id === n.id) return undefined;
@@ -91,10 +107,29 @@ function referencesAfter(scope: PyNode, name: string, after: number): PyNode[] {
     if (p.type === 'assignment' && p.childForFieldName('left')?.id === n.id) return undefined;
     if ((p.type === 'function_definition' || p.type === 'class_definition') && p.childForFieldName('name')?.id === n.id) return undefined;
     if (p.type === 'parameters' || p.type === 'default_parameter' || p.type === 'typed_parameter') return undefined;
-    refs.push(n);
+    add(index.refs, n.text, n);
     return undefined;
   });
-  return refs;
+  // Assignment positions are sorted independently; references retain original traversal order.
+  for (const positions of index.assignments.values()) positions.sort((a,b) => a-b);
+  scopes.set(scope.id, index);
+  return index;
+}
+
+function firstAfter(positions: readonly number[], after: number): number {
+  let low = 0, high = positions.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (positions[middle]! <= after) low = middle + 1;
+    else high = middle;
+  }
+  return positions[low] ?? Number.POSITIVE_INFINITY;
+}
+
+function referencesAfter(scope: PyNode, name: string, after: number): PyNode[] {
+  const index = scopeReferences(scope);
+  const cutoff = firstAfter(index.assignments.get(name) ?? [], after);
+  return (index.refs.get(name) ?? []).filter(n => n.startIndex > after && n.startIndex < cutoff);
 }
 
 function trackVariable(name: string, from: PyNode, visit: (ref: PyNode) => void): void {

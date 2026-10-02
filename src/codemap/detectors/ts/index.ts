@@ -1,3 +1,4 @@
+import { releaseKeyAnalysis } from './keys.js';
 import type { DetectContext, DetectResult, DetectedSite, Detector, SourceFile } from '../../types.js';
 import { managedSites } from './managed.js';
 import { rawHttpSites } from './rawHttp.js';
@@ -18,6 +19,7 @@ const memo = new WeakMap<Run, { file: SourceFile; ctx: DetectContext; result: De
 
 /** The detector functions are process-lifetime keys; their source-bearing values are file-scoped. */
 export function releaseAnalysis(): void {
+  releaseKeyAnalysis();
   memo.delete(managedSites);
   memo.delete(rawHttpSites);
   memo.delete(widgetSites);
