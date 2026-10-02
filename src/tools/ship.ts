@@ -10,7 +10,7 @@ import {
   type Kind,
   type KindAdapter,
 } from '../kinds/index.js';
-import { requiredConnections } from '../connections.js';
+import { connectionFailure, requiredConnections } from '../connections.js';
 import { gate, withClientTransport } from '../preflight.js';
 import { deriveFromLive } from '../preflight/derive.mjs';
 import type { ToolDefinition } from './_types.js';
@@ -27,18 +27,17 @@ import {
 /**
  * Providers this workflow needs that nobody has signed in to yet.
  *
- * Best-effort, and deliberately silent about its own failures: if the catalog is
- * unreachable this returns nothing and the run proceeds. A false "you are
- * missing credentials" that blocks a good run is worse than a real failure,
- * which the trace explains anyway.
+ * Legacy checks remain best effort. Enabled server checks propagate a refusal
+ * rather than silently crediting unavailable connection readiness.
  */
 async function missingConnections(client: SwfteClient, kind: Kind, id: string): Promise<string[]> {
   if (kind !== 'workflow') return [];
   try {
-    const workflow = await getAdapter('workflow').get!(client, id);
-    const required = await requiredConnections(client, workflow);
+    const workflow = client.serverConnectionsEnabled ? undefined : await getAdapter('workflow').get!(client, id);
+    const required = await requiredConnections(client, workflow, id);
     return required.filter((r) => !r.connected).map((r) => r.provider);
-  } catch {
+  } catch (error) {
+    if (client.serverConnectionsEnabled) throw connectionFailure(error);
     return [];
   }
 }
@@ -321,8 +320,8 @@ export const shipTools: ToolDefinition[] = [
       'means per-node traces, and an unpublished workflow automatically falls back to the draft test ' +
       'path instead of erroring. For agents it sends a chat probe, retrying through backend ' +
       'load-shedding so a degraded platform is reported as such rather than as a broken agent. ' +
-      'Stops before spending an execution when the workflow needs an OAuth provider nobody has ' +
-      'signed in to, since that run can only fail — connect first, or pass force:true.',
+      'Checks workflow connection requirements before execution. Enabled server Connections refuse ' +
+      'unresolved or unavailable requirements. force:true overrides only the inherited best-effort OAuth check.',
     inputSchema: z.object({
       kind: KindArg,
       id: z.string(),
@@ -331,7 +330,7 @@ export const shipTools: ToolDefinition[] = [
       force: z
         .boolean()
         .optional()
-        .describe('Run even when a required OAuth connection appears to be missing.'),
+        .describe('Override the inherited best-effort OAuth check. Enabled server connection admission remains required.'),
       timeoutMs: z.number().int().min(5_000).optional(),
     }),
     execute: async (input, { client }) => {
@@ -343,19 +342,19 @@ export const shipTools: ToolDefinition[] = [
       // `force` exists because the check is best-effort: a credential stored
       // under a name that does not normalise to the provider would otherwise
       // block a run that would have worked.
-      if (!input.force) {
+      if (!input.force || client.serverConnectionsEnabled) {
         const missing = await missingConnections(client, input.kind, input.id);
         if (missing.length > 0) {
           return {
             ran: false,
             blocked: 'MISSING_CONNECTIONS',
             missing,
-            summary:
-              `Not run: this workflow needs ${missing.join(', ')}, which nobody has signed in to. ` +
-              'Every run would fail at that node.',
-            nextStep:
-              `Call swfte_connect_start with provider "${missing[0]}" to open sign-in for the user, ` +
-              'then run again. Pass force:true to run anyway.',
+            summary: client.serverConnectionsEnabled
+              ? `Not run: unresolved server connection requirements for ${missing.join(', ')}.`
+              : `Not run: this workflow needs ${missing.join(', ')}, which nobody has signed in to. Every run would fail at that node.`,
+            nextStep: client.serverConnectionsEnabled
+              ? 'Resolve the server connection needs in Studio, or connect a configured OAuth provider with swfte_connect_start, then check again before running.'
+              : `Call swfte_connect_start with provider "${missing[0]}" to open sign-in for the user, then run again. Pass force:true to run anyway.`,
           };
         }
       }
@@ -477,6 +476,14 @@ export const shipTools: ToolDefinition[] = [
       // and every node still reports COMPLETED — so the deployment looks healthy
       // in exactly the way this rule set exists to disprove. Only workflows have
       // a rule set today; other kinds skip and say so rather than pretending.
+      if (client.serverConnectionsEnabled && input.kind === 'workflow') {
+        const missing = await missingConnections(client, input.kind, input.id);
+        if (missing.length > 0) return {
+          dryRun: true, refused: true, reason: 'MISSING_CONNECTIONS', missing,
+          message: 'Server connection requirements are unresolved. Nothing was provisioned.',
+          nextActions: ['Resolve the server connection needs and check again before deployment.'],
+        };
+      }
       let preDeployEvidence: Record<string, unknown> | undefined;
       if (input.kind === 'workflow' && !input.skipPreflight) {
         const derived = await withClientTransport(client, () => deriveFromLive([['workflow', input.id]]));

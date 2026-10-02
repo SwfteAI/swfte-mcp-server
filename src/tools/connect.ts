@@ -1,10 +1,33 @@
 import { z } from 'zod';
 import { sleep } from '../client.js';
-import { connectedProviders, normaliseProvider, openInBrowser, requiredConnections } from '../connections.js';
+import { connectionFailure, inspectConnectionInventory, inspectConnections, normaliseProvider, openInBrowser, requiredConnections } from '../connections.js';
 import { getAdapter } from '../kinds/index.js';
 import type { ToolDefinition } from './_types.js';
 
 const OAUTH = '/v2/oauth';
+
+/** Native connection checks never credit a bodyless start or expose a credential in its URL. */
+function validatedNativeStart(body: unknown): { authorizationUrl: string; state: string } {
+  try {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error();
+    const result = body as Record<string, unknown>;
+    if (typeof result.authorizationUrl !== 'string' || result.authorizationUrl.length > 4096
+        || /[\u0000-\u001f\u007f]/.test(result.authorizationUrl)
+        || typeof result.state !== 'string' || !result.state.trim() || result.state.length > 512
+        || /[\u0000-\u001f\u007f]/.test(result.state)) throw new Error();
+    const url = new URL(result.authorizationUrl);
+    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) || url.username || url.password)
+      throw new Error();
+    for (const key of url.searchParams.keys()) {
+      if (['clientsecret', 'accesstoken', 'refreshtoken', 'apikey', 'password', 'secret', 'token']
+        .includes(key.toLowerCase().replace(/[_-]/g, ''))) throw new Error();
+    }
+    return { authorizationUrl: url.href, state: result.state };
+  } catch {
+    throw connectionFailure(undefined);
+  }
+}
 
 /**
  * OAuth provider connections for integration nodes.
@@ -193,12 +216,15 @@ export const connectTools: ToolDefinition[] = [
       'Slack node saves and publishes happily and only fails when the node runs.',
     inputSchema: z.object({}),
     execute: async (_input, { client }) => {
-      const providers = await connectedProviders(client);
+      const inventory = await inspectConnectionInventory(client);
+      const providers = new Set(inventory.providers);
       return {
+        ...(inventory.source === 'server' ? { source: 'server', connections: inventory.connections } : {}),
         connectedCount: providers.size,
         connected: [...providers].sort(),
-        note:
-          providers.size === 0
+        note: inventory.source === 'server'
+          ? 'Server handles are listed with their current status. UNKNOWN does not establish a successful credential check.'
+          : providers.size === 0
             ? 'Nothing connected. Any integration node will fail at execution until you run swfte_connect_start.'
             : 'Names are normalised (lowercase, no spaces or separators) for comparison against node requirements.',
       };
@@ -224,12 +250,14 @@ export const connectTools: ToolDefinition[] = [
         .describe('Immediately start the OAuth flow for the first missing provider, opening a browser.'),
     }),
     execute: async (input, { client }) => {
-      const workflow = await getAdapter('workflow').get!(client, input.workflowId);
-      const required = await requiredConnections(client, workflow);
+      const workflow = client.serverConnectionsEnabled ? undefined : await getAdapter('workflow').get!(client, input.workflowId);
+      const inspection = await inspectConnections(client, workflow, input.workflowId);
+      const required = inspection.requirements;
       const missing = required.filter((r) => !r.connected);
 
       const base = {
         workflowId: input.workflowId,
+        ...(inspection.source === 'server' ? { source: 'server', needs: inspection.needs, bindings: inspection.bindings } : {}),
         requires: required.map((r) => ({
           provider: r.provider,
           connected: r.connected,
@@ -243,7 +271,9 @@ export const connectTools: ToolDefinition[] = [
         return {
           ...base,
           note:
-            required.length === 0
+            inspection.source === 'server' && required.length === 0
+              ? 'The server reported no connection requirements for this workflow.'
+              : required.length === 0
               ? 'No nodes in this workflow need a third-party credential.'
               : 'Every provider this workflow needs is connected.',
         };
@@ -258,8 +288,10 @@ export const connectTools: ToolDefinition[] = [
         return {
           ...base,
           summary,
-          nextStep: `Call swfte_connect_start with provider "${missing[0]!.provider}" to open sign-in, ` +
-            'or swfte_connections_check again with connect:true to start it now.',
+          nextStep: inspection.source === 'server'
+            ? 'Resolve the server connection needs in Studio, or use swfte_connect_start for a configured OAuth provider.'
+            : `Call swfte_connect_start with provider "${missing[0]!.provider}" to open sign-in, ` +
+              'or swfte_connections_check again with connect:true to start it now.',
         };
       }
 
@@ -272,20 +304,23 @@ export const connectTools: ToolDefinition[] = [
         path: `${OAUTH}/connect/${encodeURIComponent(first.provider)}`,
         expectStatuses: [200, 400],
         retries: 1,
-      });
+      }).catch(error => { if (client.serverConnectionsEnabled) throw connectionFailure(error); throw error; });
 
       if (started?.error) {
-        return { ...base, summary, connectAttempt: { provider: first.provider, ...started } };
+        return { ...base, summary, connectAttempt: client.serverConnectionsEnabled
+          ? { provider: first.provider, started: false, error: 'CONNECTION_START_REFUSED' }
+          : { provider: first.provider, ...started } };
       }
 
-      const browser = started?.authorizationUrl ? openInBrowser(started.authorizationUrl) : { opened: false };
+      const safeStart = client.serverConnectionsEnabled ? validatedNativeStart(started) : started;
+      const browser = safeStart?.authorizationUrl ? openInBrowser(safeStart.authorizationUrl) : { opened: false };
       return {
         ...base,
         summary,
         connectAttempt: {
           provider: first.provider,
-          authorizationUrl: started?.authorizationUrl,
-          state: started?.state,
+          authorizationUrl: safeStart?.authorizationUrl,
+          state: safeStart?.state,
           browserOpened: browser.opened,
         },
         nextStep:

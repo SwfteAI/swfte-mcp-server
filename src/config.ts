@@ -184,6 +184,8 @@ export interface ServerConfig {
    * 0 / false / off / no; best effort either way — it never blocks or fails a tool.
    */
   telemetry: boolean;
+  /** Use server-owned Connections handles and auto-bind. Absent/default false preserves legacy tools. */
+  serverConnections?: boolean;
 }
 
 const PAT_PREFIX = 'pat_';
@@ -312,5 +314,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     allowDeploy: isTrue(env.SWFTE_ALLOW_DEPLOY),
     defaultWaitMs: parseWaitMs(env.SWFTE_DEFAULT_WAIT_MS),
     telemetry: telemetryEnabled(env),
+    serverConnections: isTrue(env.SWFTE_MCP_SERVER_CONNECTIONS),
   };
 }

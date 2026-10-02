@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { IMPLEMENTED_KINDS, getAdapter, type Kind } from '../kinds/index.js';
-import { requiredConnections } from '../connections.js';
+import { connectionFailure, requiredConnections } from '../connections.js';
 import type { VerifyCheck } from '../kinds/_adapter.js';
 import type { ToolDefinition } from './_types.js';
 
@@ -13,8 +13,8 @@ const KindArg = z.enum(IMPLEMENTED_KINDS as [Kind, ...Kind[]]);
  * not to work, and no other check here can see it, so verify folds it in rather
  * than leaving it to a tool the caller has to already know to call.
  *
- * Best-effort by design: a missing catalog reports a skip, not a failure. A
- * false "you are missing credentials" is worse than staying quiet.
+ * Legacy checks are best effort. Enabled server Connections refuse unavailable
+ * checks before execution or verification credit.
  */
 async function connectionCheck(
   client: Parameters<typeof requiredConnections>[0],
@@ -30,13 +30,16 @@ async function connectionCheck(
 
   let required: Awaited<ReturnType<typeof requiredConnections>>;
   try {
-    const workflow = await getAdapter('workflow').get!(client as never, id);
-    required = await requiredConnections(client, workflow);
-  } catch {
+    const workflow = client.serverConnectionsEnabled ? undefined : await getAdapter('workflow').get!(client as never, id);
+    required = await requiredConnections(client, workflow, id);
+  } catch (error) {
+    if (client.serverConnectionsEnabled) throw connectionFailure(error);
     return skip('Connection catalog unavailable — credentials not checked.');
   }
 
-  if (required.length === 0) return skip('No node in this workflow needs a third-party credential.');
+  if (required.length === 0) return skip(client.serverConnectionsEnabled
+    ? 'The server reported no connection requirements for this workflow.'
+    : 'No node in this workflow needs a third-party credential.');
 
   const missing = required.filter((r) => !r.connected);
   if (missing.length === 0) {
@@ -58,10 +61,12 @@ async function connectionCheck(
     check: {
       id: 'connections',
       ok: false,
-      detail: `Missing ${missing.length} OAuth connection(s): ${named}. These nodes will fail at execution.`,
+      detail: client.serverConnectionsEnabled ? `Unresolved connection requirements: ${named}.`
+        : `Missing ${missing.length} OAuth connection(s): ${named}. These nodes will fail at execution.`,
     },
-    nextActions: [
-      `Call swfte_connect_start with provider "${missing[0]!.provider}" to open sign-in for the user` +
+    nextActions: [client.serverConnectionsEnabled
+      ? 'Resolve the server connection needs in Studio, or connect a configured OAuth provider with swfte_connect_start.'
+      : `Call swfte_connect_start with provider "${missing[0]!.provider}" to open sign-in for the user` +
         (missing.length > 1
           ? `, then repeat for: ${missing.slice(1).map((m) => m.provider).join(', ')}.`
           : '.'),
@@ -74,6 +79,13 @@ async function verifyArtifact(client: Parameters<typeof connectionCheck>[0], inp
   requirePublished?: boolean; timeoutMs?: number;
 }) {
   const adapter = getAdapter(input.kind);
+  // With server Connections enabled, refusals are checked before any adapter run or verification credit.
+  const serverConnections = client.serverConnectionsEnabled ? await connectionCheck(client, input.kind, input.id) : undefined;
+  if (serverConnections?.check.ok === false) return {
+    ok: false, kind: input.kind, id: input.id, checks: [serverConnections.check],
+    nextActions: serverConnections.nextActions, summary: 'Connection requirements are unresolved.',
+    ...(input.run ? { ran: false } : {}),
+  };
   const report = await adapter.verify(client, input.id, {
     run: input.run,
     inputs: input.inputs,
@@ -81,7 +93,7 @@ async function verifyArtifact(client: Parameters<typeof connectionCheck>[0], inp
     timeoutMs: input.timeoutMs,
   });
 
-  const connections = await connectionCheck(client, input.kind, input.id);
+  const connections = serverConnections ?? await connectionCheck(client, input.kind, input.id);
   const checks = [...report.checks, connections.check];
   // A missing credential is a real failure of "does this actually work?",
   // so it lowers ok rather than sitting in the report as a note nobody acts on.

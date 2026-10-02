@@ -170,6 +170,10 @@ export class SwfteClient {
     return this.config.workspaceId;
   }
 
+  get serverConnectionsEnabled(): boolean {
+    return this.config.serverConnections === true;
+  }
+
   async request<T = unknown>(opts: RequestOptions): Promise<T> {
     const retries = opts.retries ?? (opts.method === 'GET' ? 2 : 0);
     let lastError: unknown;
