@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import type { ToolDefinition } from './_types.js';
-import { CONFIDENCE_ARTIFACT_KINDS, CONFIDENCE_PROFILES, type ConfidenceResult } from '../contracts/confidence-runtime-v1.js';
+import { CONFIDENCE_ARTIFACT_KINDS, CONFIDENCE_PROFILES } from '../contracts/confidence-runtime-v1.js';
 import { prepareIntake } from '../intake/levels.js';
 import { requestIntakeConsent } from '../intake/consent.js';
 import { uploadIntake, getIntakeBundle, deleteIntakeBundle, requestBundleDeletion } from '../intake/upload.js';
@@ -15,7 +15,8 @@ const rawHash=z.string().regex(/^[0-9a-f]{64}$/);
 const commandUUID=z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 const durableBudget=z.object({persona:z.number().finite().nonnegative().max(100),systemUnderTest:z.number().finite().nonnegative().max(100),report:z.number().finite().nonnegative().max(20),maxSteps:z.number().int().min(1).max(50000)}).strict();
 const durableInput=z.object({commandId:commandUUID,artifactKind:z.enum(CONFIDENCE_ARTIFACT_KINDS),artifactId:z.string().min(1).max(200).regex(/^[A-Za-z0-9_:@./-]+$/).refine(value=>!value.includes('://')&&!value.startsWith('/')&&!value.includes('..')),profile:z.enum(CONFIDENCE_PROFILES).default('QUICK'),frameworks:z.array(verifiedText.refine(value=>value.length<=200)).max(20).refine(values=>new Set(values).size===values.length).default([]),seed:z.number().int().safe().default(0),expectedContentHash:rawHash,budget:durableBudget.default({persona:1,systemUnderTest:1,report:.1,maxSteps:200})}).strict();
-const count=z.number().int().nonnegative();
+const count=z.number().int().nonnegative().max(2147483647);
+const longCount=z.number().int().nonnegative().safe();
 const dimension=z.enum(['FUNCTION','COMPLETENESS','ROBUSTNESS','LOAD_COST','SECURITY','PRIVACY','COMPLIANCE','BEHAVIOUR']);
 const verdict=z.enum(['PASS','FAIL','UNKNOWN']);
 const reason=z.enum(['NOT_EXERCISED','CRASHED','NO_VERDICT','CASSETTE_BROKEN','UNASSESSED_CONTROL','UNCALIBRATED_GRADER','BUDGET','LANE_UNVERIFIED','STALE']);
@@ -49,7 +50,7 @@ async function durableDeletion(input:z.infer<typeof deletionInput>,client:import
   return receipt;
 }
 const wilson=(successes:number,n:number)=>{const z=1.959963984540054,z2=z*z,p=successes/n,denom=1+z2/n,centre=(p+z2/(2*n))/denom,half=z*Math.sqrt(p*(1-p)/n+z2/(4*n*n))/denom;return{low:Math.round(Math.max(0,centre-half)*10000)/10000,high:Math.round(Math.min(1,centre+half)*10000)/10000,successes,n};};
-const interval=z.object({n:count.positive(),successes:count,low:z.number().finite().min(0).max(1),high:z.number().finite().min(0).max(1)}).passthrough().refine(value=>value.successes<=value.n&&value.low===wilson(value.successes,value.n).low&&value.high===wilson(value.successes,value.n).high);
+const interval=z.object({n:longCount.positive(),successes:longCount,low:z.number().finite().min(0).max(1),high:z.number().finite().min(0).max(1)}).passthrough().refine(value=>value.successes<=value.n&&value.low===wilson(value.successes,value.n).low&&value.high===wilson(value.successes,value.n).high);
 const ref=z.object({kind:z.enum(['CASSETTE','EXEC_LOG','LEDGER','CONTROL_RECORD','CAPTURE']),hash:rawHash}).passthrough();
 const claim=z.object({dimension,elementId:verifiedText,verdict,unknownReason:reason.nullish(),statedConfidence:z.number().finite().min(0).max(1).nullish(),interval:interval.nullish(),evidenceRefs:z.array(ref),dependsOn:z.array(verifiedText),stale:z.boolean()}).passthrough().refine(value=>(value.verdict==='UNKNOWN'?value.unknownReason!=null&&value.statedConfidence==null:value.unknownReason==null&&value.evidenceRefs.length>0)&&value.stale===(value.verdict==='UNKNOWN'&&value.unknownReason==='STALE'));
 const resultSchema=z.object({schemaVersion:z.literal('1'),run:z.object({runId:verifiedText,workspaceId:verifiedText,artifactKind:z.enum(CONFIDENCE_ARTIFACT_KINDS),artifactId:verifiedText,contentHash:rawHash,environment:z.literal('SANDBOX'),profile:z.enum(CONFIDENCE_PROFILES),frameworks:z.array(verifiedText),seed:z.number().int().safe(),budget:durableBudget,status:z.enum(['QUEUED','RUNNING','COMPLETE','BUDGET_EXHAUSTED','FAILED','CANCELLED']),engineVersion:verifiedText,calibrationVersion:verifiedText.nullish(),modelSnapshot:z.array(z.object({role:verifiedText,modelId:verifiedText,inputUsdPerMTok:z.number().finite().nonnegative().nullish(),outputUsdPerMTok:z.number().finite().nonnegative().nullish(),priced:z.boolean()}).passthrough().refine(value=>value.priced?value.inputUsdPerMTok!=null&&value.outputUsdPerMTok!=null:value.inputUsdPerMTok==null&&value.outputUsdPerMTok==null)),cassetteHead:rawHash.nullish(),startedAt:timestamp.nullish(),finishedAt:timestamp.nullish()}).passthrough(),claims:z.array(claim),completeness:z.object({covered:count,applicable:count,uncovered:z.array(z.object({elementId:verifiedText,dimension,reason}).passthrough()),inapplicable:z.array(z.object({elementId:verifiedText,dimension,reason:verifiedText}).passthrough())}).passthrough().refine(value=>value.covered<=value.applicable&&value.covered+value.uncovered.length===value.applicable),findings:z.array(z.object({fingerprint:rawHash,dimension,elementId:verifiedText,rootCauseKey:verifiedText,severity:z.enum(['CRITICAL','HIGH','MEDIUM','LOW','INFO']),status:z.enum(['OPEN','FIXED']),title:verifiedText,reproduction:z.array(verifiedText),evidenceRefs:z.array(ref),affectedElements:z.array(verifiedText),suggestedFix:z.string().nullish(),rerunCommand:z.string().nullish(),gap:z.boolean()}).passthrough()),summary:z.object({overall:verdict,headline:z.enum(['NOT_RUN','IN_PROGRESS','ALL_MANDATORY_PASSED','FAILURES_FOUND','NOTHING_FAILED_SOME_UNTESTED','RUN_INCOMPLETE','STALE']),dimensions:z.array(z.object({dimension,verdict,passCount:count,failCount:count,unknownCount:count,interval:interval.nullish(),mandatory:z.boolean()}).passthrough()),completenessCovered:count,completenessApplicable:count,unknownCount:count,openCriticalFindings:count,lastRunAt:timestamp.nullish(),evidenceLevel:z.enum(['NONE','OBSERVED','CORROBORATED','VALIDATED','VERIFIED'])}).passthrough()}).passthrough().refine(value=>value.summary.completenessCovered===value.completeness.covered&&value.summary.completenessApplicable===value.completeness.applicable
@@ -92,6 +93,22 @@ function validProjection(value:z.infer<typeof resultSchema>):boolean {
   const last=run.finishedAt??run.startedAt??null;
   return s.overall===overall&&s.headline===headline&&s.unknownCount===unknown.size&&s.openCriticalFindings===critical&&(last==null?s.lastRunAt==null:s.lastRunAt!=null&&instantValue(s.lastRunAt)===instantValue(last));
 }
+type AdmittedConfidenceResult=z.infer<typeof resultSchema>;
+type AdmittedConfidenceRun=AdmittedConfidenceResult['run'];
+const confidenceRunIdentity=(run:AdmittedConfidenceRun)=>JSON.stringify([
+  run.runId,run.workspaceId,run.artifactKind,run.artifactId,run.contentHash,run.environment,run.profile,run.frameworks,run.seed,
+  [run.budget.persona,run.budget.systemUnderTest,run.budget.report,run.budget.maxSteps],run.engineVersion,
+  run.modelSnapshot.map(model=>[model.role,model.modelId,model.priced,model.inputUsdPerMTok??null,model.outputUsdPerMTok??null]),
+]);
+/** Consumer admission reuses the same Java-parity result projection as durable receipts. */
+function admitConfidenceResult(wire:unknown,client:import('../client.js').SwfteClient,runId?:string,prior?:AdmittedConfidenceRun):AdmittedConfidenceResult {
+  const result=resultSchema.parse(wire);
+  if(!validProjection(result))throw new Error('CONFIDENCE_RESULT_PROJECTION_INVALID');
+  if(client.configuredWorkspaceId!==undefined&&result.run.workspaceId!==client.configuredWorkspaceId
+    ||runId!==undefined&&result.run.runId!==runId||prior!==undefined&&confidenceRunIdentity(result.run)!==confidenceRunIdentity(prior))
+    throw new Error('CONFIDENCE_RUN_BINDING_MISMATCH');
+  return result;
+}
 function submissionReceipt(value:unknown,input:z.infer<typeof durableInput>,identity:z.infer<typeof identitySchema>){
   const receipt=receiptSchema.parse(value),run=receipt.result.run;
   if(receipt.identity.requestDigest!==identity.requestDigest||receipt.identity.commandId!==input.commandId||receipt.identity.contentHash!==input.expectedContentHash
@@ -131,18 +148,34 @@ export const proveTools: ToolDefinition[]=[
     inputSchema:z.object({artifactKind:z.enum(CONFIDENCE_ARTIFACT_KINDS),artifactId:z.string().min(1).max(200),profile:z.enum(CONFIDENCE_PROFILES).default('QUICK'),frameworks:z.array(z.string().min(1).max(200)).max(20).default([]),seed:z.number().int().safe().default(1),expectedContentHash:z.string().regex(/^[0-9a-f]{64}$/),budget:z.object({persona:z.number().finite().nonnegative().max(100),systemUnderTest:z.number().finite().nonnegative().max(100),report:z.number().finite().nonnegative().max(20),maxSteps:z.number().int().min(1).max(50000)}).strict().default({persona:1,systemUnderTest:1,report:.1,maxSteps:200}),waitSeconds:z.number().int().min(0).max(120).default(0)}).strict(),
     execute:async(input,{client})=>{
       const {waitSeconds,...body}=input;
-      const created=await client.request<ConfidenceResult>({method:'POST',path:'/v2/confidence/runs',body,retries:0});
+      const created=admitConfidenceResult(await client.request({method:'POST',path:'/v2/confidence/runs',body,retries:0}),client);
+      const run=created.run;
+      if(run.artifactKind!==body.artifactKind||run.artifactId!==body.artifactId||run.contentHash!==body.expectedContentHash
+        ||run.profile!==body.profile||JSON.stringify(run.frameworks)!==JSON.stringify(body.frameworks)||run.seed!==body.seed
+        ||run.budget.persona!==body.budget.persona||run.budget.systemUnderTest!==body.budget.systemUnderTest
+        ||run.budget.report!==body.budget.report||run.budget.maxSteps!==body.budget.maxSteps
+        ||run.status!=='QUEUED'||run.startedAt!=null||run.finishedAt!=null)throw new Error('CONFIDENCE_CREATE_BINDING_MISMATCH');
       const runId=created.run.runId;
-      const started=await client.request<ConfidenceResult>({method:'POST',path:`${runPath(runId)}/start`,body:{},retries:0});
+      const started=admitConfidenceResult(await client.request({method:'POST',path:`${runPath(runId)}/start`,body:{},retries:0}),client,runId,run);
       if (!waitSeconds) return {runId,result:started,reportPath:`${runPath(runId)}/report`,next:'Read swfte_prove_status; results are current-content bound.'};
-      const progress=await client.pollUntil(()=>client.request<ConfidenceResult>({method:'GET',path:runPath(runId)}),result=>terminal.has(result.run.status),{timeoutMs:waitSeconds*1000,intervalMs:1000});
+      // pollUntil tolerates transport errors after its first poll; admission failure must instead stop immediately.
+      let pollFailure:{error:unknown}|undefined;
+      const progress=await client.pollUntil(async()=>{
+        try{return admitConfidenceResult(await client.request({method:'GET',path:runPath(runId),retries:0}),client,runId,run);}
+        catch(error){pollFailure={error};return started;}
+      },result=>pollFailure!==undefined||terminal.has(result.run.status),{timeoutMs:waitSeconds*1000,intervalMs:1000});
+      if(pollFailure)throw pollFailure.error;
       return {runId,...progress,reportPath:`${runPath(runId)}/report`};
     },
   },
-  {name:'swfte_prove_status',title:'Read actual confidence status',readOnly:true,description:'Read an owned confidence result, including every UNKNOWN reason and current-content binding.',inputSchema:runInput,execute:(input,{client})=>client.request({method:'GET',path:runPath(input.runId)})},
+  {name:'swfte_prove_status',title:'Read actual confidence status',readOnly:true,description:'Read an owned confidence result, including every UNKNOWN reason and current-content binding.',inputSchema:runInput,execute:async(input,{client})=>admitConfidenceResult(await client.request({method:'GET',path:runPath(input.runId),retries:0}),client,input.runId)},
   {name:'swfte_prove_estimate',title:'Read confidence cost estimate',readOnly:true,description:'Estimate an existing queued run before starting it. Unpriced models and dependency gaps remain explicit.',inputSchema:runInput,execute:(input,{client})=>client.request({method:'POST',path:`${runPath(input.runId)}/estimate`,body:{},retries:0})},
   {name:'swfte_prove_findings',title:'Read measured findings',readOnly:true,description:'Read findings linked to actual evidence; gaps remain gaps.',inputSchema:runInput,execute:(input,{client})=>client.request({method:'GET',path:`${runPath(input.runId)}/findings`})},
   {name:'swfte_findings',title:'Read measured findings',readOnly:true,description:'Read canonical proving-ground findings linked to actual evidence. Compatibility swfte_prove_findings remains available.',inputSchema:runInput,execute:(input,{client})=>client.request({method:'GET',path:`${runPath(input.runId)}/findings`})},
   {name:'swfte_prove_report',title:'Read the ten-section report',readOnly:true,description:'Read JSON or Markdown from the authoritative report, with the separate Unknown list and claims boundary.',inputSchema:runInput.extend({format:z.enum(['json','md']).default('json')}),execute:(input,{client})=>client.request({method:'GET',path:`${runPath(input.runId)}/report`,query:{format:input.format}})},
-  {name:'swfte_prove_cancel',title:'Cancel confidence execution',description:'Request cancellation; remaining measurements become UNKNOWN. Cancellation does not manufacture a passing report.',inputSchema:runInput,execute:(input,{client})=>client.request({method:'POST',path:`${runPath(input.runId)}/cancel`,body:{},retries:0})},
+  {name:'swfte_prove_cancel',title:'Cancel confidence execution',description:'Request cancellation; remaining measurements become UNKNOWN. Cancellation does not manufacture a passing report.',inputSchema:runInput,execute:async(input,{client})=>{
+    const prior=admitConfidenceResult(await client.request({method:'GET',path:runPath(input.runId),retries:0}),client,input.runId);
+    if(terminal.has(prior.run.status))return prior;
+    return admitConfidenceResult(await client.request({method:'POST',path:`${runPath(input.runId)}/cancel`,body:{},retries:0}),client,input.runId,prior.run);
+  }},
 ];

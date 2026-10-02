@@ -172,7 +172,12 @@ test('proof submits content binding and never caller identity',()=>fixture(async
 test('proving starts the actual returned run and retains UNKNOWN',()=>fixture(async(client,calls)=>{
   const result:any=await tool('swfte_prove',{artifactKind:'WORKFLOW',artifactId:'owned',expectedContentHash:hash},client);
   assert.equal(calls.length,2);assert.equal(calls[1]!.path,'/v2/confidence/runs/server-run/start');assert.equal(result.result.summary.overall,'UNKNOWN');
-},()=>({body:{run:{runId:'server-run',status:'QUEUED'},summary:{overall:'UNKNOWN'}}})));
+},call=>{const dims=['FUNCTION','COMPLETENESS','ROBUSTNESS','LOAD_COST','SECURITY','PRIVACY','COMPLIANCE','BEHAVIOUR'];
+function legacyResult(status='QUEUED'):any{
+ const terminal=['COMPLETE','FAILED','CANCELLED','BUDGET_EXHAUSTED'].includes(status),start=status==='QUEUED'?null:'2026-10-02T12:00:00.123456789Z',finish=terminal?'2026-10-02T12:00:01Z':null;
+ return{schemaVersion:'1',run:{runId:'server-run',workspaceId:'ws',artifactKind:'WORKFLOW',artifactId:'owned',contentHash:hash,environment:'SANDBOX',profile:'QUICK',frameworks:[],seed:1,budget:{persona:1,systemUnderTest:1,report:.1,maxSteps:200},status,engineVersion:'actual-engine-v1',calibrationVersion:null,modelSnapshot:[],cassetteHead:null,startedAt:start,finishedAt:finish},claims:[],completeness:{covered:0,applicable:1,uncovered:[{elementId:'native-node',dimension:'FUNCTION',reason:'NOT_EXERCISED'}],inapplicable:[]},findings:[],summary:{overall:'UNKNOWN',headline:status==='COMPLETE'?'NOTHING_FAILED_SOME_UNTESTED':terminal?'RUN_INCOMPLETE':'IN_PROGRESS',dimensions:dims.map(dimension=>({dimension,verdict:'UNKNOWN',passCount:0,failCount:0,unknownCount:['LOAD_COST','PRIVACY','BEHAVIOUR'].includes(dimension)?0:1,mandatory:!['LOAD_COST','PRIVACY','BEHAVIOUR'].includes(dimension)})),completenessCovered:0,completenessApplicable:1,unknownCount:5,openCriticalFindings:0,lastRunAt:finish??start,evidenceLevel:'NONE'},future:{preserved:true}};
+}
+return{body:legacyResult(call.path.endsWith('/start')?'RUNNING':'QUEUED')};}));
 test('a failed mutation is never automatically retried or followed by start',()=>fixture(async(client,calls)=>{
   await assert.rejects(tool('swfte_prove',{artifactKind:'WORKFLOW',artifactId:'owned',expectedContentHash:hash},client),SwfteApiError);assert.equal(calls.length,1);
 },()=>({status:503,body:{code:'DEPENDENCY_UNAVAILABLE'}})));
