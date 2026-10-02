@@ -24,6 +24,19 @@ for(const [name,args] of [['typecheck',['run','typecheck']],['all-offline-tests'
 const count=name=>{const match=tap.match(new RegExp(`^# ${name} (\\d+)\\s*$`,'m'));return match?Number(match[1]):null;};
 const tests={tests:count('tests'),suites:count('suites'),pass:count('pass'),fail:count('fail'),cancelled:count('cancelled'),skipped:count('skipped'),todo:count('todo')};
 const requiredControls=[
+  'durable bundle deletion consistently foreign configured workspace refuses before any POST',
+  'durable bundle deletion matching configured workspace retains server actor and exact receipt',
+  'durable bundle deletion missing verified owner and reserved actor refuse without mutation',
+  'durable bundle deletion Java Instant nanoseconds extended year and offset preserve full receipt',
+  'durable bundle deletion binds verified server identity exact request and scoped receipt',
+  'durable bundle deletion readback is read only with no mutation fallback',
+  'durable bundle deletion invalid UUID hash authority and reason refuse before HTTP',
+  'durable bundle deletion foreign pure identity never reaches producer',
+  'durable bundle deletion every foreign receipt identity field refuses',
+  'durable bundle deletion full receipt refuses malformed scope audit level and Java Instant',
+  'durable bundle deletion uncertain mutation never retries or allocates fallback',
+  'durable bundle deletion absent pending malformed readback never deletes',
+
   'durable confidence actual Java negative four digit Instant preserves complete result',
   'durable confidence Java nonblank Unicode preserves NBSP figure and narrow spaces',
   'durable confidence unpriced model prices and duplicate roles refuse',
@@ -67,7 +80,7 @@ const requiredControls=[
 const missingControls=requiredControls.filter(label=>!tap.includes(label));
 const after=fingerprint();
 const passed=checks.length===2&&checks.every(check=>check.exitCode===0)&&before.hash===after.hash
-  &&tests.tests>=883&&tests.pass===tests.tests&&tests.fail===0&&tests.cancelled===0&&tests.skipped===0&&tests.todo===0&&missingControls.length===0;
+  &&tests.tests>=895&&tests.pass===tests.tests&&tests.fail===0&&tests.cancelled===0&&tests.skipped===0&&tests.todo===0&&missingControls.length===0;
 writeFileSync(`${directory}/result.json`,JSON.stringify({at:new Date().toISOString(),sourceBefore:before,sourceAfter:after,checks,tests,missingControls,passed,
   acceptance:'MCP client/local HTTP controls only; actual backend/provider/runtime and visual acceptance remain separate'},null,2)+'\n');
 if(!passed)process.exit(1);

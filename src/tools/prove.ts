@@ -4,7 +4,7 @@ import type { ToolDefinition } from './_types.js';
 import { CONFIDENCE_ARTIFACT_KINDS, CONFIDENCE_PROFILES, type ConfidenceResult } from '../contracts/confidence-runtime-v1.js';
 import { prepareIntake } from '../intake/levels.js';
 import { requestIntakeConsent } from '../intake/consent.js';
-import { uploadIntake, getIntakeBundle, deleteIntakeBundle } from '../intake/upload.js';
+import { uploadIntake, getIntakeBundle, deleteIntakeBundle, requestBundleDeletion } from '../intake/upload.js';
 
 const runInput=z.object({runId:z.string().min(1).max(200)}).strict();
 const runPath=(id:string)=>`/v2/confidence/runs/${encodeURIComponent(id)}`;
@@ -36,6 +36,18 @@ const instantValue=(value:string):bigint|null=>{
   return epoch< -31557014167219200000000000n||epoch>31556889864403199999999999n?null:epoch;
 };
 const timestamp=verifiedText.refine(value=>instantValue(value)!==null);
+const deletionInput=z.object({bundleId:z.string().min(1).max(200).regex(/^[A-Za-z0-9_:@./-]+$/).refine(value=>!value.includes('://')&&!value.startsWith('/')&&!value.includes('..')),commandId:commandUUID,snapshotHash:rawHash}).strict();
+const deletionIdentitySchema=z.object({workspaceId:verifiedText,actorId:verifiedText.refine(value=>value!=='system:confidence-intake'),commandId:commandUUID,bundleId:verifiedText,snapshotHash:rawHash,reason:z.literal('USER_REQUEST'),requestDigest:rawHash}).strict();
+const deletionReceiptSchema=z.object({identity:deletionIdentitySchema,level:z.enum(['LOCAL','MANIFEST','DIFF','TREE']),expiresAt:timestamp,rowAbsentConfirmedAt:timestamp,canonicalAuditHash:rawHash,scope:z.literal('CODE_BUNDLE_STORAGE_ROW')}).strict();
+async function durableDeletion(input:z.infer<typeof deletionInput>,client:import('../client.js').SwfteClient,operation:'deleteOnce'|'readback'){
+  const owner=z.object({workspaceId:verifiedText,actorId:verifiedText}).strict().parse(await client.request({method:'GET',path:'/v2/confidence/identity',retries:0}));
+  if(client.configuredWorkspaceId!==undefined&&owner.workspaceId!==client.configuredWorkspaceId)throw new Error('DELETION_CONFIGURED_WORKSPACE_MISMATCH');
+  const identity=deletionIdentitySchema.parse(await requestBundleDeletion(client,input,'identity'));
+  if(identity.workspaceId!==owner.workspaceId||identity.actorId!==owner.actorId||identity.commandId!==input.commandId||identity.bundleId!==input.bundleId||identity.snapshotHash!==input.snapshotHash)throw new Error('DELETION_IDENTITY_MISMATCH');
+  const receipt=deletionReceiptSchema.parse(await requestBundleDeletion(client,input,operation));
+  if(Object.keys(identity).some(key=>identity[key as keyof typeof identity]!==receipt.identity[key as keyof typeof identity]))throw new Error('DELETION_RECEIPT_MISMATCH');
+  return receipt;
+}
 const wilson=(successes:number,n:number)=>{const z=1.959963984540054,z2=z*z,p=successes/n,denom=1+z2/n,centre=(p+z2/(2*n))/denom,half=z*Math.sqrt(p*(1-p)/n+z2/(4*n*n))/denom;return{low:Math.round(Math.max(0,centre-half)*10000)/10000,high:Math.round(Math.min(1,centre+half)*10000)/10000,successes,n};};
 const interval=z.object({n:count.positive(),successes:count,low:z.number().finite().min(0).max(1),high:z.number().finite().min(0).max(1)}).passthrough().refine(value=>value.successes<=value.n&&value.low===wilson(value.successes,value.n).low&&value.high===wilson(value.successes,value.n).high);
 const ref=z.object({kind:z.enum(['CASSETTE','EXEC_LOG','LEDGER','CONTROL_RECORD','CAPTURE']),hash:rawHash}).passthrough();
@@ -110,7 +122,9 @@ export const proveTools: ToolDefinition[]=[
     return input.approvalActionId?uploadIntake(client,intake,input.approvalActionId):requestIntakeConsent(client,intake);
   }},
   {name:'swfte_code_bundle',title:'Read owned code bundle metadata',readOnly:true,description:'Read actual current bundle metadata; foreign, expired and deleted bundles remain unavailable.',inputSchema:z.object({bundleId:z.string().min(1).max(200)}).strict(),execute:(input,{client})=>getIntakeBundle(client,input.bundleId)},
-  {name:'swfte_code_bundle_delete',title:'Delete owned code bundle',destructive:true,description:'Delete retained source through the actual owned server store. This does not retain a source copy in MCP.',inputSchema:z.object({bundleId:z.string().min(1).max(200)}).strict(),execute:(input,{client})=>deleteIntakeBundle(client,input.bundleId)},
+  {name:'swfte_code_bundle_delete_once',title:'Delete one exact owned bundle row',destructive:true,description:'Persist exact caller UUID, bundle and hash before first mutation. Obtain server identity and confirmed canonical audit receipt for CODE_BUNDLE_STORAGE_ROW only. Uncertain responses require exact swfte_code_bundle_deletion readback; never replace UUID or retry mutation. Independent run snapshots and backups are outside this receipt.',inputSchema:deletionInput,execute:(input,{client})=>durableDeletion(input,client,'deleteOnce')},
+  {name:'swfte_code_bundle_deletion',title:'Read exact bundle deletion receipt',readOnly:true,description:'Read-only exact original UUID/hash reconciliation. Never deletes, retries mutation or treats a missing bundle as confirmed erasure. Scope is CODE_BUNDLE_STORAGE_ROW only.',inputSchema:deletionInput,execute:(input,{client})=>durableDeletion(input,client,'readback')},
+  {name:'swfte_code_bundle_delete',title:'Delete owned code bundle',destructive:true,description:'Legacy server lifecycle request; live bundles refuse without trusted terminal mapping. For user deletion use swfte_code_bundle_delete_once with persisted UUID/hash.',inputSchema:z.object({bundleId:z.string().min(1).max(200)}).strict(),execute:(input,{client})=>deleteIntakeBundle(client,input.bundleId)},
   {
     name:'swfte_prove', title:'Run the actual sandbox proving ground',
     description:'Create and start actual sandbox confidence for a server-owned current artifact. No URL, client verdict or claimed confidence is accepted. All judged confidence requires versioned calibration; incomplete measurements remain UNKNOWN. This never promotes.',

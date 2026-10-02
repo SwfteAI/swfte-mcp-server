@@ -24,12 +24,12 @@ function durableReceipt(){return {identity:{workspaceId:'ws',actorId:'actor',com
 function durableReply(call:Call){return {body:call.path==='/v2/confidence/identity'?{workspaceId:'ws',actorId:'actor'}:call.path.endsWith('/identity')?durableReceipt().identity:durableReceipt()};}
 
 type Call={method:string;path:string;body:any;authorization:string|undefined};
-async function fixture<T>(run:(client:SwfteClient,calls:Call[])=>Promise<T>,reply:(call:Call)=>{status?:number;body:unknown;rawBody?:string}=()=>({body:[]})) {
+async function fixture<T>(run:(client:SwfteClient,calls:Call[])=>Promise<T>,reply:(call:Call)=>{status?:number;body:unknown;rawBody?:string}=()=>({body:[]}),workspaceId?:string) {
   const calls:Call[]=[];
   const server=createServer(async(req,res)=>{let text='';for await(const chunk of req)text+=String(chunk);const call={method:req.method!,path:req.url!,body:text?JSON.parse(text):undefined,authorization:req.headers.authorization};calls.push(call);const response=reply(call);res.writeHead(response.status??200,{'content-type':'application/json'});res.end(response.rawBody??JSON.stringify(response.body))});
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const address=server.address();if(!address||typeof address==='string')throw new Error('Loopback bind failed');
-  const config=loadConfig({SWFTE_PAT:'pat_test',SWFTE_BASE_URL:`http://127.0.0.1:${address.port}`,SWFTE_TELEMETRY:'0'} as never);
+  const config=loadConfig({SWFTE_PAT:'pat_test',SWFTE_BASE_URL:`http://127.0.0.1:${address.port}`,SWFTE_TELEMETRY:'0',...(workspaceId?{SWFTE_WORKSPACE_ID:workspaceId}:{})} as never);
   try{return await run(new SwfteClient(config),calls)}finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()))}
 }
 async function tool(name:string,input:unknown,client:SwfteClient){const definition=[...setupTools,...proveTools,...promotionTools,...cloudLinkTools,...connectTools,...actionTools].find(candidate=>candidate.name===name) as ToolDefinition;assert.ok(definition);return definition.execute(definition.inputSchema.parse(input),{client,config:loadConfig({SWFTE_PAT:'pat_test'} as never)})}
@@ -221,3 +221,74 @@ test('uncertain managed READ approval is not automatically retried or resolved',
   await assert.rejects(tool('swfte_request_approval',{capability:'managed_database.read.provision',target:'workflow:owned',environment:'development',params:{taskKey:'node-key',expectedRevision:'2'}},client),SwfteApiError);
   assert.equal(calls.length,1);assert.equal(calls[0]!.path,'/v2/actions');
 },()=>({status:503,body:{error:'UNCONFIRMED'}})));
+
+const deletionRequest={bundleId:'bundle-a',commandId:durableCommand,snapshotHash:hash};
+function deletionReceipt(){return {identity:{workspaceId:'ws',actorId:'actor',commandId:durableCommand,bundleId:'bundle-a',snapshotHash:hash,reason:'USER_REQUEST',requestDigest:'d'.repeat(64)},level:'TREE',expiresAt:'2026-10-02T15:00:00.123456789Z',rowAbsentConfirmedAt:'2026-10-02T14:00:00Z',canonicalAuditHash:'b'.repeat(64),scope:'CODE_BUNDLE_STORAGE_ROW'};}
+function deletionReply(call:Call){return {body:call.path==='/v2/confidence/identity'?{workspaceId:'ws',actorId:'actor'}:call.path.endsWith('/identity')?deletionReceipt().identity:deletionReceipt()};}
+test('durable bundle deletion binds verified server identity exact request and scoped receipt',()=>fixture(async(client,calls)=>{
+ const receipt:any=await tool('swfte_code_bundle_delete_once',deletionRequest,client);
+ assert.deepEqual(receipt,deletionReceipt());assert.equal(calls.length,3);
+ assert.deepEqual(calls.map(c=>c.path),['/v2/confidence/identity',`/v2/confidence/bundles/bundle-a/deletions/${durableCommand}/identity`,`/v2/confidence/bundles/bundle-a/deletions/${durableCommand}`]);
+ for(const c of calls.slice(1)){assert.equal(c.method,'POST');assert.deepEqual(c.body,{snapshotHash:hash});}
+},deletionReply));
+test('durable bundle deletion readback is read only with no mutation fallback',()=>fixture(async(client,calls)=>{
+ assert.equal(proveTools.find(t=>t.name==='swfte_code_bundle_deletion')?.readOnly,true);
+ assert.equal(proveTools.find(t=>t.name==='swfte_code_bundle_delete_once')?.destructive,true);
+ await tool('swfte_code_bundle_deletion',deletionRequest,client);
+ assert.equal(calls.length,3);assert.ok(calls[2]!.path.endsWith('/readback'));
+},deletionReply));
+test('durable bundle deletion invalid UUID hash authority and reason refuse before HTTP',()=>fixture(async(client,calls)=>{
+ for(const input of [{...deletionRequest,commandId:'bad'},{...deletionRequest,commandId:durableCommand.toUpperCase()},{...deletionRequest,snapshotHash:'sha256:'+hash},{...deletionRequest,bundleId:'../foreign'},{...deletionRequest,actorId:'forged'},{...deletionRequest,workspaceId:'foreign'},{...deletionRequest,reason:'TERMINAL_RUN'}])await assert.rejects(tool('swfte_code_bundle_delete_once',input,client));
+ assert.equal(calls.length,0);
+}));
+test('durable bundle deletion foreign pure identity never reaches producer',async()=>{
+ for(const [field,value] of Object.entries({workspaceId:'foreign',actorId:'foreign',commandId:'00000000-0000-0000-0000-000000000000',bundleId:'other',snapshotHash:'f'.repeat(64),reason:'TERMINAL_RUN'}))await fixture(async(client,calls)=>{
+ await assert.rejects(tool('swfte_code_bundle_delete_once',deletionRequest,client));assert.equal(calls.length,2);
+ },call=>call.path.endsWith('/identity')&&call.path!=='/v2/confidence/identity'?{body:{...deletionReceipt().identity,[field]:value}}:deletionReply(call));
+});
+test('durable bundle deletion every foreign receipt identity field refuses',async()=>{
+ for(const [field,value] of Object.entries({workspaceId:'foreign',actorId:'foreign',commandId:'00000000-0000-0000-0000-000000000000',bundleId:'other',snapshotHash:'f'.repeat(64),requestDigest:'e'.repeat(64),reason:'RETENTION_EXPIRED'}))await fixture(async(client,calls)=>{
+ await assert.rejects(tool('swfte_code_bundle_deletion',deletionRequest,client));assert.equal(calls.length,3);assert.ok(calls[2]!.path.endsWith('/readback'));
+ },call=>call.path.endsWith('/readback')?{body:{...deletionReceipt(),identity:{...deletionReceipt().identity,[field]:value}}}:deletionReply(call));
+});
+test('durable bundle deletion full receipt refuses malformed scope audit level and Java Instant',async()=>{
+ for(const patch of [{scope:'ALL_SOURCE'},{canonicalAuditHash:'wrong'},{level:'UNKNOWN'},{expiresAt:'2026-02-30T00:00:00Z'},{rowAbsentConfirmedAt:'2026-10-02'},{rowAbsentConfirmedAt:'2026-10-02T14:00:00.1234567890Z'}])await fixture(async(client,calls)=>{
+ await assert.rejects(tool('swfte_code_bundle_deletion',deletionRequest,client));assert.equal(calls.length,3);
+ },call=>call.path.endsWith('/readback')?{body:{...deletionReceipt(),...patch}}:deletionReply(call));
+ for(const field of Object.keys(deletionReceipt()))await fixture(async(client)=>{
+ await assert.rejects(tool('swfte_code_bundle_deletion',deletionRequest,client));
+ },call=>{if(!call.path.endsWith('/readback'))return deletionReply(call);const receipt:Record<string,unknown>={...deletionReceipt()};delete receipt[field];return {body:receipt};});
+});
+test('durable bundle deletion uncertain mutation never retries or allocates fallback',()=>fixture(async(client,calls)=>{
+ await assert.rejects(tool('swfte_code_bundle_delete_once',deletionRequest,client));assert.equal(calls.length,3);
+ assert.ok(!calls.some(c=>c.method==='DELETE'||c.path==='/v2/confidence/bundles'));
+},call=>call.path.endsWith('/identity')?deletionReply(call):{status:503,body:{error:'DELETION_UNCONFIRMED'}}));
+test('durable bundle deletion absent pending malformed readback never deletes',async()=>{
+ for(const reply of [{status:404,body:{error:'DELETION_NOT_FOUND'}},{status:503,body:{error:'DELETION_UNCONFIRMED'}},{body:null},{body:{},rawBody:'{broken'}])await fixture(async(client,calls)=>{
+ await assert.rejects(tool('swfte_code_bundle_deletion',deletionRequest,client));assert.equal(calls.length,3);assert.ok(calls[2]!.path.endsWith('/readback'));
+ },call=>call.path.endsWith('/readback')?reply:deletionReply(call));
+});
+
+test('durable bundle deletion missing verified owner and reserved actor refuse without mutation',async()=>{
+ for(const owner of [{workspaceId:'ws'},{workspaceId:'ws',actorId:'system:confidence-intake'},{workspaceId:'other',actorId:'actor'}])await fixture(async(client,calls)=>{
+ await assert.rejects(tool('swfte_code_bundle_delete_once',deletionRequest,client));assert.ok(calls.length<=2);
+ },call=>call.path==='/v2/confidence/identity'?{body:owner}:call.path.endsWith('/identity')?{body:{...deletionReceipt().identity,actorId:owner.actorId}}:deletionReply(call));
+});
+test('durable bundle deletion Java Instant nanoseconds extended year and offset preserve full receipt',async()=>{
+ for(const time of ['-0001-01-01T00:00:00.123456789Z','+10000-01-01T00:00:00Z','2026-10-02T14:00:00+01:00:30'])await fixture(async(client)=>{
+ const receipt:any=await tool('swfte_code_bundle_deletion',deletionRequest,client);assert.equal(receipt.expiresAt,time);
+ },call=>call.path.endsWith('/readback')?{body:{...deletionReceipt(),expiresAt:time}}:deletionReply(call));
+});
+
+// Local HTTP transport controls only: no actual provider mutation or erasure acceptance.
+test('durable bundle deletion consistently foreign configured workspace refuses before any POST',()=>fixture(async(client,calls)=>{
+ assert.equal(client.configuredWorkspaceId,'configured-ws');
+ await assert.rejects(tool('swfte_code_bundle_delete_once',deletionRequest,client),/DELETION_CONFIGURED_WORKSPACE_MISMATCH/);
+ assert.equal(calls.length,1);assert.equal(calls[0]!.method,'GET');assert.equal(calls[0]!.path,'/v2/confidence/identity');
+},deletionReply,'configured-ws'));
+test('durable bundle deletion matching configured workspace retains server actor and exact receipt',()=>fixture(async(client,calls)=>{
+ assert.equal(client.configuredWorkspaceId,'ws');
+ const receipt:any=await tool('swfte_code_bundle_delete_once',deletionRequest,client);
+ assert.equal(receipt.identity.workspaceId,'ws');assert.equal(receipt.identity.actorId,'actor');assert.deepEqual(receipt,deletionReceipt());
+ assert.equal(calls.length,3);assert.deepEqual(calls[2]!.body,{snapshotHash:hash});
+},deletionReply,'ws'));

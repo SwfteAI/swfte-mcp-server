@@ -12,3 +12,9 @@ export async function uploadIntake(client:SwfteClient, input:CodeIntakeRequest, 
 }
 export const getIntakeBundle=(client:SwfteClient,id:string)=>client.request<BundleRef>({method:'GET',path:`/v2/confidence/bundles/${encodeURIComponent(id)}`});
 export const deleteIntakeBundle=(client:SwfteClient,id:string)=>client.request({method:'DELETE',path:`/v2/confidence/bundles/${encodeURIComponent(id)}`,retries:0});
+
+export interface DurableBundleDeletionInput {bundleId:string;commandId:string;snapshotHash:string}
+export function requestBundleDeletion(client:SwfteClient,input:DurableBundleDeletionInput,operation:'identity'|'deleteOnce'|'readback'):Promise<unknown> {
+  const base=`/v2/confidence/bundles/${encodeURIComponent(input.bundleId)}/deletions/${input.commandId}`;
+  return client.request({method:'POST',path:base+(operation==='deleteOnce'?'':`/${operation}`),body:{snapshotHash:input.snapshotHash},retries:0});
+}

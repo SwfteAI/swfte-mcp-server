@@ -64,3 +64,7 @@ export interface BundleRef {
   bundleId: string; workspaceId: string; level: CodeLevel; snapshotHash: string;
   expiresAt: string; sizeBytes: number; sourceRetained: boolean;
 }
+
+/** Server-owned identity; callers persist exact UUID/hash before first mutation. */
+export interface BundleDeletionIdentity {workspaceId:string;actorId:string;commandId:string;bundleId:string;snapshotHash:string;reason:'USER_REQUEST';requestDigest:string}
+export interface BundleDeletionReceipt {identity:BundleDeletionIdentity;level:CodeLevel;expiresAt:string;rowAbsentConfirmedAt:string;canonicalAuditHash:string;scope:'CODE_BUNDLE_STORAGE_ROW'}
