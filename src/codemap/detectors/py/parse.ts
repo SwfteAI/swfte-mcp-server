@@ -23,20 +23,39 @@ export let grammarGeneration = 0;
  * (Re)load the Python grammar. Returns false, leaving no parser, when the WASM cannot be read or
  * loaded: detectors then report nothing and the scan goes on (edge case E9).
  */
-export async function initPythonParser(wasmPath: string = DEFAULT_WASM): Promise<boolean> {
-  try {
-    await initRuntime();
-    const language = await Language.load(fs.readFileSync(wasmPath));
-    const p = new Parser();
-    p.setLanguage(language);
-    parser = p;
+// A per-language queue makes publication follow invocation order, not asynchronous load order.
+let reloadTail: Promise<void> = Promise.resolve();
+
+export function initPythonParser(wasmPath: string = DEFAULT_WASM): Promise<boolean> {
+  const attempt = reloadTail.then(async () => {
+    let candidate: Parser | null = null;
+    let loaded = false;
+    try {
+      await initRuntime();
+      const language = await Language.load(fs.readFileSync(wasmPath));
+      candidate = new Parser();
+      candidate.setLanguage(language);
+      loaded = true;
+    } catch {
+      // Setup failure preserves E9: completing this attempt makes the grammar unavailable.
+    }
+    const previous = parser;
+    parser = loaded ? candidate : null;
     grammarGeneration++;
-    return true;
-  } catch {
-    parser = null;
-    grammarGeneration++;
-    return false;
-  }
+    // Detach ownership before disposal. Even an unexpected native deletion failure cannot cause
+    // a later attempt to delete the same resource again or skip disposal of another owned parser.
+    const retired = loaded ? [previous] : [candidate, previous];
+    const errors: unknown[] = [];
+    for (const resource of new Set(retired)) {
+      if (!resource) continue;
+      try { resource.delete(); } catch (error) { errors.push(error); }
+    }
+    if (errors.length) throw errors[0];
+    return loaded;
+  });
+  // A visible disposal error rejects its caller, but cannot poison subsequent queued attempts.
+  reloadTail = attempt.then(() => undefined, () => undefined);
+  return attempt;
 }
 
 await initPythonParser();
@@ -82,7 +101,7 @@ export function isForeignGenerated(text: string): boolean {
 
 /** A module that imports a mocking or test framework is a test even when it sits in a main tree. */
 export function usesMocks(root: PyNode): boolean {
-  for (const st of children(root)) {
+  for (const st of childrenView(root)) {
     if (st.type !== 'import_statement' && st.type !== 'import_from_statement') continue;
     if (/^(?:from|import)\s+(?:unittest|pytest|pytest_mock|mock)\b/.test(st.text)) return true;
   }
@@ -122,8 +141,12 @@ function namedChildren(n: PyNode): readonly PyNode[] {
   return vector;
 }
 
+function childrenView(n: PyNode): readonly PyNode[] {
+  return namedChildren(n);
+}
+
 export function children(n: PyNode): PyNode[] {
-  return [...namedChildren(n)];
+  return [...childrenView(n)];
 }
 
 /** Depth-first walk over named nodes; `visit` returning false prunes the subtree. */
@@ -208,7 +231,7 @@ export function envNameOf(n: PyNode): string | null {
   if (n.type === 'call') {
     const f = n.childForFieldName('function');
     const args = n.childForFieldName('arguments');
-    const first = args ? children(args).find((c) => c.type !== 'keyword_argument') ?? null : null;
+    const first = args ? childrenView(args).find((c) => c.type !== 'keyword_argument') ?? null : null;
     if (!f) return null;
     if (/^(?:os\.)?getenv$/.test(f.text)) return stringArg(first);
     if (f.type === 'attribute' && f.childForFieldName('attribute')?.text === 'get' && isEnviron(f.childForFieldName('object'))) return stringArg(first);
@@ -224,9 +247,9 @@ export function evalPieces(n: PyNode, depth = 0): Piece[] {
     case 'string':
       return mergePieces(stringPieces(n, depth));
     case 'concatenated_string':
-      return mergePieces(children(n).flatMap((c) => evalPieces(c, depth + 1)));
+      return mergePieces(childrenView(n).flatMap((c) => evalPieces(c, depth + 1)));
     case 'parenthesized_expression': {
-      const inner = children(n)[0];
+      const inner = childrenView(n)[0];
       return inner ? evalPieces(inner, depth + 1) : [{ k: 'dyn' }];
     }
     case 'binary_operator': {
@@ -420,7 +443,7 @@ export function lookupName(name: string, at: PyNode): PyNode | 'opaque' | null {
 export function swfteImports(root: PyNode): { swfte: boolean; fork: boolean } {
   let swfte = false;
   let fork = false;
-  for (const st of children(root)) {
+  for (const st of childrenView(root)) {
     if (st.type !== 'import_statement' && st.type !== 'import_from_statement') continue;
     const mod = st.type === 'import_from_statement' ? st.childForFieldName('module_name')?.text ?? '' : st.text.replace(/^import\s+/, '');
     const all = `${mod} ${st.text}`.toLowerCase();

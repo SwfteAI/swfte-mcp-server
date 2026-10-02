@@ -167,7 +167,8 @@ for (const grammar of [
         const branchIds = new Set<number>(); const prunedIds = new Set<number>();
         grammar.walk(branch, node => { branchIds.add(node.id); });
         grammar.walk(root, node => { prunedIds.add(node.id); if (node.id === branch.id) return false; });
-        return { firstCalls, secondCalls,
+        return { firstCalls, secondCalls, mutableArray: !Object.isFrozen(pristine),
+          repeatedIds: grammar.children(root).map(node => node.id),
           sameNodes: first.length === second.length && first.every((node, index) => node === second[index]),
           separateArrays: mutable !== pristine && pristine !== afterMutation,
           expectedChildren: pristine.map(node => node.id), actualChildren: afterMutation.map(node => node.id),
@@ -183,6 +184,8 @@ for (const grammar of [
     assert(observation.firstCalls > 0, 'the first walk must call the actual native adapter');
     assert.equal(observation.secondCalls, 0, 'repeated native traversal must reuse its child wrappers');
     assert.equal(observation.sameNodes, true, 'a single native tree must retain node identities across helper walks');
+    assert.equal(observation.mutableArray, true, 'exported children remains an ordinary mutable array');
+    assert.deepEqual(observation.repeatedIds, observation.expectedChildren, 'internal view cannot alter named-child order or identity');
     assert.equal(observation.separateArrays, true, 'each caller owns its returned children array');
     assert.deepEqual(observation.actualChildren, observation.expectedChildren, 'caller mutation cannot poison the tree traversal');
     assert.equal(observation.includesComment, true, 'walk must preserve comment visits');

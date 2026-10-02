@@ -24,20 +24,39 @@ export let grammarGeneration = 0;
  * (Re)load the Java grammar. Returns false, leaving no parser, when the WASM cannot be read or loaded:
  * detectors then report nothing and the scan goes on (edge case E9).
  */
-export async function initJavaParser(wasmPath: string = DEFAULT_WASM): Promise<boolean> {
-  try {
-    await initRuntime();
-    const language = await Language.load(fs.readFileSync(wasmPath));
-    const p = new Parser();
-    p.setLanguage(language);
-    parser = p;
+// A per-language queue makes publication follow invocation order, not asynchronous load order.
+let reloadTail: Promise<void> = Promise.resolve();
+
+export function initJavaParser(wasmPath: string = DEFAULT_WASM): Promise<boolean> {
+  const attempt = reloadTail.then(async () => {
+    let candidate: Parser | null = null;
+    let loaded = false;
+    try {
+      await initRuntime();
+      const language = await Language.load(fs.readFileSync(wasmPath));
+      candidate = new Parser();
+      candidate.setLanguage(language);
+      loaded = true;
+    } catch {
+      // Setup failure preserves E9: completing this attempt makes the grammar unavailable.
+    }
+    const previous = parser;
+    parser = loaded ? candidate : null;
     grammarGeneration++;
-    return true;
-  } catch {
-    parser = null;
-    grammarGeneration++;
-    return false;
-  }
+    // Detach ownership before disposal. Even an unexpected native deletion failure cannot cause
+    // a later attempt to delete the same resource again or skip disposal of another owned parser.
+    const retired = loaded ? [previous] : [candidate, previous];
+    const errors: unknown[] = [];
+    for (const resource of new Set(retired)) {
+      if (!resource) continue;
+      try { resource.delete(); } catch (error) { errors.push(error); }
+    }
+    if (errors.length) throw errors[0];
+    return loaded;
+  });
+  // A visible disposal error rejects its caller, but cannot poison subsequent queued attempts.
+  reloadTail = attempt.then(() => undefined, () => undefined);
+  return attempt;
 }
 
 await initJavaParser();
@@ -56,6 +75,7 @@ export function withTree<T>(text: string, fn: (root: JNode) => T): T | null {
     if (tree) {
       // Cached Nodes reference this Tree and its source callback. Their lifetime ends here.
       NAMED_CHILDREN_CACHE.delete(tree);
+      SEMANTIC_CHILDREN_CACHE.delete(tree);
       SCOPE_INDEX.delete(tree);
       FIELD_INDEX.delete(tree);
       tree.delete();
@@ -88,7 +108,7 @@ export function isForeignGenerated(text: string): boolean {
 
 /** A file that uses Mockito or Spring's mock beans is a test even when it sits in a main tree. */
 export function usesMocks(root: JNode): boolean {
-  return children(root).some((n) => n.type === 'import_declaration' && /\borg\.mockito\b|\borg\.springframework\.boot\.test\b|\borg\.junit\b/.test(n.text));
+  return childrenView(root).some((n) => n.type === 'import_declaration' && /\borg\.mockito\b|\borg\.springframework\.boot\.test\b|\borg\.junit\b/.test(n.text));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -124,8 +144,25 @@ function namedChildren(n: JNode): readonly JNode[] {
   return vector;
 }
 
+const SEMANTIC_CHILDREN_CACHE = new WeakMap<Tree, Map<number, readonly JNode[]>>();
+
+/** Internal read-only semantic view excludes comments; walk continues using all named children. */
+function childrenView(n: JNode): readonly JNode[] {
+  let nodes = SEMANTIC_CHILDREN_CACHE.get(n.tree);
+  const cached = nodes?.get(n.id);
+  if (cached) return cached;
+  const named = namedChildren(n);
+  if (!named.length) return EMPTY_NAMED_CHILDREN;
+  const filtered = named.filter(child => child.type !== 'line_comment' && child.type !== 'block_comment');
+  if (!filtered.length) return EMPTY_NAMED_CHILDREN;
+  const vector = Object.freeze(filtered);
+  if (!nodes) { nodes = new Map(); SEMANTIC_CHILDREN_CACHE.set(n.tree, nodes); }
+  nodes.set(n.id, vector);
+  return vector;
+}
+
 export function children(n: JNode): JNode[] {
-  return namedChildren(n).filter(child => child.type !== 'line_comment' && child.type !== 'block_comment');
+  return [...childrenView(n)];
 }
 
 /** Depth-first walk over named nodes; `visit` returning false prunes the subtree. */
@@ -151,7 +188,7 @@ function methodsNamed(typeDecl: JNode, name: string, ctor: boolean): number {
   const body = typeDecl.childForFieldName('body');
   if (!body) return 0;
   let n = 0;
-  for (const c of children(body)) {
+  for (const c of childrenView(body)) {
     if (c.type === (ctor ? 'constructor_declaration' : 'method_declaration') && c.childForFieldName('name')?.text === name) n++;
   }
   return n;
@@ -159,7 +196,7 @@ function methodsNamed(typeDecl: JNode, name: string, ctor: boolean): number {
 
 function arityOf(m: JNode): number {
   const params = m.childForFieldName('parameters');
-  return params ? children(params).length : 0;
+  return params ? childrenView(params).length : 0;
 }
 
 /**
@@ -312,7 +349,7 @@ export function valueAnnotationEnv(annotations: JNode[]): string | null {
   for (const a of annotations) {
     if (a.type !== 'annotation' || a.childForFieldName('name')?.text !== 'Value') continue;
     const arg = a.childForFieldName('arguments');
-    const lit = arg ? children(arg).find((c) => c.type === 'string_literal') : undefined;
+    const lit = arg ? childrenView(arg).find((c) => c.type === 'string_literal') : undefined;
     const s = lit ? plainString(lit) : null;
     const m = s ? /^\$\{([A-Za-z0-9_.-]+)(?::[^}]*)?\}$/.exec(s) : null;
     if (m && ENV_STYLE.test(m[1]!)) return m[1]!;
@@ -322,7 +359,7 @@ export function valueAnnotationEnv(annotations: JNode[]): string | null {
 
 const annotationsOf = (n: JNode): JNode[] => {
   const mods = n.children.find((c) => c && c.type === 'modifiers');
-  return mods ? children(mods).filter((c) => c.type === 'annotation' || c.type === 'marker_annotation') : [];
+  return mods ? childrenView(mods).filter((c) => c.type === 'annotation' || c.type === 'marker_annotation') : [];
 };
 
 const MAX_DEPTH = 8;
@@ -358,7 +395,7 @@ export function evalPieces(n: JNode, depth = 0): Piece[] {
     case 'string_literal':
       return stringPieces(n);
     case 'parenthesized_expression': {
-      const inner = children(n)[0];
+      const inner = childrenView(n)[0];
       return inner ? evalPieces(inner, depth + 1) : [{ k: 'dyn' }];
     }
     case 'cast_expression': {
@@ -434,7 +471,7 @@ function paramBindings(scope: JNode, name: string): Bindings | null {
 }
 
 function paramName(p: JNode): string {
-  if (p.type === 'spread_parameter') return children(p).find((c) => c.type === 'variable_declarator')?.childForFieldName('name')?.text ?? '';
+  if (p.type === 'spread_parameter') return childrenView(p).find((c) => c.type === 'variable_declarator')?.childForFieldName('name')?.text ?? '';
   return p.childForFieldName('name')?.text ?? '';
 }
 
@@ -460,7 +497,7 @@ function scopeIndex(scope: JNode): ScopeIndex {
       binding: { values: [], opaque: true, env: null }, type: null,
     });
   }
-  for (const parameter of params ? children(params) : []) {
+  for (const parameter of params ? childrenView(params) : []) {
     if (parameter.type !== 'formal_parameter' && parameter.type !== 'spread_parameter') continue;
     index.parameters.set(paramName(parameter), {
       binding: { values: [], opaque: true, env: scope.type === 'lambda_expression' ? null : valueAnnotationEnv(annotationsOf(parameter)) },
@@ -557,7 +594,7 @@ function fieldIndex(type: JNode): FieldIndex {
   const index: FieldIndex = { bindings: new Map(), types: new Map() };
   const body = type.childForFieldName('body');
   const finals = new Set<string>();
-  for (const m of body ? children(body) : []) {
+  for (const m of body ? childrenView(body) : []) {
     if (m.type !== 'field_declaration') continue;
     for (const d of m.childrenForFieldName('declarator')) {
       const name = d?.childForFieldName('name')?.text;
@@ -598,7 +635,7 @@ function fieldIndex(type: JNode): FieldIndex {
     if (b.env) { b.values = []; b.opaque = true; }
     else if (!finals.has(name) && b.values.length !== 1) b.opaque = true;
   }
-  for (const parameter of type.childForFieldName('parameters') ? children(type.childForFieldName('parameters')!) : []) {
+  for (const parameter of type.childForFieldName('parameters') ? childrenView(type.childForFieldName('parameters')!) : []) {
     if (parameter.type === 'formal_parameter') index.types.set(paramName(parameter), parameter.childForFieldName('type')?.text ?? null);
   }
   types.set(type.id, index);
