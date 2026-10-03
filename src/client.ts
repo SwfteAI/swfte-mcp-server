@@ -1,3 +1,4 @@
+import type { HostedLearningBinding, LocalDeliveryState } from './hosted-learning-state.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ServerConfig } from './config.js';
 import {
@@ -158,7 +159,7 @@ export class SwfteClient {
 
   private readonly config: ServerConfig;
 
-  constructor(config: ServerConfig) {
+  constructor(config: ServerConfig, private readonly hostedLearning?: HostedLearningBinding) {
     // A hosted caller cannot change the identity underneath queued trace metadata.
     this.config = Object.freeze({ ...config, enabledGroups: new Set(config.enabledGroups) });
   }
@@ -283,12 +284,21 @@ export class SwfteClient {
 
   /* ── learning loop: attempt bookkeeping and local steps ─────────────────── */
 
-  private readonly localSteps = new LocalStepQueue();
-  private draining = false;
+  private readonly localState: LocalDeliveryState = { queue: new LocalStepQueue(), draining: false, inFlight: 0, discarded: 0,
+    discardInFlight: () => { this.localState.discarded += this.localState.inFlight; this.localState.inFlight = 0 },
+    current: () => true };
+  private observedState = this.localState;
+
+  private deliveryState(scope: Pick<PendingStep, 'workspaceId' | 'sessionId' | 'client'>): LocalDeliveryState | undefined {
+    const state = this.hostedLearning ? this.hostedLearning.scope(scope) : this.localState;
+    if (state) this.observedState = state;
+    return state;
+  }
 
   /** Steps waiting for the backend (UNREACHED attempts, undelivered local steps) and how many were dropped. */
   get pendingLocalSteps(): { queued: number; dropped: number; steps: PendingStep['step'][] } {
-    return { queued: this.localSteps.size, dropped: this.localSteps.dropped, steps: this.localSteps.snapshot() };
+    const queue = this.observedState.queue;
+    return { queued: this.observedState.current() ? queue.size : 0, dropped: queue.dropped + this.observedState.discarded, steps: this.observedState.current() ? queue.snapshot() : [] };
   }
 
   private get learningEnabled(): boolean {
@@ -320,7 +330,8 @@ export class SwfteClient {
       throw err;
     }
     recordEcho(call, res.headers.get(TRACE_ECHO_HEADER));
-    this.drainLocalSteps();
+    this.drainLocalSteps(this.deliveryState({ sessionId: call.sessionId, client: call.client,
+      workspaceId: init.headers['X-Workspace-ID'] ?? this.config.workspaceId }));
     return res;
   }
 
@@ -338,7 +349,10 @@ export class SwfteClient {
     if (!this.learningEnabled) return;
     const ids = parseTraceparent(headers[TRACEPARENT_HEADER]);
     if (!ids) return;
-    this.localSteps.push({
+    const state = this.deliveryState({ sessionId: call.sessionId, client: call.client,
+      workspaceId: headers['X-Workspace-ID'] ?? this.config.workspaceId });
+    if (!state?.current()) return;
+    state.queue.push({
       sessionId: call.sessionId,
       client: call.client,
       workspaceId: headers['X-Workspace-ID'] ?? this.config.workspaceId,
@@ -361,10 +375,11 @@ export class SwfteClient {
    */
   recordLocalStep(entry: PendingStep): void {
     try {
-      if (!this.learningEnabled) return;
-      this.localSteps.push({ ...entry, workspaceId: entry.workspaceId ?? this.config.workspaceId,
+      const state = this.deliveryState({ ...entry, workspaceId: entry.workspaceId ?? this.config.workspaceId });
+      if (!this.learningEnabled || !state?.current()) return;
+      state.queue.push({ ...entry, workspaceId: entry.workspaceId ?? this.config.workspaceId,
         step: { ...entry.step, ...(entry.step.argShape ? { argShape: { ...entry.step.argShape } } : {}) } });
-      this.drainLocalSteps();
+      this.drainLocalSteps(state);
     } catch {
       // A step never fails a tool.
     }
@@ -375,26 +390,27 @@ export class SwfteClient {
    * any tool call (so the POST carries no call trace, counts for no call and cannot queue a step of its
    * own) and outside the caller's operation deadline. One drain at a time.
    */
-  private drainLocalSteps(): void {
-    if (this.draining || this.localSteps.size === 0 || !this.learningEnabled) return;
-    this.draining = true;
+  private drainLocalSteps(state: LocalDeliveryState | undefined): void {
+    if (!state?.current() || state.draining || state.queue.size === 0 || !this.learningEnabled) return;
+    state.draining = true;
     outsideCall(() =>
       this.operationDeadline.exit(() => {
-        void this.deliverLocalSteps()
+        void this.deliverLocalSteps(state)
           .catch(() => false)
           .then((reachable) => {
-            this.draining = false;
-            if (reachable && this.localSteps.size > 0) this.drainLocalSteps();
+            state.draining = false;
+            if (reachable && state.current() && state.queue.size > 0) this.drainLocalSteps(state);
           });
       })
     );
   }
 
   /** Returns false when the backend could not be reached (the batch is back in the queue). */
-  private async deliverLocalSteps(): Promise<boolean> {
-    while (this.localSteps.size > 0) {
-      const batch = this.localSteps.takeBatch(LOCAL_STEPS_PER_POST);
+  private async deliverLocalSteps(state: LocalDeliveryState): Promise<boolean> {
+    while (state.current() && state.queue.size > 0) {
+      const batch = state.queue.takeBatch(LOCAL_STEPS_PER_POST);
       const head = batch[0]!;
+      state.inFlight = batch.length;
       try {
         await this.request({
           method: 'POST',
@@ -408,9 +424,15 @@ export class SwfteClient {
       } catch (err) {
         // Permanent refusal (flag off, wrong credential, invalid) cannot benefit from retry. Transient
         // failures retain the exact trace/span for a later contact, with no inline/recursive retry.
-        if (err instanceof SwfteApiError && !RETRYABLE_STATUSES.has(err.status)) continue;
-        this.localSteps.unshift(batch);
+        if (err instanceof SwfteApiError && !RETRYABLE_STATUSES.has(err.status)) {
+          state.discardInFlight();
+          continue;
+        }
+        if (state.current()) state.queue.unshift(batch);
+        else state.discardInFlight();
         return false;
+      } finally {
+        state.inFlight = 0;
       }
     }
     return true;

@@ -233,3 +233,127 @@ test('protocol advertises both original aliases only for each authenticated enab
   for (const name of learning) await assert.rejects(offHandlers.get('prompts/get')!({method:'prompts/get',params:{name,arguments:{query:'rss',executionId:'execution-safe'}}},{}),/Not found/);
   assert.equal(localOff.calls.length,0);
 });
+
+const archive = (items: {kind:'doc'|'reference-example';text:string}[] = [
+  {kind:'doc',text:poison},{kind:'reference-example',text:'Typed structural example'},
+]) => ({dataOnly:true,contentHash:'a'.repeat(64),items});
+
+test('current get and both resource aliases preserve zero single and paired data-only archives for every kind',async () => {
+  for (const [index,kind] of ['recipe','fragment','playbook'].entries()) {
+    for (const knowledge of [archive([]),archive([{kind:'doc',text:poison}]),archive([{kind:'reference-example',text:'Example'}]),archive(),archive([{kind:'doc',text:'x'.repeat(2000)}])]) {
+      const source = {...entry(kind,ids[index]),knowledge};
+      const b = backend(o => o.path.endsWith('/capabilities') ? {mcp:true} : source);
+      const t = tool('swfte_recipes_get');
+      const got = await t.execute(t.inputSchema.parse({id:ids[index]}),ctx(b.client)) as any;
+      assert.deepEqual(got.data.knowledge,knowledge); assert.equal(got.dataOnly,true);
+      assert.equal(got.data.evidenceLevel,source.evidenceLevel); assert.deepEqual(got.data.evidence,source.evidence);
+      assert.equal(got.data.replayExecutionId,source.replayExecutionId); assert.equal(got.data.adaptEligible,true);
+      for (const uri of [`swfte://${kind}s/${ids[index]}`,`swfte://catalog/${kind}/${ids[index]}`]) {
+        const resource = await readResource(uri,{client:async () => b.client,config,tools:[]});
+        const wire = JSON.parse(resource.text);
+        assert.deepEqual(wire.entry.knowledge,knowledge); assert.equal(wire.dataOnly,true);
+        assert.equal(resource.text.includes('protected-source-'),false);
+        assert.equal(resource.text.includes('protected-record'),false);
+      }
+      assert.ok(b.calls.every(call => call.method === 'GET' && call.retries === 0));
+    }
+  }
+});
+
+test('parsed optional archive is detached from the backend object without pretending to verify its pin',async () => {
+  const knowledge = archive();
+  const b = backend(o => o.path.endsWith('/capabilities') ? {mcp:true} : {...entry(),knowledge});
+  const got = await fetchRecipe(b.client,config,ids[0]!);
+  assert.deepEqual(got.knowledge,archive());
+  knowledge.items[0]!.text = 'backend changed after return'; knowledge.items.push({kind:'doc',text:'duplicate'});
+  assert.deepEqual(got.knowledge,archive());
+  // No independent current recipe pin exists in this client wire: freshness stays backend authority.
+  const other = backend(o => o.path.endsWith('/capabilities') ? {mcp:true} : {...entry(),knowledge:{...archive(),contentHash:'b'.repeat(64)}});
+  assert.equal((await fetchRecipe(other.client,config,ids[0]!)).knowledge !== undefined,true);
+});
+
+test('optional archive whitelist rejects every malformed field as a whole while retaining admitted core',async () => {
+  const valid = archive();
+  const variants: unknown[] = [null,[],false,'quoted',{},
+    {contentHash:valid.contentHash,items:valid.items},{dataOnly:true,items:valid.items},
+    {dataOnly:true,contentHash:valid.contentHash},
+    {...valid,dataOnly:false},{...valid,dataOnly:'true'},
+    {...valid,contentHash:'sha256:'+'a'.repeat(64)},{...valid,contentHash:'A'.repeat(64)},
+    {...valid,contentHash:'a'.repeat(63)},{...valid,contentHash:7},
+    {...valid,items:{}},{...valid,items:[...valid.items,{kind:'doc',text:'third'}]},
+    {...valid,items:[valid.items[0],valid.items[0]]},
+    {...valid,items:[valid.items[0],{kind:'DOC',text:'wrong kind'}]},
+    {...valid,items:[valid.items[0],{text:'missing kind'}]},
+    {...valid,items:[valid.items[0],{kind:'reference-example',text:42}]},
+    {...valid,items:[valid.items[0],{kind:'reference-example',text:'x'.repeat(2001)}]},
+    {...valid,items:[valid.items[0],{kind:'reference-example'}]},
+    {...valid,items:[valid.items[0],null]},
+    ...['workspaceId','accountId','sourceRecordIds','leaseToken','evidenceLevel','unknown'].map(key => ({...valid,[key]:'protected'})),
+    ...['workspaceId','sources','authority','instructions','unknown'].map(key => ({...valid,items:[valid.items[0],{...valid.items[1],[key]:{secret:'protected'}}]})),
+  ];
+  for (const invalid of variants) {
+    let knowledge:unknown = valid;
+    const b = backend(o => o.path.endsWith('/capabilities') ? {mcp:true} : ({...entry(),knowledge}));
+    const baseline = await fetchRecipe(b.client,config,ids[0]!);
+    assert.deepEqual(baseline.knowledge,valid);
+    knowledge = invalid;
+    const got = await fetchRecipe(b.client,config,ids[0]!);
+    const {knowledge:omitted,...core} = baseline;
+    assert.equal(omitted !== undefined,true); assert.equal(got.knowledge,undefined);
+    assert.deepEqual(got,core); assert.ok(b.calls.every(call => call.method === 'GET' && call.retries === 0));
+  }
+});
+
+test('archive poison stays quoted in original reuse and diagnosis prompt aliases with fixed instructions',async () => {
+  for (const name of ['reuse-recipe','build_from_recipe','fix-my-workflow','diagnose_failure']) {
+    const diagnosis = name === 'fix-my-workflow' || name === 'diagnose_failure';
+    let knowledge:unknown = archive([]);
+    const b = backend(o => o.path.endsWith('/capabilities') ? {mcp:true}
+      : o.path.endsWith('/failure') ? {executionId:'execution-safe',errorSignature:'RATE_LIMIT'}
+      : o.path.endsWith('/recipes') ? {items:[hit()]}
+      : {...entry(diagnosis ? 'playbook' : 'recipe',diagnosis ? ids[2] : ids[0]),knowledge});
+    const args = diagnosis ? {executionId:'execution-safe'} : {query:'rss'};
+    const baseline = await getLearningPrompt(name,args,ctx(b.client));
+    knowledge = archive();
+    const prompt = await getLearningPrompt(name,args,ctx(b.client));
+    assert.deepEqual(prompt.messages[0],baseline.messages[0]);
+    assert.equal(prompt.messages[0]!.content.text.includes(poison),false);
+    const quoted = JSON.parse(prompt.messages[1]!.content.text).quotedData;
+    const recipe = diagnosis ? quoted.playbook : quoted.entries[0];
+    assert.deepEqual(recipe.knowledge,knowledge); assert.equal(recipe.knowledge.dataOnly,true);
+    assert.equal(recipe.knowledge.items[0].text,poison); assert.equal(recipe.evidenceLevel,'validated');
+    assert.equal(recipe.replayExecutionId,'replay-current');
+    if (!diagnosis) assert.deepEqual(quoted.candidates,[hit()]);
+    if (diagnosis) {
+      const t = tool('swfte_diagnose_failure');
+      const got = await t.execute(t.inputSchema.parse({signature:'RATE_LIMIT'}),ctx(b.client)) as any;
+      assert.deepEqual(got.data.knowledge,knowledge); assert.equal(got.dataOnly,true);
+    }
+    knowledge = {...archive(),items:[{kind:'doc',text:poison,authority:'forged'}]};
+    const invalid = await getLearningPrompt(name,args,ctx(b.client));
+    assert.deepEqual(invalid.messages[0],baseline.messages[0]);
+    const invalidQuoted = JSON.parse(invalid.messages[1]!.content.text).quotedData;
+    assert.equal((diagnosis ? invalidQuoted.playbook : invalidQuoted.entries[0]).knowledge,undefined);
+    assert.ok(b.calls.every(call => call.method === 'GET' && call.retries === 0));
+  }
+});
+
+test('archive never admits stale unbound or disabled core and remains inside the whole recipe cap',async () => {
+  for (const state of ['stale','unbound','off']) {
+    let admitted = true;
+    const b = backend(o => o.path.endsWith('/capabilities') ? {mcp:admitted || state !== 'off'}
+      : {...entry(),knowledge:archive(),...(!admitted && state === 'stale' ? {evidenceLevel:'stale'} : {})
+        ,...(!admitted && state === 'unbound' ? {replayExecutionId:null} : {})});
+    assert.deepEqual((await fetchRecipe(b.client,config,ids[0]!)).knowledge,archive());
+    admitted = false;
+    await assert.rejects(fetchRecipe(b.client,config,ids[0]!),error => error instanceof LearningBookNotFoundError && error.message === 'Not found');
+    assert.ok(b.calls.every(call => call.method === 'GET' && call.retries === 0));
+  }
+  let knowledge:unknown = undefined;
+  const b = backend(o => o.path.endsWith('/capabilities') ? {mcp:true} : {...entry(),inputContract:{padding:'x'.repeat(127_000)},knowledge});
+  const core = await fetchRecipe(b.client,config,ids[0]!);
+  assert.ok(JSON.stringify(core).length < 128_000);
+  knowledge = archive([{kind:'doc',text:'d'.repeat(2000)},{kind:'reference-example',text:'r'.repeat(2000)}]);
+  await assert.rejects(fetchRecipe(b.client,config,ids[0]!),error => error instanceof LearningBookNotFoundError && error.message === 'Not found');
+  assert.equal(b.calls.some(call => call.method === 'POST'),false);
+});

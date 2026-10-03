@@ -20,6 +20,7 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 
 import { buildServer } from './server.js';
 import { SwfteClient } from './client.js';
+import { HostedLearningState } from './hosted-learning-state.js';
 import { detectCredentialKind, loadConfig, type ServerConfig } from './config.js';
 import { createOAuthEndpoints, loadOAuthOptions, type AuthenticateResult, type OAuthEndpoints } from './oauth.js';
 
@@ -130,18 +131,19 @@ const HOSTED_PLACEHOLDER_CREDENTIAL = 'pat_hosted_no_credential';
  * the alternative is a client built on the placeholder credential that fails much later
  * with a 401 nobody can trace back here.
  */
-export function resolveClientFromAuth(config: ServerConfig): (authInfo?: AuthInfo) => SwfteClient {
+export function resolveClientFromAuth(config: ServerConfig, learningState = new HostedLearningState()): (authInfo?: AuthInfo) => SwfteClient {
   return (authInfo?: AuthInfo) => {
     if (!authInfo?.token) {
       throw new Error('No verified credential on this request — the bearer gate did not run.');
     }
-    return new SwfteClient({
+    const callerConfig: ServerConfig = {
       ...config,
       credential: authInfo.token,
       // The login only issues PATs, but a workspace API key presented as a bearer token
       // is a valid principal too and needs different headers. Detect rather than assume.
       credentialKind: detectCredentialKind(authInfo.token) ?? 'pat',
-    });
+    };
+    return new SwfteClient(callerConfig, learningState.bind(callerConfig));
   };
 }
 

@@ -11,6 +11,16 @@ export class LearningBookNotFoundError extends Error {
 const Id = z.string().regex(/^(rcp|frg|pbk)_[0-9a-f]{24}$/);
 const Kind = z.enum(['recipe','fragment','playbook']);
 const LEVELS = new Set(['unmeasured','observed','corroborated','validated','verified','disputed','stale']);
+// Private archived documentation is quoted data, never additional execution evidence.
+// Invalid optional enrichment cannot invalidate an otherwise admitted core recipe.
+const Knowledge = z.object({
+  dataOnly: z.literal(true),
+  contentHash: z.string().regex(/^[0-9a-f]{64}$/),
+  items: z.array(z.object({
+    kind: z.enum(['doc','reference-example']),
+    text: z.string().max(2000),
+  }).strict()).max(2).refine(items => new Set(items.map(item => item.kind)).size === items.length),
+}).strict();
 
 export async function requireLearning(client: SwfteClient, config: ServerConfig): Promise<void> {
   if (!(await learningEnabled(client,config))) throw new LearningBookNotFoundError();
@@ -60,6 +70,8 @@ function checkedRecipe(entry:Record<string,unknown>,id?:string,expectedKind?:Lea
   if (!(entry.id as string).startsWith(prefix)) throw new LearningBookNotFoundError();
   const body = Object.fromEntries(SAFE_FIELDS.filter(key => entry[key] !== undefined).map(key => [key,entry[key]]));
   for (const key of ['title','description','diagnosis']) if (typeof body[key] === 'string') body[key] = (body[key] as string).slice(0,key === 'title' ? 120 : 2000);
+  const knowledge = Knowledge.safeParse(entry.knowledge);
+  if (knowledge.success) body.knowledge = knowledge.data;
   if (JSON.stringify(body).length > 128_000) throw new LearningBookNotFoundError();
   return body as ReadRecipe;
 }
