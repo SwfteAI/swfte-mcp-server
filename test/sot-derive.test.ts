@@ -86,7 +86,7 @@ test('derive all catalog kinds have captured backend source provenance and immut
   }
   const raw = readFileSync(new URL('two-input-workflow.golden.json', FIXTURE_ROOT));
   assert.equal(sha256(raw), provenance.derivedGoldenSha256);
-  assert.equal(provenance.derivedGoldenSha256, '7b5f0a585dc9f1f973d2711232bb871887b7a08fce1bcb87996fc48869511c42');
+  assert.equal(provenance.derivedGoldenSha256, '9c576a0e0f40307dc9b71effbcd456fbf028a33f97c130785ad827b76eb23fe6');
   assert.equal(readFileSync(new URL('two-input-workflow.golden.json.sha256', FIXTURE_ROOT), 'utf8').trim(),
     `${provenance.derivedGoldenSha256}  two-input-workflow.golden.json`);
   const derived = cases.find(row => row.catalogRef === 'workflow:wf_1' && row.variant === 'provider-everyKind')!;

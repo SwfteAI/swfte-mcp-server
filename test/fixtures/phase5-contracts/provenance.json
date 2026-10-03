@@ -6,7 +6,7 @@
     "file" : "workflow_wf_1.contract.json",
     "kind" : "workflow",
     "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
-    "sha256" : "7b5f0a585dc9f1f973d2711232bb871887b7a08fce1bcb87996fc48869511c42",
+    "sha256" : "9c576a0e0f40307dc9b71effbcd456fbf028a33f97c130785ad827b76eb23fe6",
     "variant" : "provider-everyKind"
   }, {
     "catalogRef" : "agent:agent_1",
@@ -107,7 +107,7 @@
     "sha256" : "1f83c8193272b4e90303b88b3c8e49f5eff0e007bf1cba87c35eabfb1cdbbb14",
     "variant" : "pinned-workflow"
   } ],
-  "derivedGoldenSha256" : "7b5f0a585dc9f1f973d2711232bb871887b7a08fce1bcb87996fc48869511c42",
+  "derivedGoldenSha256" : "9c576a0e0f40307dc9b71effbcd456fbf028a33f97c130785ad827b76eb23fe6",
   "format" : 1,
   "mode" : "driver-captured-real-backend-records",
   "sourceSha256" : {

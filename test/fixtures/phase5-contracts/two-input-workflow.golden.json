@@ -5,7 +5,8 @@
     "path" : "/v2/workflows/wf_1/invoke",
     "auth" : "api_key",
     "async" : true,
-    "statusPath" : "/v2/workflows/executions/{executionId}/status"
+    "statusPath" : "/v2/workflows/executions/{executionId}/status",
+    "outputPath" : [ "execution", "outputData", "parameters", "end_1" ]
   },
   "inputSchema" : {
     "additionalProperties" : true,
@@ -50,7 +51,7 @@
     "mcp" : "# Give Claude Code the Swfte MCP server (it reads the key from your environment):\nclaude mcp add swfte -e SWFTE_API_KEY=\"$SWFTE_API_KEY\" -e SWFTE_BASE_URL=\"https://api.example.test/agents\" -- npx -y @swfte/mcp-server\n\n# Then, in your project, ask Claude:\n#   Use swfte_get_context on workflow:wf_1, then swfte_scaffold_client to generate a typed client for it in this repo and pin it in swfte.json.\n"
   },
   "embed" : null,
-  "contractHash" : "87ac3ee1dde4cd3ac48a47b6dd7943f512bba85658e970dd6d410f8882214a88",
+  "contractHash" : "7ac54917f9f6ae55143f9d0dff90e8334bf54bf1ffebaec13e9d8c40c256438e",
   "version" : "1.0.0",
   "invokeUnavailableReason" : null
 }

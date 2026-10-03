@@ -30,3 +30,21 @@ The dedicated provenance test checks all immutable fingerprints. Semantic tests
 load records independently of that check, so a required-field or invocation
 mutation must fail its actual compile or refusal assertion, rather than a hash
 check or fixture loader.
+
+## Keeping the golden in sync with agents-service
+
+The backend owns `src/test/resources/catalog/g3/two-input-workflow.contract.json`.
+`two-input-workflow.golden.json`, its `.sha256`, the captured unpinned workflow
+(`workflow_wf_1.contract.json` + `.sha256`) and `provenance.json`'s
+`derivedGoldenSha256` mirror it and move together:
+
+```text
+node scripts/sync-derived-fixture.mjs <agents-service-checkout> --check   # exit 1 on any drift
+node scripts/sync-derived-fixture.mjs <agents-service-checkout> [--expect-sha <sha256>]   # copy + re-verify
+```
+
+`test/derived-fixture-sync.test.ts` fails when the golden, its `.sha256`, the
+captured workflow or the provenance disagree. The last sync was from
+agents-service golden sha256 `9c576a0e0f40307dc9b71effbcd456fbf028a33f97c130785ad827b76eb23fe6`
+(adds `invoke.outputPath`). The other captured cases still come from the older
+capture recorded in `provenance.json`; none of them declares `outputPath`.
