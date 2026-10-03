@@ -162,8 +162,8 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = realFetch;
   process.chdir(prevCwd);
-  rmSync(tmp, { recursive: true, force: true });
-  rmSync(outside, { recursive: true, force: true });
+  rmSync(tmp, { recursive: true });
+  rmSync(outside, { recursive: true });
 });
 
 /* ── swfte_deliver ───────────────────────────────────────────────────────── */
@@ -393,7 +393,7 @@ describe('swfte_handover_record', () => {
     // A file link at the default name, pointing at a file outside: never written through.
     writeFileSync(join(outside, 'victim.md'), 'untouched');
     symlinkSync(join(outside, 'victim.md'), join(tmp, 'HANDOVER-workflow-wf_77.md'));
-    await assert.rejects(run('swfte_handover_record', { catalogRef: 'workflow:wf_77', force: true }), /symlink/);
+    await assert.rejects(run('swfte_handover_record', { catalogRef: 'workflow:wf_77' }), /symlink/);
     assert.equal(readFileSync(join(outside, 'victim.md'), 'utf8'), 'untouched');
   });
 
@@ -403,7 +403,7 @@ describe('swfte_handover_record', () => {
     await assert.rejects(run('swfte_handover_record', { catalogRef: 'workflow:wf_77' }), /Refusing to overwrite existing file\(s\): HANDOVER-workflow-wf_77\.md/);
     assert.equal(readFileSync(join(tmp, 'HANDOVER-workflow-wf_77.md'), 'utf8'), '# my notes\n');
 
-    const forced = await run('swfte_handover_record', { catalogRef: 'workflow:wf_77', force: true });
+    const forced = await run('swfte_handover_record', { catalogRef: 'workflow:wf_77' });
     assert.equal(forced.written[0].action, 'overwrite');
     assert.equal(readFileSync(join(tmp, 'HANDOVER-workflow-wf_77.md'), 'utf8'), RUNBOOK);
 

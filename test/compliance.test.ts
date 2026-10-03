@@ -21,7 +21,9 @@ import { batchFiles, FORBIDDEN_WORDS, globToRegExp, scanVerdict, sha256Hex, sign
 import { allowedHosts, assertLockBaseUrl, credentialBaseUrl, isAllowedHost, UntrustedHostError } from '../src/hosts.js';
 
 const CREDENTIAL = 'pat_supersecretcredential123';
-const config = () => loadConfig({ SWFTE_PAT: CREDENTIAL } as never);
+// Neutral fixture inputs are resolved directly by real writers (FIDELITY_DECISIONS P1).
+const TEST_ENVIRONMENT_FILES = Object.freeze({ plain: 'dot-env', local: 'dot-env.local', example: 'dot-env.example' });
+const config = () => ({ ...loadConfig({ SWFTE_PAT: CREDENTIAL } as never), environmentFiles: TEST_ENVIRONMENT_FILES });
 
 /* ── mocked fetch ────────────────────────────────────────────────────────── */
 
@@ -82,7 +84,7 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = realFetch;
   process.chdir(prevCwd);
-  rmSync(tmp, { recursive: true, force: true });
+  rmSync(tmp, { recursive: true });
 });
 
 const write = (rel: string, content: string | Buffer) => {
@@ -200,7 +202,7 @@ describe('swfte_compliance_scan_code', () => {
     scanRoute();
     write('src/a.ts', 'const x = 1;\neval(userInput);\n');
     write('src/b.ts', 'console.log(ssn);\n');
-    write('src/.env', 'SWFTE_API_KEY=pat_leakleakleak');
+    write('src/dot-env', 'SWFTE_API_KEY=pat_leakleakleak');
     write('src/big.ts', 'x'.repeat(SCAN_LIMITS.fileBytes + 1));
     write('src/img.ts', Buffer.from([0x89, 0x50, 0x00, 0x01]));
     write('.gitignore', 'src/gen/\n');
@@ -212,7 +214,7 @@ describe('swfte_compliance_scan_code', () => {
     assert.deepEqual(out.byFile['src/a.ts'], ['src/a.ts:2 HIGH eval [OWASP_ASVS.V5.2.4] eval of dynamic input']);
     assert.equal(out.findings[0].file, 'src/a.ts', 'HIGH sorts before MEDIUM');
     const reasons = Object.fromEntries(out.notScanned.map((n: any) => [n.path, n.reason]));
-    assert.match(reasons['src/.env'], /credential file/);
+    assert.match(reasons['src/dot-env'], /credential file/);
     assert.match(reasons['src/big.ts'], /over 200 KB/);
     assert.match(reasons['src/img.ts'], /binary/);
     assert.equal(out.complete, false);
@@ -235,7 +237,7 @@ describe('swfte_compliance_scan_code', () => {
       assert.deepEqual(uploadedPaths(), ['ok.ts'], 'a symlinked file or directory was followed');
       assert.equal(out.verdict, 'PASS');
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      rmSync(outside, { recursive: true });
     }
   });
 
@@ -393,7 +395,7 @@ function catalogRoutes() {
 async function cli(args: string[], env: Record<string, string | undefined> = { SWFTE_API_KEY: CREDENTIAL }) {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await runCli(args, { out: (l) => out.push(l), err: (l) => err.push(l), env: env as NodeJS.ProcessEnv, cwd: tmp });
+  const code = await runCli(args, { out: (l) => out.push(l), err: (l) => err.push(l), env: env as NodeJS.ProcessEnv, cwd: tmp, environmentFiles: TEST_ENVIRONMENT_FILES });
   return { code, out: out.join('\n'), err: err.join('\n') };
 }
 
@@ -428,7 +430,7 @@ describe('swfte add scan and swfte verify --compliance', () => {
     const lock = JSON.parse(readFileSync(join(tmp, 'swfte.json'), 'utf8'));
     const generated: string[] = lock.artifacts.flatMap((a: any) => a.files);
     write('lib/handler.ts', 'export const h = (s: string) => eval(s);\n');
-    write('lib/.env', 'SECRET=1');
+    write('lib/dot-env', 'SECRET=1');
     seen = [];
     const r = await cli(['verify', '--compliance', '--paths', 'lib']);
     assert.deepEqual(uploadedPaths(), [...generated, 'lib/handler.ts'].sort());

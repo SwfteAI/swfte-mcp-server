@@ -51,7 +51,9 @@ const tool = (name: string) => {
 };
 
 function ctx(env: Record<string, string> = {}) {
-  const config = loadConfig({ SWFTE_PAT: PAT, ...env } as never);
+  // Neutral fixture inputs are resolved directly by real writers (FIDELITY_DECISIONS P1).
+const TEST_ENVIRONMENT_FILES = Object.freeze({ plain: 'dot-env', local: 'dot-env.local', example: 'dot-env.example' });
+const config = ({ ...loadConfig({ SWFTE_PAT: PAT, ...env } as never), environmentFiles: TEST_ENVIRONMENT_FILES });
   return { client: new SwfteClient(config), config };
 }
 
@@ -83,7 +85,7 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = realFetch;
   process.chdir(prevCwd);
-  rmSync(tmp, { recursive: true, force: true });
+  rmSync(tmp, { recursive: true });
 });
 
 describe('telemetry: opt-out', () => {

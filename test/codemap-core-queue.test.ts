@@ -52,7 +52,7 @@ let root: string;
 beforeEach(() => {
   root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'cmap-queue-')));
 });
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+afterEach(() => fs.rmSync(root, { recursive: true }));
 
 const queued = () => (fs.existsSync(join(root, QUEUE_DIR)) ? fs.readdirSync(join(root, QUEUE_DIR)).sort() : []);
 
@@ -101,7 +101,7 @@ describe('enqueue and list', () => {
       assert.deepEqual(fs.readdirSync(elsewhere), []);
       assert.throws(() => dequeue(root, '../../x'), /40-hex/);
     } finally {
-      fs.rmSync(elsewhere, { recursive: true, force: true });
+      fs.rmSync(elsewhere, { recursive: true });
     }
   });
 });

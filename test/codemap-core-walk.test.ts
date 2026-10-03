@@ -98,8 +98,8 @@ before(() => {
 });
 
 after(() => {
-  fs.rmSync(root, { recursive: true, force: true });
-  fs.rmSync(outside, { recursive: true, force: true });
+  fs.rmSync(root, { recursive: true });
+  fs.rmSync(outside, { recursive: true });
 });
 
 describe('enumeration', () => {
@@ -231,7 +231,7 @@ describe('generated files', () => {
       assert.ok('text' in readSource(reader, gen, { skipGenerated: false }));
       assert.ok('text' in readSource(reader, swfte));
     } finally {
-      fs.rmSync(r, { recursive: true, force: true });
+      fs.rmSync(r, { recursive: true });
     }
   });
 });
@@ -257,7 +257,7 @@ describe('caps', () => {
       assert.deepEqual(packageOf('app/a.ts', w.packages), { pkgId: 'late-name', pkgRelPath: 'a.ts' });
       assert.deepEqual(contextOf('app/a.ts', w.locks).locks.map((l) => l.alias), ['helper']);
     } finally {
-      fs.rmSync(r, { recursive: true, force: true });
+      fs.rmSync(r, { recursive: true });
     }
   });
 
@@ -271,7 +271,7 @@ describe('caps', () => {
       assert.equal(w.truncated, true);
       assert.deepEqual(paths.filter((p) => p.endsWith('big.ts')), []);
     } finally {
-      fs.rmSync(r, { recursive: true, force: true });
+      fs.rmSync(r, { recursive: true });
     }
   });
 });
@@ -312,7 +312,7 @@ describe('package roots (pkgId)', () => {
       assert.deepEqual(of('dup1/i.ts'), { pkgId: 'dup1', pkgRelPath: 'i.ts' }, 'two roots with one name fall back to their directories');
       assert.deepEqual(of('dup2/i.ts'), { pkgId: 'dup2', pkgRelPath: 'i.ts' });
     } finally {
-      fs.rmSync(r, { recursive: true, force: true });
+      fs.rmSync(r, { recursive: true });
     }
   });
 });
@@ -349,7 +349,7 @@ describe('nearest swfte.json', () => {
       assert.deepEqual(contextOf('elsewhere/z.ts', []), { locks: [], lockDir: null });
       assert.equal(none.locks.length, 1);
     } finally {
-      fs.rmSync(r, { recursive: true, force: true });
+      fs.rmSync(r, { recursive: true });
     }
   });
 
@@ -370,7 +370,7 @@ describe('nearest swfte.json', () => {
       assert.ok(w.warnings.filter((m) => m.includes('refused')).length >= 3);
       assert.deepEqual(paths.filter((p) => p.includes('/etc/') || p.includes('hosts')), []);
     } finally {
-      fs.rmSync(r, { recursive: true, force: true });
+      fs.rmSync(r, { recursive: true });
     }
   });
 
@@ -384,7 +384,7 @@ describe('nearest swfte.json', () => {
       assert.deepEqual(contextOf('a/x.ts', w.locks).locks, []);
       assert.equal(w.warnings.filter((m) => m.includes('swfte.json')).length, 2);
     } finally {
-      fs.rmSync(r, { recursive: true, force: true });
+      fs.rmSync(r, { recursive: true });
     }
   });
 });

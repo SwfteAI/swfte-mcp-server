@@ -64,11 +64,19 @@ function terminalPayload(adapter: KindAdapter, snapshot: BuildSnapshot) {
   const fr = snapshot.finalResponse as any;
   const artifact = adapter.extractArtifact?.(snapshot) ?? null;
   const id = adapter.extractId?.(snapshot);
+  const outcome: Record<string, unknown> = {};
+  // Missing availability is unknown. Keep actual false/null and optional fields
+  // exactly as reported; neither a finished transport nor an artifact proves validation.
+  for (const key of ['needsInput', 'needsAttention', 'repairs', 'userMessage',
+    'validationAvailable', 'retryableReason', 'retryable']) {
+    if (fr !== null && typeof fr === 'object' && Object.hasOwn(fr, key)) outcome[key] = fr[key];
+  }
 
   return {
     done: true,
     sessionId: snapshot.sessionId,
-    status: snapshot.status,
+    status: typeof fr?.status === 'string' ? fr.status : snapshot.status,
+    ...outcome,
     ...(snapshot.error ? { error: snapshot.error } : {}),
     ...(id ? { id, persisted: true } : { persisted: false }),
     artifact,
@@ -300,6 +308,23 @@ export const shipTools: ToolDefinition[] = [
     execute: async (input, { client }) => {
       const adapter = requireVerb(input.kind, 'refine');
       const result = (await adapter.refine(client, input.artifact, input.feedback)) as any;
+      if (input.kind === 'workflow') {
+        const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+        const own = (key: string, accepts: (value: unknown) => boolean) => !Object.hasOwn(result, key) || result[key] === null || accepts(result[key]);
+        const valid = record(result) && typeof result.status === 'string' && !!result.status.trim()
+          && ['validationAvailable', 'retryable'].every(key => own(key, value => typeof value === 'boolean'))
+          && ['retryableReason', 'userMessage'].every(key => own(key, value => typeof value === 'string'))
+          && ['needsInput', 'needsAttention', 'repairs', 'findings'].every(key => own(key, value => Array.isArray(value) && value.every(record)));
+        if (!valid) return { refined: false, reason: 'INVALID_WIZARD_RESPONSE',
+          ...(record(result) && typeof result.status === 'string' && result.status.trim() ? { status: result.status } : {}) };
+        const outcome: Record<string, unknown> = {};
+        for (const key of ['needsInput', 'needsAttention', 'repairs', 'userMessage', 'validationAvailable', 'retryableReason', 'retryable', 'findings']) {
+          if (Object.hasOwn(result, key)) outcome[key] = result[key];
+        }
+        if (!Object.hasOwn(result, 'generatedWorkflow') || !record(result.generatedWorkflow))
+          return { refined: false, reason: 'INVALID_WIZARD_RESPONSE', status: result.status, ...outcome };
+        return { refined: true, status: result.status, message: result.message, artifact: result.generatedWorkflow, ...outcome };
+      }
       return {
         refined: true,
         status: result?.status,

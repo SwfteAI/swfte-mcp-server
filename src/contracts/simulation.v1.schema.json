@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swfte.dev/schemas/simulation/v1.json",
+  "$comment": "Provenance: original (Swfte Simulations). Not derived from MiroFish. Schema for simulation.yaml v1. Server-side rules the schema cannot express (target ownership, sandbox-only deployment, pack resolution and hash, flags, roles) are enforced by SpecService.",
+  "title": "Swfte Simulation (simulation.yaml v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "swfte.dev/simulation/v1" },
+    "kind": { "const": "Simulation" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+        "labels": {
+          "type": "object",
+          "maxProperties": 20,
+          "propertyNames": { "pattern": "^[a-z0-9][a-z0-9._/-]{0,62}$" },
+          "additionalProperties": { "type": "string", "maxLength": 128 }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "target", "profile", "graders"],
+      "properties": {
+        "mode": { "enum": ["proving", "feature", "open_world"] },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id"],
+          "properties": {
+            "kind": { "enum": ["workflow", "agent", "chatflow", "app", "widget", "worker_box"] },
+            "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$" },
+            "version": { "type": "integer", "minimum": 1 },
+            "environment": { "const": "sandbox" }
+          }
+        },
+        "profile": { "enum": ["quick", "standard", "deep", "adversarial", "custom"] },
+        "seed": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "usdPersonas": { "type": "number", "minimum": 0, "maximum": 10000 },
+            "usdSystemUnderTest": { "type": "number", "minimum": 0, "maximum": 10000 },
+            "usdReport": { "type": "number", "minimum": 0, "maximum": 1000 },
+            "maxSteps": { "type": "integer", "minimum": 1, "maximum": 1000000 }
+          }
+        },
+        "population": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "packs": { "$ref": "#/$defs/packRefs" },
+            "archetypes": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "user": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                "adversary": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                "chaos": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                "auditor": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                "stakeholder": { "type": "integer", "minimum": 0, "maximum": 100000 }
+              }
+            }
+          }
+        },
+        "interfaces": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" }
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "synthetic": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fromSchemas": { "type": "boolean" },
+                "locales": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": { "type": "string", "pattern": "^[a-z]{2,3}(-[A-Z]{2})?$" }
+                }
+              }
+            }
+          }
+        },
+        "traffic": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "profile": { "enum": ["steady", "bursty", "diurnal", "abusive"] },
+            "peakRps": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+            "durationMinutes": { "type": "integer", "minimum": 1, "maximum": 1440 }
+          }
+        },
+        "faults": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "packs": { "$ref": "#/$defs/packRefs" } }
+        },
+        "scenarios": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "packs": { "$ref": "#/$defs/packRefs" } }
+        },
+        "graders": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/packRef" }
+        },
+        "frameworks": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["gdpr", "soc2", "iso27001", "eu-ai-act", "nist-ai-rmf", "owasp-asvs", "owasp-llm", "swfte-quality"] }
+        },
+        "report": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sections": { "$ref": "#/$defs/packRefs" },
+            "formats": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "enum": ["markdown", "json"] }
+            }
+          }
+        },
+        "stop": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "intervalHalfWidth": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.5 },
+            "onBudget": { "const": "report_unknowns" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "packRef": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}/[a-z0-9][a-z0-9-]{0,63}@[1-9][0-9]{0,5}$"
+    },
+    "packRefs": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 20,
+      "items": { "$ref": "#/$defs/packRef" }
+    }
+  }
+}

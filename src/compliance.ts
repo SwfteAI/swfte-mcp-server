@@ -255,7 +255,8 @@ export const SCAN_LIMITS = {
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', 'out', '.next', '.turbo', 'coverage', '__pycache__', '.venv', 'venv', '.tox', 'target', 'vendor']);
 
 /** Files that hold credentials rather than code. Never uploaded, whatever the pattern says. */
-export function isCredentialFile(rel: string): boolean {
+export function isCredentialFile(rel: string, additionalSecretGlobs: readonly string[] = []): boolean {
+  if (additionalSecretGlobs.some(glob => new RegExp(globToRegExp(glob).source, 'i').test(rel))) return true;
   const base = rel.split('/').pop() ?? rel;
   if (/^\.env(\..*)?$/i.test(base)) return !/\.(example|sample|template)$/i.test(base);
   return /^(id_rsa|id_ed25519|id_ecdsa|id_dsa)(\.pub)?$/i.test(base) || /\.(pem|key|p12|pfx|jks|keystore)$/i.test(base) || /^\.(npmrc|pypirc|netrc)$/i.test(base);
@@ -339,7 +340,7 @@ export interface NotScanned {
  * root is read; symlinks are not followed; credential files, binaries and
  * files over the size cap are reported rather than read.
  */
-export function collectLocalFiles(opts: { paths?: string[]; globs?: string[]; root?: string }): { files: CollectedFile[]; notScanned: NotScanned[]; notes: string[] } {
+export function collectLocalFiles(opts: { paths?: string[]; globs?: string[]; root?: string; additionalSecretGlobs?: readonly string[] }): { files: CollectedFile[]; notScanned: NotScanned[]; notes: string[] } {
   const root = confinementRoot(opts.root);
   const files: CollectedFile[] = [];
   const notScanned: NotScanned[] = [];
@@ -354,7 +355,7 @@ export function collectLocalFiles(opts: { paths?: string[]; globs?: string[]; ro
     const r = rel(abs);
     if (seen.has(r)) return;
     seen.add(r);
-    if (isCredentialFile(r)) return notScanned.push({ path: r, reason: 'credential file — never uploaded' });
+    if (isCredentialFile(r, opts.additionalSecretGlobs)) return notScanned.push({ path: r, reason: 'credential file — never uploaded' });
     if (!explicit && ignore.match(r, false)) return;
     let st;
     try {
@@ -433,7 +434,7 @@ export function collectLocalFiles(opts: { paths?: string[]; globs?: string[]; ro
 }
 
 /** Inline files (hosted mode, or content the caller already holds). Same caps, no disk. */
-export function collectInlineFiles(inline: { path: string; content: string }[]): { files: CollectedFile[]; notScanned: NotScanned[] } {
+export function collectInlineFiles(inline: { path: string; content: string }[], additionalSecretGlobs: readonly string[] = []): { files: CollectedFile[]; notScanned: NotScanned[] } {
   const files: CollectedFile[] = [];
   const notScanned: NotScanned[] = [];
   let total = 0;
@@ -443,7 +444,7 @@ export function collectInlineFiles(inline: { path: string; content: string }[]):
       notScanned.push({ path: path || '(empty)', reason: 'invalid path' });
       continue;
     }
-    if (isCredentialFile(path)) {
+    if (isCredentialFile(path, additionalSecretGlobs)) {
       notScanned.push({ path, reason: 'credential file — never uploaded' });
       continue;
     }
@@ -615,11 +616,11 @@ export function unavailableScan(reason: string): ScanReport {
 }
 
 /** Scan project files through fsguard. Never throws for a scan problem; the report says what was not checked. */
-export async function scanProject(client: SwfteClient | null, root: string | undefined, paths: string[]): Promise<ScanReport> {
+export async function scanProject(client: SwfteClient | null, root: string | undefined, paths: string[], additionalSecretGlobs: readonly string[] = []): Promise<ScanReport> {
   if (!client) return unavailableScan('No credential (SWFTE_API_KEY or SWFTE_PAT), so the compliance scan could not run.');
   let collected;
   try {
-    collected = collectLocalFiles({ paths, root });
+    collected = collectLocalFiles({ paths, root, additionalSecretGlobs });
   } catch (err) {
     return unavailableScan(err instanceof Error ? err.message : String(err));
   }
@@ -627,8 +628,8 @@ export async function scanProject(client: SwfteClient | null, root: string | und
 }
 
 /** Scan files a tool just produced inline (hosted scaffold): same caps, no disk. */
-export async function scanInline(client: SwfteClient, files: { path: string; content: string }[]): Promise<ScanReport> {
-  const inline = collectInlineFiles(files);
+export async function scanInline(client: SwfteClient, files: { path: string; content: string }[], additionalSecretGlobs: readonly string[] = []): Promise<ScanReport> {
+  const inline = collectInlineFiles(files, additionalSecretGlobs);
   return scanFiles(client, { files: inline.files, notScanned: inline.notScanned });
 }
 

@@ -26,7 +26,7 @@
 import { OperationDeadlineError, type SwfteClient } from './client.js';
 
 export const MAX_ORCHESTRATION_MS = 600_000;
-import { getAdapter, type BuildSnapshot, type Kind, type KindAdapter } from './kinds/index.js';
+import { analyseGraph, getAdapter, pickId, type BuildSnapshot, type Kind, type KindAdapter } from './kinds/index.js';
 import {
   findPlaceholders,
   verifySolution,
@@ -107,10 +107,25 @@ export interface ComponentOutcome {
   key: string;
   kind: SolutionKind;
   id?: string;
-  state: 'adopted' | 'built' | 'planned' | 'failed' | 'skipped' | 'pending';
+  state: 'adopted' | 'built' | 'planned' | 'failed' | 'skipped' | 'pending' | 'needs-input';
   sessionId?: string;
   detail: string;
   knowledge?: BuildKnowledgeReport;
+  /** Exact generated draft and terminal wizard facts, never execution evidence. */
+  artifact?: unknown;
+  wizardStatus?: string;
+  needsInput?: unknown;
+  needsAttention?: unknown;
+  repairs?: unknown;
+  userMessage?: unknown;
+  validationAvailable?: unknown;
+  retryableReason?: unknown;
+  retryable?: unknown;
+  workflowStatus?: unknown;
+  createdWorkflow?: unknown;
+  /** Consumer admission reason. Missing backend availability remains unknown. */
+  blockingReason?: 'VALIDATION_REQUIRED' | 'VALIDATION_UNAVAILABLE' | 'SAVE_GUARD_UNAVAILABLE' |
+    'NEEDS_INPUT' | 'NEEDS_ATTENTION' | 'INCOMPLETE';
 }
 
 export interface RequiredInput {
@@ -218,8 +233,22 @@ async function pollBuild(
   if (timedOut) {
     throw new OperationDeadlineError();
   }
-  if (snapshot.error) throw new Error(String(snapshot.error).slice(0, 300));
   return snapshot;
+}
+
+function workflowBlockingReason(final: Record<string, unknown>, status: string): ComponentOutcome['blockingReason'] | null {
+  if (final.validationAvailable !== true) {
+    return final.retryableReason === 'SAVE_GUARD_UNAVAILABLE' ? 'SAVE_GUARD_UNAVAILABLE'
+      : final.validationAvailable === false ? 'VALIDATION_UNAVAILABLE' : 'VALIDATION_REQUIRED';
+  }
+  const unresolved = (value: unknown) => value != null && (!Array.isArray(value) || value.length > 0);
+  if (unresolved(final.needsInput)) return 'NEEDS_INPUT';
+  if (unresolved(final.needsAttention)) return 'NEEDS_ATTENTION';
+  if (final.retryableReason != null || final.retryable === true) return 'VALIDATION_REQUIRED';
+  if (status !== 'READY' && status !== 'CREATED') {
+    return status === 'INCOMPLETE' ? 'INCOMPLETE' : status === 'NEEDS_INPUT' ? 'NEEDS_INPUT' : 'VALIDATION_REQUIRED';
+  }
+  return null;
 }
 
 async function buildComponent(
@@ -231,6 +260,7 @@ async function buildComponent(
 ): Promise<ComponentOutcome> {
   let sessionId: string | undefined;
   let id: string | undefined;
+  let terminalDetails: Partial<ComponentOutcome> = {};
   try {
     client.assertDeadline();
     if (component.kind === 'dataset') {
@@ -271,13 +301,35 @@ async function buildComponent(
     }));
     const snapshot = await pollBuild(client, adapter, sessionId, Math.min(waitMs, Math.max(0, client.remainingMs())));
 
+    const rawFinal = snapshot.finalResponse;
+    const final: Record<string, unknown> = rawFinal !== null && typeof rawFinal === 'object' && !Array.isArray(rawFinal)
+      ? rawFinal as Record<string, unknown> : {};
+    const wizardStatus = typeof final.status === 'string' ? final.status : snapshot.status;
+    const artifact = adapter.extractArtifact?.(snapshot) ?? null;
+    terminalDetails = { artifact, wizardStatus };
+    for (const key of ['needsInput', 'needsAttention', 'repairs', 'userMessage',
+      'validationAvailable', 'retryableReason', 'retryable', 'workflowStatus', 'createdWorkflow'] as const) {
+      if (Object.hasOwn(final, key)) terminalDetails[key] = final[key];
+    }
+    id = adapter.extractId?.(snapshot) ??
+      (component.kind === 'workflow' ? pickId(final.createdWorkflow) : undefined);
+    const base = { key: component.key, kind: component.kind, id, sessionId, ...terminalDetails };
+    if (snapshot.error || ['FAILED', 'ERROR', 'CANCELLED', 'CANCELED', 'INACTIVE'].includes(wizardStatus)) {
+      return { ...base, state: 'failed', detail: String(snapshot.error ?? final.message ?? 'Generation failed').slice(0, 300) };
+    }
+    let blockingReason = component.kind === 'workflow' ? workflowBlockingReason(final, wizardStatus) : null;
+    if (component.kind === 'workflow' && !blockingReason && !id && !analyseGraph(artifact).ok) blockingReason = 'INCOMPLETE';
+    if (blockingReason) {
+      return { ...base, state: 'needs-input', blockingReason,
+        detail: 'The generated draft needs available clean validation and resolved choices/attention before this solution can use it.' };
+    }
+
     // Some kinds persist during generation (chatflow, widget); the rest need a
     // separate create. The adapter knows which, so this does not.
-    id = adapter.extractId?.(snapshot);
     if (!id && typeof adapter.create === 'function') {
-      const artifact = adapter.extractArtifact?.(snapshot);
       if (!artifact) {
         return {
+          ...terminalDetails,
           key: component.key,
           kind: component.kind,
           state: 'failed',
@@ -291,6 +343,7 @@ async function buildComponent(
 
     if (!id) {
       return {
+        ...terminalDetails,
         key: component.key,
         kind: component.kind,
         state: 'failed',
@@ -302,13 +355,13 @@ async function buildComponent(
       };
     }
 
-    return { key: component.key, kind: component.kind, id, sessionId, state: 'built', detail: `${component.kind} ${id}` };
+    return { key: component.key, kind: component.kind, id, sessionId, ...terminalDetails, state: 'built', detail: `${component.kind} ${id}` };
   } catch (error) {
     if (!(error instanceof OperationDeadlineError) && client.remainingMs() > 0) {
-      return { key: component.key, kind: component.kind, id, sessionId, state: 'failed',
+      return { key: component.key, kind: component.kind, id, sessionId, ...terminalDetails, state: 'failed',
         detail: (error instanceof Error ? error.message : String(error)).slice(0, 300) };
     }
-    return { key: component.key, kind: component.kind, id, sessionId, state: 'pending',
+    return { key: component.key, kind: component.kind, id, sessionId, ...terminalDetails, state: 'pending',
       detail: 'Time budget ended. Generation or persistence may still have committed. Inspect this session and any artifact ID; do not restart generation or repeat create blindly.' };
   }
 }
@@ -437,6 +490,9 @@ export async function orchestrateSolution(
         // A dataset that indexed nothing keeps its id but does not count as a
         // dependency being met.
         else if (outcome.id) ids.delete(key);
+        if (outcome.state === 'needs-input') {
+          nextActions.push(`Resolve the reported choices/attention and obtain available clean validation for ${key}. Inspect session ${outcome.sessionId}${outcome.id ? ' and existing draft ' + outcome.id : ''}; preserve the draft and do not repeat generation or create.`);
+        }
       } catch (err) {
         components.push({
           key,
@@ -461,6 +517,12 @@ export async function orchestrateSolution(
           ok: false,
           detail: 'Wire names a component that is not in the plan.',
         });
+        continue;
+      }
+      const unresolved = components.filter(outcome => outcome.state === 'needs-input').map(outcome => outcome.key);
+      if (unresolved.includes(w.from) || unresolved.includes(w.to)) {
+        wires.push({ from: w.from, to: w.to, relation: w.relation, state: 'target-missing', ok: false,
+          detail: 'Cannot wire: a generated draft still needs validation or user attention.' });
         continue;
       }
       if (w.externalReason) {
@@ -512,7 +574,7 @@ export async function orchestrateSolution(
     // actionable; blaming a wire for a stub in an unrelated node is not.
     for (const outcome of components) {
       client.assertDeadline();
-      if (!outcome.id || outcome.kind === 'dataset') continue;
+      if (!outcome.id || outcome.kind === 'dataset' || (outcome.state !== 'built' && outcome.state !== 'adopted')) continue;
       try {
         const adapter = getAdapter(outcome.kind as Kind);
         if (typeof adapter.get !== 'function') continue;
@@ -531,7 +593,7 @@ export async function orchestrateSolution(
     // Against live state, not against what we believe we wrote. This is the only
     // pass that can catch a build where every step looked fine.
     client.assertDeadline();
-    const verifiable = components.filter((c) => c.id);
+    const verifiable = components.filter((c) => c.id && (c.state === 'built' || c.state === 'adopted'));
     let verification: SolutionVerifyReport | undefined;
     if (verifiable.length) {
       try {
@@ -554,7 +616,8 @@ export async function orchestrateSolution(
               };
             }),
             wiring: (plan.wiring ?? [])
-              .filter((w) => ids.has(w.from) || byKey.get(w.from)?.id)
+              .filter((w) => (ids.has(w.from) || byKey.get(w.from)?.id) &&
+                (w.externalReason || ids.has(w.to) || byKey.get(w.to)?.id))
               .map((w) => ({ from: w.from, to: w.to, relation: w.relation, note: w.note, externalReason: w.externalReason })),
           },
           { includeComponentVerify: opts.includeComponentVerify }
@@ -573,6 +636,7 @@ export async function orchestrateSolution(
     const buildFailed = components.some((c) => c.state === 'failed' || c.state === 'skipped');
     const wireFailed = wires.some((w) => !w.ok);
     const verifyFailed = verification ? !verification.ok : verifiable.length > 0;
+    const needsWizardInput = components.some((c) => c.state === 'needs-input');
 
     for (const w of wires.filter((x) => !x.ok && x.nextAction)) nextActions.push(w.nextAction!);
     if (requiredInputs.length) {
@@ -581,10 +645,10 @@ export async function orchestrateSolution(
       );
     }
 
-    const ok = !buildFailed && !wireFailed && !verifyFailed && requiredInputs.length === 0;
+    const ok = !needsWizardInput && !buildFailed && !wireFailed && !verifyFailed && requiredInputs.length === 0;
     const status: OrchestrateReport['status'] = ok
       ? 'READY'
-      : !buildFailed && !wireFailed && !verifyFailed
+      : needsWizardInput || (!buildFailed && !wireFailed && !verifyFailed)
         ? 'NEEDS_INPUT'
         : 'BROKEN';
 
@@ -599,9 +663,9 @@ export async function orchestrateSolution(
       verification,
       nextActions: [...new Set(nextActions)],
       summary:
-        `${components.filter((c) => c.id).length}/${plan.components.length} components live, ` +
+        `${verifiable.length}/${plan.components.length} components usable, ` +
         `${wires.filter((w) => w.ok).length}/${wires.length} wires connected, ` +
-        `${requiredInputs.length} unresolved input(s)` +
+        `${requiredInputs.length} unresolved configuration input(s), ${components.filter((c) => c.state === 'needs-input').length} component(s) awaiting input or validation` +
         (verification ? `, solution verification ${verification.ok ? 'passed' : 'FAILED'}` : ', solution verification did not run') +
         `. Status: ${status}.`,
     };

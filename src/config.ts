@@ -19,6 +19,7 @@
  */
 
 import { telemetryEnabled } from './telemetry.js';
+import type { EnvironmentFiles } from './env-files.js';
 
 /** Which credential family the configured secret belongs to. */
 export type CredentialKind = 'pat' | 'api-key';
@@ -58,6 +59,9 @@ export const TOOL_GROUPS = [
   // tool-surface budget.
   'journeys',
   'relay',
+  // Swfte Simulations (validate locally, create, start, status, findings,
+  // report). Opt-in: outside DEFAULT_GROUPS so the advertised budget holds.
+  'simulations',
   // Convenience variants of tools that are already advertised (same endpoint, a
   // subset of one, or superseded by an advertised tool that does strictly
   // more). Out of DEFAULT_GROUPS so they do not spend the budget twice; still
@@ -76,7 +80,7 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is 239 tools, which measurably degrades a model's ability
+ * The full surface is 245 tools, which measurably degrades a model's ability
  * to pick the right one (test/tools.test.ts "the budget comment carries the measured counts" keeps
  * these two numbers true). This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
@@ -145,7 +149,7 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   // shares adopt's Art. 25 question flow and licence-binding reading, and a
   // step of the pick-up → adopt → deliver → hand over path that a group filter
   // can hide is a step that gets skipped.
-  // Measured now: 239 registered, 105 advertised against the ceiling of 105 —
+  // Measured now: 245 registered, 105 advertised against the ceiling of 105 —
   //   core 41, workflows 16, agents 10, chatflows 12, deployments 7,
   //   datasets 6, modules 6, connect 4, untagged 3.
   // `journeys` and `relay` are deliberately absent, and that is a decision to
@@ -158,6 +162,8 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
 ];
 
 export interface ServerConfig {
+  /** Explicit library file layout; no environment-variable/CLI flag overrides the production defaults. */
+  environmentFiles?: Partial<EnvironmentFiles>;
   /** The raw secret. Never logged. */
   credential: string;
   credentialKind: CredentialKind;

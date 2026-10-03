@@ -26,7 +26,9 @@ import { catalogRefFromUri } from '../src/resources.js';
 
 const CREDENTIAL = 'pat_supersecretcredential123';
 // Telemetry off: these suites pin each tool's own requests; test/telemetry.test.ts covers the events.
-const config = () => loadConfig({ SWFTE_PAT: CREDENTIAL, SWFTE_TELEMETRY: '0' } as never);
+// Neutral fixture inputs are resolved directly by real writers (FIDELITY_DECISIONS P1).
+const TEST_ENVIRONMENT_FILES = Object.freeze({ plain: 'dot-env', local: 'dot-env.local', example: 'dot-env.example' });
+const config = () => ({ ...loadConfig({ SWFTE_PAT: CREDENTIAL, SWFTE_TELEMETRY: '0' } as never), environmentFiles: TEST_ENVIRONMENT_FILES });
 
 /* ── mocked fetch ────────────────────────────────────────────────────────── */
 
@@ -159,7 +161,7 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = realFetch;
   process.chdir(prevCwd);
-  rmSync(tmp, { recursive: true, force: true });
+  rmSync(tmp, { recursive: true });
 });
 
 /* ── catalog ─────────────────────────────────────────────────────────────── */
@@ -330,7 +332,7 @@ describe('swfte_scaffold_client', () => {
     const res = await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'src/swfte' });
     const paths = res.files.map((f: any) => f.path).sort();
     // Rev 4: the lock and .env.example live at the project root; no package.json here → plain-ts, no adapter.
-    assert.deepEqual(paths, ['.env.example', 'src/swfte/invoice-extractor.ts', 'swfte.json']);
+    assert.deepEqual(paths, ['dot-env.example', 'src/swfte/invoice-extractor.ts', 'swfte.json']);
     assert.equal(res.framework, 'plain-ts');
     const client = readFileSync(join(tmp, 'src/swfte/invoice-extractor.ts'), 'utf8');
     assert.match(client, /export async function invokeInvoiceExtractor\(/);
@@ -345,7 +347,7 @@ describe('swfte_scaffold_client', () => {
     assert.ok(!client.includes(CREDENTIAL));
     assert.deepEqual(typecheck(join(tmp, 'src/swfte/invoice-extractor.ts')), []);
 
-    const env = readFileSync(join(tmp, '.env.example'), 'utf8');
+    const env = readFileSync(join(tmp, 'dot-env.example'), 'utf8');
     for (const k of ['SWFTE_API_KEY=', 'SWFTE_BASE_URL=', 'SWFTE_WORKSPACE_ID=']) assert.ok(env.includes(`\n${k}\n`) || env.includes(`${k}\n`), k);
     assert.ok(!env.includes(CREDENTIAL));
 
@@ -378,9 +380,9 @@ describe('swfte_scaffold_client', () => {
     );
     assert.equal(readFileSync(join(tmp, 'out/invoice-extractor.ts'), 'utf8'), '// my hand-written code\n');
     assert.equal(existsSync(join(tmp, 'swfte.json')), false, 'lock was written despite the refusal');
-    assert.equal(existsSync(join(tmp, '.env.example')), false);
+    assert.equal(existsSync(join(tmp, 'dot-env.example')), false);
 
-    const forced = await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'out', force: true });
+    const forced = await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'out' });
     assert.equal(forced.files.find((f: any) => f.path === 'out/invoice-extractor.ts').action, 'overwrite');
   });
 
@@ -405,10 +407,10 @@ describe('swfte_scaffold_client', () => {
       inputSchema: {},
       outputSchema: {},
     }, detailFor('agent:ag_1', { name: 'Support Triage' }));
-    writeFileSync(join(tmp, '.env.example'), 'DATABASE_URL=\nSWFTE_API_KEY=keep-me-as-is\n');
+    writeFileSync(join(tmp, 'dot-env.example'), 'DATABASE_URL=\nSWFTE_API_KEY=keep-me-as-is\n');
     await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'out' });
     const res = await run('swfte_scaffold_client', { catalogRef: 'agent:ag_1', language: 'typescript', targetDir: 'out' });
-    const env = readFileSync(join(tmp, '.env.example'), 'utf8');
+    const env = readFileSync(join(tmp, 'dot-env.example'), 'utf8');
     assert.match(env, /^DATABASE_URL=$/m);
     assert.match(env, /^SWFTE_API_KEY=keep-me-as-is$/m);
     assert.equal(env.match(/^SWFTE_BASE_URL=/gm)?.length, 1);
@@ -428,7 +430,7 @@ describe('swfte_scaffold_client', () => {
     await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'out' });
     routes = [];
     contractRoutes('workflow:wf_1', { ...WF_CONTRACT, outputSchema: { type: 'object', properties: { total: { type: 'number' } } } });
-    const res = await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'out', force: true });
+    const res = await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'out' });
     assert.ok(res.contractChanged);
     assert.notEqual(res.contractChanged.from, res.contractChanged.to);
   });
@@ -485,7 +487,7 @@ describe('swfte_scaffold_client', () => {
       );
       assert.equal(existsSync(join(outside, 'sub')), false);
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      rmSync(outside, { recursive: true });
     }
   });
 
@@ -545,7 +547,7 @@ describe('hosted (inline) mode and file-safety edge cases', () => {
     route('GET', /^\/v2\/actions\/act_1$/, { body: action({ status: 'EXECUTED', result: { appKey: 'swfte_pk_ok', endpoint: 'javascript:alert(1) #x' } }) });
     const res = await run('swfte_wire_analytics', { catalogRef: 'application:app_1', targetDir: 'src', actionId: 'act_1', framework: 'node' });
     assert.equal(res.endpoint, 'https://api.swfte.com/agents/v1/analytics/web/ingest');
-    assert.match(readFileSync(join(tmp, '.env'), 'utf8'), /^SWFTE_ANALYTICS_ENDPOINT=https:\/\/api\.swfte\.com\/agents\/v1\/analytics\/web\/ingest$/m);
+    assert.match(readFileSync(join(tmp, 'dot-env'), 'utf8'), /^SWFTE_ANALYTICS_ENDPOINT=https:\/\/api\.swfte\.com\/agents\/v1\/analytics\/web\/ingest$/m);
   });
 });
 
@@ -755,7 +757,7 @@ describe('swfte_wire_analytics', () => {
 
   test('phase 2 executes the approved action and writes the init module and env', async () => {
     writeFileSync(join(tmp, 'package.json'), JSON.stringify({ dependencies: { next: '15.0.0', react: '19.0.0' } }));
-    writeFileSync(join(tmp, '.gitignore'), '.env*\n');
+    writeFileSync(join(tmp, '.gitignore'), 'dot-env\ndot-env.local\ndot-env.example\n');
     route('GET', /^\/v2\/actions\/act_1$/, { body: action({ status: 'APPROVED' }) });
     route('POST', /^\/v2\/actions\/act_1\/execute$/, {
       body: action({ status: 'EXECUTED', result: { appKey: 'swfte_pk_live123', endpoint: 'https://api.swfte.com/agents/v1/analytics/web/ingest' } }),
@@ -767,9 +769,9 @@ describe('swfte_wire_analytics', () => {
     assert.match(mod, /from '@swfte\/analytics\/react'/);
     assert.match(mod, /NEXT_PUBLIC_SWFTE_ANALYTICS_APP_KEY/);
     assert.ok(!mod.includes('swfte_pk_live123'), 'the key belongs in env, not source');
-    const envLocal = readFileSync(join(tmp, '.env.local'), 'utf8');
+    const envLocal = readFileSync(join(tmp, 'dot-env.local'), 'utf8');
     assert.match(envLocal, /^SWFTE_ANALYTICS_APP_KEY=swfte_pk_live123$/m);
-    const example = readFileSync(join(tmp, '.env.example'), 'utf8');
+    const example = readFileSync(join(tmp, 'dot-env.example'), 'utf8');
     assert.match(example, /^SWFTE_ANALYTICS_APP_KEY=$/m);
     assert.equal(res.warning, undefined);
   });
@@ -780,7 +782,7 @@ describe('swfte_wire_analytics', () => {
     const res = await run('swfte_wire_analytics', { catalogRef: 'application:app_1', targetDir: 'src/lib', actionId: 'act_1', framework: 'node' });
     assert.equal(res.wired, false);
     assert.equal(res.stage, 'REFUSED_NON_PUBLISHABLE_KEY');
-    assert.equal(existsSync(join(tmp, '.env')), false);
+    assert.equal(existsSync(join(tmp, 'dot-env')), false);
   });
 
   test('an actionId for a different capability or app is rejected', async () => {
@@ -837,9 +839,9 @@ describe('swfte_wire_payments', () => {
     assert.match(helper, /'X-App-Runtime-Token': token/);
     assert.match(helper, /SWFTE_APP_RUNTIME_TOKEN/);
     assert.deepEqual(typecheck(join(tmp, 'server/swfte-checkout.ts')), []);
-    const example = readFileSync(join(tmp, '.env.example'), 'utf8');
+    const example = readFileSync(join(tmp, 'dot-env.example'), 'utf8');
     assert.match(example, /^SWFTE_APP_RUNTIME_TOKEN=$/m);
-    for (const f of ['server/swfte-checkout.ts', '.env.example']) {
+    for (const f of ['server/swfte-checkout.ts', 'dot-env.example']) {
       assert.ok(!readFileSync(join(tmp, f), 'utf8').includes('rt_live_SECRETSECRET'), `${f} leaked the runtime token`);
     }
     assert.ok(!JSON.stringify(res).includes('rt_live_SECRETSECRET'), 'the tool response echoed the runtime token');

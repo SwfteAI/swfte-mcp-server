@@ -31,7 +31,9 @@ import { getPrompt } from '../src/prompts.js';
 
 const CREDENTIAL = 'pat_supersecretcredential123';
 // Telemetry off: these suites pin each tool's own requests; test/telemetry.test.ts covers the events.
-const config = () => loadConfig({ SWFTE_PAT: CREDENTIAL, SWFTE_TELEMETRY: '0' } as never);
+// Neutral fixture inputs are resolved directly by real writers (FIDELITY_DECISIONS P1).
+const TEST_ENVIRONMENT_FILES = Object.freeze({ plain: 'dot-env', local: 'dot-env.local', example: 'dot-env.example' });
+const config = () => ({ ...loadConfig({ SWFTE_PAT: CREDENTIAL, SWFTE_TELEMETRY: '0' } as never), environmentFiles: TEST_ENVIRONMENT_FILES });
 
 /* ── mocked fetch ────────────────────────────────────────────────────────── */
 
@@ -173,7 +175,7 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = realFetch;
   process.chdir(prevCwd);
-  rmSync(tmp, { recursive: true, force: true });
+  rmSync(tmp, { recursive: true });
 });
 
 const write = (rel: string, content: string) => {
@@ -187,7 +189,7 @@ const pkg = (deps: Record<string, string>, extra: Record<string, unknown> = {}) 
 async function cli(args: string[], env: Record<string, string | undefined> = { SWFTE_API_KEY: CREDENTIAL }) {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await runCli(args, { out: (l) => out.push(l), err: (l) => err.push(l), env: env as NodeJS.ProcessEnv, cwd: tmp });
+  const code = await runCli(args, { out: (l) => out.push(l), err: (l) => err.push(l), env: env as NodeJS.ProcessEnv, cwd: tmp, environmentFiles: TEST_ENVIRONMENT_FILES });
   return { code, out: out.join('\n'), err: err.join('\n') };
 }
 
@@ -370,7 +372,7 @@ describe('swfte add / swfte_scaffold_client', () => {
     catalogRoutes();
     const res = await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', alias: 'invoices' });
     assert.equal(res.framework, 'express');
-    assert.deepEqual(res.files.map((f: any) => f.path).sort(), ['.env.example', 'src/swfte/invoices.router.ts', 'src/swfte/invoices.ts', 'swfte.json']);
+    assert.deepEqual(res.files.map((f: any) => f.path).sort(), ['dot-env.example', 'src/swfte/invoices.router.ts', 'src/swfte/invoices.ts', 'swfte.json']);
     const router = read('src/swfte/invoices.router.ts');
     assert.match(router, /from "\.\/invoices\.js";/);
     assert.match(router, /export const invoicesRouter = Router\(\);/);

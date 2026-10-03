@@ -15,6 +15,8 @@ import { runCli } from '../src/cli.js';
 import { ConfinedWriter, PathConfinementError } from '../src/fsguard.js';
 import { detectStack } from '../src/stack.js';
 
+// Neutral fixture inputs are resolved directly by real writers (FIDELITY_DECISIONS P1).
+const TEST_ENVIRONMENT_FILES = Object.freeze({ plain: 'dot-env', local: 'dot-env.local', example: 'dot-env.example' });
 const CREDENTIAL = 'pat_supersecretcredential123';
 
 interface Seen {
@@ -104,14 +106,14 @@ beforeEach(() => {
 });
 afterEach(() => {
   globalThis.fetch = realFetch;
-  rmSync(tmp, { recursive: true, force: true });
-  rmSync(outside, { recursive: true, force: true });
+  rmSync(tmp, { recursive: true });
+  rmSync(outside, { recursive: true });
 });
 
 async function cli(args: string[], env: Record<string, string | undefined> = { SWFTE_API_KEY: CREDENTIAL }) {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await runCli(args, { out: (l) => out.push(l), err: (l) => err.push(l), env: env as NodeJS.ProcessEnv, cwd: tmp });
+  const code = await runCli(args, { out: (l) => out.push(l), err: (l) => err.push(l), env: env as NodeJS.ProcessEnv, cwd: tmp, environmentFiles: TEST_ENVIRONMENT_FILES });
   return { code, out: out.join('\n'), err: err.join('\n') };
 }
 

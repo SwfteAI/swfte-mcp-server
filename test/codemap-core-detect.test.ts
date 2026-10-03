@@ -81,7 +81,7 @@ before(() => {
   write(root, 'dot-env.example', 'SWFTE_EXAMPLE_ID=\n');
 });
 
-after(() => fs.rmSync(root, { recursive: true, force: true }));
+after(() => fs.rmSync(root, { recursive: true }));
 
 const ts = () => fakeDetector('ts.fake', ['typescript', 'javascript']);
 
@@ -210,7 +210,7 @@ describe('end to end with fingerprints', () => {
       assert.notDeepEqual(second.sites.map((s) => s.line), first.sites.map((s) => s.line), 'the lines did move');
       assert.deepEqual(assignIds(second.sites, second.packages, KEY, REPO).map((s) => s.id), ids1);
     } finally {
-      fs.rmSync(r, { recursive: true, force: true });
+      fs.rmSync(r, { recursive: true });
     }
   });
 });
