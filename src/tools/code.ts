@@ -1,5 +1,6 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { assertLocalFilesystem, assertNoSecrets, ConfinedWriter, confineDirectory, confinementRoot, confinePath, denyReason, OverwriteRefusedError, PathConfinementError } from '../fsguard.js';
 import { z } from 'zod';
 import { unzipSync, zipSync, type Unzipped } from 'fflate';
@@ -93,8 +94,12 @@ function hasExportMarker(dir: string): boolean {
   }
 }
 
-/** Resolve an export destination under the working directory and clear it only if we own it. */
-export function prepareExportDest(destDir: string, overwrite: boolean | undefined): string {
+/**
+ * Resolve an export destination under the working directory. Nothing on disk changes here: with
+ * `overwrite` the previous export (only one we own, by marker) is replaced later, once the new one
+ * has been unpacked and validated in a sibling directory. `replacing` says that swap is needed.
+ */
+export function prepareExportDest(destDir: string, overwrite: boolean | undefined): { dest: string; replacing: boolean } {
   const dest = confinePath(destDir);
   if (dest === resolve(confinementRoot())) {
     throw new PathConfinementError('Refusing to export into the working directory itself: pass a subdirectory as destDir.');
@@ -109,11 +114,27 @@ export function prepareExportDest(destDir: string, overwrite: boolean | undefine
             'so it is not deleted. Choose a new destDir, or remove the directory yourself.'
         );
       }
-      rmSync(dest, { recursive: true, force: true });
+      return { dest, replacing: true };
     }
   }
   mkdirSync(dest, { recursive: true });
-  return dest;
+  return { dest, replacing: false };
+}
+
+/**
+ * Put `staged` in place of `dest` by rename (same parent, same filesystem). The previous directory is
+ * kept aside until the new one is in place and put back if that second rename fails.
+ */
+function swapDirectory(dest: string, staged: string): void {
+  const previous = join(dirname(dest), `${basename(dest)}.swfte-previous-${randomBytes(6).toString('hex')}`);
+  renameSync(dest, previous);
+  try {
+    renameSync(staged, dest);
+  } catch (error) {
+    renameSync(previous, dest);
+    throw error;
+  }
+  rmSync(previous, { recursive: true, force: true });
 }
 
 /**
@@ -151,7 +172,7 @@ export const codeTools: ToolDefinition[] = [
       overwrite: z
         .boolean()
         .optional()
-        .describe('Delete destDir first — only if a previous swfte_export_src created it (marker file). Off by default so local edits are not silently destroyed.'),
+        .describe('Replace destDir with the new export — only if a previous swfte_export_src created it (marker file). The new export is validated first and swapped in, so a refused download leaves the old one intact. Off by default so local edits are not silently destroyed.'),
       force: z
         .boolean()
         .optional()
@@ -181,9 +202,12 @@ export const codeTools: ToolDefinition[] = [
       }
       const { bytes, headers } = download;
 
-      const dest = prepareExportDest(input.destDir, input.overwrite);
+      const { dest, replacing } = prepareExportDest(input.destDir, input.overwrite);
 
       const files = unzipCapped(bytes);
+      // overwrite: unpack and validate the new export in a sibling directory; the old one is swapped out
+      // only after every entry has passed the same checks, so a refused zip leaves it untouched.
+      const target = replacing ? join(dirname(dest), `${basename(dest)}.swfte-staging-${randomBytes(6).toString('hex')}`) : dest;
       const written: string[] = [];
       const steps: Array<{ file: string; stepId?: string; stepType?: string; userRegions: string[] }> = [];
 
@@ -192,10 +216,10 @@ export const codeTools: ToolDefinition[] = [
       // (never silently replaced), a symlink anywhere on the path is refused (never
       // written through), and the deny-list and secret scan apply.
       const writer = new ConfinedWriter({ forbidden: [config?.credential ?? ''] });
-      const destRel = relative(writer.root, dest);
+      const destRel = relative(writer.root, target);
       for (const [name, data] of Object.entries(files)) {
         if (name.endsWith('/') || name === EXPORT_MARKER) continue;
-        safeJoin(dest, name); // zip-slip guard: the entry must stay inside dest
+        safeJoin(target, name); // zip-slip guard: the entry must stay inside the destination
         writer.createBytes(writer.resolve(join(destRel, name)), data, input.force);
         written.push(name);
 
@@ -211,7 +235,9 @@ export const codeTools: ToolDefinition[] = [
       );
       try {
         writer.commit();
+        if (replacing) swapDirectory(dest, target);
       } catch (err) {
+        if (replacing) rmSync(target, { recursive: true, force: true });
         if (err instanceof OverwriteRefusedError) {
           throw new PathConfinementError(
             `Refusing to overwrite existing file(s) in "${input.destDir}": ${err.files.join(', ')}. Nothing was written. ` +
