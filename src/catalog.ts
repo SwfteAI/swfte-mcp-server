@@ -159,6 +159,8 @@ export interface CatalogContract {
     auth: 'pat' | 'api_key' | 'public';
     async: boolean;
     statusPath: string | null;
+    /** Optional final-result path inside the polling envelope, supplied by the backend. */
+    outputPath?: string[];
   };
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;

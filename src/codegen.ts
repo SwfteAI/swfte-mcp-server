@@ -525,6 +525,12 @@ function resolvedInvoke(spec: ClientSpec): CatalogContract['invoke'] {
   const self = new Set(['id', ...(SELF_PLACEHOLDERS[spec.kind] ?? [])]);
   const sub = (p: string) => p.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, k: string) => (self.has(k) ? encodeURIComponent(spec.id) : m));
   const inv = spec.contract.invoke;
+  if (inv.outputPath !== undefined && inv.outputPath !== null) {
+    if (!Array.isArray(inv.outputPath) || inv.outputPath.length === 0 || inv.outputPath.some((key) =>
+      typeof key !== 'string' || key.length === 0)) {
+      throw new Error('Refusing to generate a client: invoke.outputPath must be a nonempty list of JSON field names.');
+    }
+  }
   const path = sub(String(inv.path ?? ''));
   assertSafeInvokePath(path, 'invoke.path');
   const statusPath = inv.statusPath ?? null;
@@ -694,7 +700,22 @@ async function call(opts: ClientOptions, method: string, path: string, body: unk
 }
 
 const statusOf = (s: any): string => String(s?.execution?.status ?? s?.status ?? 'UNKNOWN').toUpperCase();
-const outputOf = (s: any): unknown => s?.execution?.outputData ?? s?.outputData ?? s?.output ?? s?.result;
+const OUTPUT_PATH = ${JSON.stringify(inv.outputPath ?? null)} as readonly string[] | null;
+// A failed or cancelled run has no declared output: only a successful one must carry it.
+const outputOf = (s: any, strict: boolean): unknown => {
+  if (OUTPUT_PATH !== null) {
+    let value: unknown = s;
+    for (const key of OUTPUT_PATH) {
+      if (value === null || typeof value !== 'object' || Array.isArray(value) || !Object.prototype.hasOwnProperty.call(value, key)) {
+        if (!strict) return undefined;
+        throw new Error('The response does not contain the declared invoke.outputPath.');
+      }
+      value = (value as Record<string, unknown>)[key];
+    }
+    return value;
+  }
+  return s?.execution?.outputData ?? s?.outputData ?? s?.output ?? s?.result;
+};
 
 /**
  * ${tsComment(spec.description || `Call ${spec.name}.`)}
@@ -716,7 +737,7 @@ ${chat ? `    const reply = started?.content ?? started?.response;
     const snapshot = await call(opts, 'GET', statusPath, undefined, deadline);
     const status = statusOf(snapshot);
     if (TERMINAL.has(status) || WAITING.has(status)) {
-      return { ok: SUCCESS.has(status), status, executionId, output: outputOf(snapshot) as ${base}Output | undefined, raw: snapshot };
+      return { ok: SUCCESS.has(status), status, executionId, output: outputOf(snapshot, SUCCESS.has(status)) as ${base}Output | undefined, raw: snapshot };
     }
     if (Date.now() + (opts.pollIntervalMs ?? 2_000) > deadline) {
       throw new Error(\`Timed out waiting for execution \${executionId} (last status \${status}). It may still finish; poll \${statusPath}.\`);
@@ -888,7 +909,19 @@ def _status(snapshot: Any) -> str:
     return "UNKNOWN"
 
 
-def _output(snapshot: Any) -> Any:
+_OUTPUT_PATH = ${inv.outputPath == null ? 'None' : JSON.stringify(inv.outputPath)}
+
+
+def _output(snapshot: Any, strict: bool = True) -> Any:
+    if _OUTPUT_PATH is not None:
+        value = snapshot
+        for key in _OUTPUT_PATH:
+            if not isinstance(value, dict) or key not in value:
+                if not strict:
+                    return None
+                raise ValueError("The response does not contain the declared invoke.outputPath.")
+            value = value[key]
+        return value
     if not isinstance(snapshot, dict):
         return None
     execution = snapshot.get("execution")
@@ -932,7 +965,7 @@ def ${fn}(
         snapshot = _call("GET", status_path, None, api_key, base_url, workspace_id, remaining)
         status = _status(snapshot)
         if status in TERMINAL or status in WAITING:
-            return {"ok": status in SUCCESS, "status": status, "execution_id": execution_id, "output": _output(snapshot), "reply": None, "raw": snapshot}
+            return {"ok": status in SUCCESS, "status": status, "execution_id": execution_id, "output": _output(snapshot, status in SUCCESS), "reply": None, "raw": snapshot}
         if time.monotonic() + poll_interval_s > deadline:
             raise TimeoutError(f"Timed out waiting for execution {execution_id} (last status {status}); poll {status_path}.")
         time.sleep(poll_interval_s)
