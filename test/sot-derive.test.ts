@@ -181,12 +181,19 @@ test('derive generated clients preserve backend auth version async and schema se
     const output = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
     const exports: Record<string, Function> = {};
     runInNewContext(output, { exports, URL, AbortController, setTimeout, clearTimeout }, { timeout: 1000 });
+    // The status envelope places the output where the backend's invoke.outputPath says (wrapper fallback when absent).
+    const terminalSnapshot = (outputPath?: string[]) => {
+      let node: any = { amount: 1 };
+      for (const key of [...(outputPath ?? ['execution', 'outputData'])].reverse()) node = { [key]: node };
+      node.execution = { ...node.execution, status: 'SUCCESS' };
+      return node;
+    };
     for (const apiKey of ['pat_PHASE5_SYNTHETIC', 'synthetic-workspace-api-key']) {
       const requests: Array<{ url: string; method: string; headers: Record<string, string>; body: unknown }> = [];
       const fetch = async (url: string, init: RequestInit) => {
         requests.push({ url, method: init.method ?? 'GET', headers: init.headers as Record<string, string>, body: init.body ? JSON.parse(String(init.body)) : null });
         return new Response(JSON.stringify(invoke.async
-          ? init.method === 'POST' ? { executionId: 'fixture-execution' } : { execution: { status: 'SUCCESS', outputData: { amount: 1 } } }
+          ? init.method === 'POST' ? { executionId: 'fixture-execution' } : terminalSnapshot(invoke.outputPath)
           : row.kind === 'agent' ? { content: 'Synthetic reply' } : { success: true }),
         { status: 200, headers: { 'content-type': 'application/json' } });
       };
