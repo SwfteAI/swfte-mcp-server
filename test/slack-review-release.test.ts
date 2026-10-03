@@ -11,7 +11,7 @@ const planHash = `sha256:${'b'.repeat(64)}`;
 const proposal = { releaseId: 'release/a', expectedContentHash: contentHash, expectedPlanHash: planHash, desiredStage: 'AB', candidateWeight: 5000 };
 const action = { id: 'action_1', capability: 'release.ramp', target: { kind: 'model', id: 'model_1' },
   environment: 'production', status: 'PROPOSED', requiresApproval: true, contentHash, planHash,
-  params: { releaseId: 'release/a', stage: 'AB', candidateWeight: '5000' } };
+  params: { releaseId: 'release/a', stage: 'AB', candidateWeight: '5000', planHash } };
 
 function harness(name: string, reply: unknown) {
   const tool = [...reviewTools, ...releaseTools].find(t => t.name === name)!;
@@ -27,7 +27,8 @@ describe('Slack, review and release MCP boundaries', () => {
     for (const t of [...reviewTools, ...releaseTools]) assert.equal(allTools.filter(x => x.name === t.name).length, 1);
     assert.equal(allTools.some(t => /slack.*(?:install|message|approve|decide)|(?:approve|decide).*slack/.test(t.name)), false);
     assert.equal(allTools.some(t => /review.*(?:view|mark|run)|action.*approve/.test(t.name)), false);
-    for (const t of reviewTools) assert.equal(t.readOnly, true);
+    for (const t of reviewTools) assert.equal(t.readOnly, false);
+    assert.deepEqual(reviewTools.filter(t => t.group === 'extras').map(t => t.name).sort(), ['swfte_proof_bundle', 'swfte_review_room']);
     assert.deepEqual(new Set(REVIEW_KINDS), new Set(['workflow', 'agent', 'chatflow', 'model', 'application', 'widget', 'studio-change']));
   });
 
@@ -63,7 +64,7 @@ describe('Slack, review and release MCP boundaries', () => {
       { params: { ...action.params, releaseId: 'another' } }, { params: { ...action.params, stage: 'COMPLETE' } },
       { params: { ...action.params, candidateWeight: '10000' } }, { params: undefined }]) {
       const h = harness('swfte_release_propose_ramp', { ...action, ...changed });
-      await assert.rejects(h.run(proposal), /requested release step and human approval state/);
+      await assert.rejects(h.run(proposal), e => e instanceof SwfteApiError && e.code === 'RELEASE_PROPOSAL_UNCONFIRMED');
       assert.equal(h.calls.length, 1); assert.equal(h.calls[0].retries, 0);
     }
   });
@@ -76,6 +77,31 @@ describe('Slack, review and release MCP boundaries', () => {
     assert.equal(h.calls.length, 1); assert.equal(h.calls[0].path, '/v2/releases/release%2Fa/propose-next-step');
     assert.match(result.instructions, /Pending human approval/);
   });
+  test('nested executable planHash must match the top-level exact binding', async () => {
+    for (const nested of [undefined, `sha256:${'c'.repeat(64)}`]) {
+      const h = harness('swfte_release_propose_ramp', { ...action, params: { ...action.params, planHash: nested } });
+      await assert.rejects(h.run(proposal), e => e instanceof SwfteApiError && e.code === 'RELEASE_PROPOSAL_UNCONFIRMED');
+      assert.equal(h.calls.length, 1); assert.equal(h.calls[0].retries, 0);
+    }
+    const h = harness('swfte_release_propose_ramp', action);
+    const result = await h.run(proposal) as any;
+    assert.equal(result.changesTraffic, false); assert.equal(result.planHash, planHash);
+    assert.equal(h.calls.length, 1);
+  });
+  test('COMPLETE rejects ramp capability or changed stage and every proposal rejects coerced weight wire types', async () => {
+    const complete = { ...action, capability: 'release.complete', params: { ...action.params, stage: 'COMPLETE', candidateWeight: '10000' } };
+    for (const changed of [{ capability: 'release.ramp' }, { params: { ...complete.params, stage: 'RAMP' } },
+      { params: { ...complete.params, candidateWeight: '5000' } }]) {
+      const h = harness('swfte_release_propose_ramp', { ...complete, ...changed });
+      await assert.rejects(h.run({ ...proposal, desiredStage: 'COMPLETE', candidateWeight: 10000 }), e => e instanceof SwfteApiError && e.code === 'RELEASE_PROPOSAL_UNCONFIRMED');
+      assert.equal(h.calls.length, 1); assert.equal(h.calls[0].retries, 0);
+    }
+    for (const candidateWeight of [[5000], 5000, '05000', '5000 ']) {
+      const h = harness('swfte_release_propose_ramp', { ...action, params: { ...action.params, candidateWeight } });
+      await assert.rejects(h.run(proposal), e => e instanceof SwfteApiError && e.code === 'RELEASE_PROPOSAL_UNCONFIRMED');
+      assert.equal(h.calls.length, 1); assert.equal(h.calls[0].retries, 0);
+    }
+  });
 
   test('authority, stale hash and missing runtime refusals propagate with one call and no substitute action', async () => {
     for (const [status, code] of [[403, 'APPROVER_REQUIRED'], [409, 'STALE_CONTENT'], [503, 'ACTION_RUNTIME_UNAVAILABLE']] as const) {
@@ -86,11 +112,9 @@ describe('Slack, review and release MCP boundaries', () => {
     }
   });
 
-  test('read-only room preserves explicit historical absence and performs one GET even when evidence is missing', async () => {
-    const reply = { action: { contentHash, planHash }, requestedHash: contentHash, packet: null,
-      reports: [{ type: 'confidence', state: 'absent', reason: 'CONFIDENCE_RUNTIME_UNAVAILABLE' }], proofSuiteAvailable: false };
-    const h = harness('swfte_review_room', reply);
-    assert.deepEqual(await h.run({ actionId: 'a?view=true', contentHash }), reply);
-    assert.deepEqual(h.calls, [{ method: 'GET', path: '/v2/review/a%3Fview%3Dtrue', query: { hash: contentHash }, retries: 1 }]);
+  test('room alias refuses unbound historical absence with one GET and no human effect', async () => {
+    const h = harness('swfte_review_room', { packet: null, reports: [] });
+    await assert.rejects(h.run({ actionId: 'action:a-1', contentHash }), e => e instanceof SwfteApiError && e.code === 'REVIEW_ROOM_BINDING_INVALID');
+    assert.equal(h.calls.length, 1); assert.equal(h.calls[0].method, 'GET'); assert.equal(h.calls[0].retries, 0);
   });
 });

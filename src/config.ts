@@ -65,7 +65,7 @@ export const TOOL_GROUPS = [
   'extras',
   // The learning loop (swfte_report_outcome, swfte_propose_rule, and the recipe
   // book's swfte_recipes_search/get/apply). Opt-in on purpose: the default
-  // surface sits at its ceiling of 105, and raising that ceiling is a product
+  // surface sits at its ceiling of 108, and raising that ceiling is a product
   // decision, not a side effect of adding tools. The Builder Lab and Codex/Claude
   // setups name it explicitly: SWFTE_TOOLS=core,…,learning (docs/CODEX.md).
   'learning',
@@ -76,9 +76,9 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is 239 tools, which measurably degrades a model's ability
- * to pick the right one (test/tools.test.ts "the budget comment carries the measured counts" keeps
- * these two numbers true). This subset covers building, shipping, and inspecting
+ * The full surface is 249 tools, in the current static source inventory. A large surface can reduce a model's ability
+ * to pick the right one (test/tools.test.ts "the budget comment carries the measured counts" will check
+ * these two numbers when execution is authorized). This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
  * `SWFTE_TOOLS=all` advertises everything, and `swfte_whoami` reports which
  * groups are live so nothing is hidden silently.
@@ -145,12 +145,14 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   // shares adopt's Art. 25 question flow and licence-binding reading, and a
   // step of the pick-up → adopt → deliver → hand over path that a group filter
   // can hide is a step that gets skipped.
-  // Measured now: 239 registered, 105 advertised against the ceiling of 105 —
-  //   core 41, workflows 16, agents 10, chatflows 12, deployments 7,
+  // The three exact room/proof core operations preserve original outcomes; aliases
+  // remain extras and five release experiments remain opt-in. Ceiling 105 → 108.
+  // Static source inventory (execution UNRUN): 249 registered, 108 advertised against the ceiling of 108 —
+  //   core 44, workflows 16, agents 10, chatflows 12, deployments 7,
   //   datasets 6, modules 6, connect 4, untagged 3.
   // `journeys` and `relay` are deliberately absent, and that is a decision to
-  // revisit rather than a default to inherit. The surface sits at 105 against
-  // a ceiling of 105 — a ceiling that exists because a large advertised surface
+  // revisit rather than a default to inherit. The surface sits at 108 against
+  // a ceiling of 108 — a ceiling that exists because a large advertised surface
   // measurably degrades a model's ability to pick the right tool. Adding them
   // (17 tools) would push well past it. They stay reachable through
   // SWFTE_TOOLS; whether an agent should reach for Relay tools unprompted is a
