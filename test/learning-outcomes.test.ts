@@ -4,7 +4,8 @@
  * they never count as evidence, and send no other request.
  *
  * Driven through the real MCP server and SwfteClient against a mocked global fetch, so every request the
- * tools make is visible.
+ * mutation the tools make is visible. Authenticated capability reads use a separate positive fixture;
+ * dedicated gate tests verify those reads and refusal paths independently.
  */
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -50,6 +51,7 @@ beforeEach(() => {
       body: init.body ? JSON.parse(String(init.body)) : undefined,
       headers: Object.fromEntries(Object.entries(init.headers ?? {}).map(([k, v]) => [k.toLowerCase(), String(v)])),
     };
+    if (s.path === '/v2/learning/capabilities') return new Response('{"mcp":true}', { status: 200 });
     seen.push(s);
     if (s.path === LOCAL_STEPS_PATH) return new Response('{"accepted":1}', { status: 202 });
     return reply(s);

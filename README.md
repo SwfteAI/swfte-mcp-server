@@ -17,7 +17,7 @@ If you don't know what Swfte is, [start here](https://www.swfte.com). It's the u
 
 ## What this gives you
 
-- **239 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
+- **243 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
 - **Stdio transport** — works out of the box with Claude Desktop and Claude Code.
 - **Workspace-scoped** — set `SWFTE_WORKSPACE_ID` once, or pass `workspaceId` per call.
 - **Zero-config security** — your API key stays on the machine running the MCP server, never in the LLM context.
@@ -51,7 +51,7 @@ widget, application, or MCP server**.
   server-side page cap, read-merge-write updates where the raw PATCH would wipe
   omitted fields, retry with load-shedding detection, and typed error envelopes
   carrying the backend's own code plus a suggested action.
-- **239 tools available, 105 advertised by default**, adjustable via `SWFTE_TOOLS`.
+- **243 tools available, 105 advertised by default**, adjustable via `SWFTE_TOOLS`.
 - **Stdio transport**, multi-arch Docker image, and Zod-typed inputs published
   as JSON Schema over `tools/list`.
 

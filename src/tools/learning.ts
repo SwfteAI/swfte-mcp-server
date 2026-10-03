@@ -6,12 +6,14 @@
  * as-is. Each creates a review-queue entry and nothing else: a human reviews it, and it never changes an
  * evidence level or counts as evidence (only an Archivist replay in a fresh sandbox promotes anything).
  *
- * Section 2 (the recipe book) is appended below by a later package.
+ * Recipe tools live in recipes.ts and are registered by tools/index.ts.
  */
 import { z } from 'zod';
 
 import { OUTCOMES_PATH, PROPOSALS_PATH, TRACE_ID_RE } from '../learning-contract.js';
 import type { ToolDefinition } from './_types.js';
+import { learningEnabled } from '../learning-capabilities.js';
+import { SwfteApiError } from '../client.js';
 
 const TraceId = z
   .string()
@@ -46,8 +48,10 @@ export const reviewQueueTools: ToolDefinition[] = [
         .optional()
         .describe('Up to 20 execution ids the work produced.'),
     }),
-    execute: async (input, { client }) =>
-      client.request({
+    execute: async (input, { client, config }) => {
+      if (!await learningEnabled(client, config)) throw new SwfteApiError({ status: 404, code: 'NOT_FOUND',
+        message: 'Not found', method: 'GET', path: '/v2/learning/capabilities' });
+      return client.request({
         method: 'POST',
         path: OUTCOMES_PATH,
         body: compact({
@@ -57,7 +61,8 @@ export const reviewQueueTools: ToolDefinition[] = [
           executionIds: input.executionIds,
         }),
         retries: 0,
-      }),
+      });
+    },
   },
   {
     name: 'swfte_propose_rule',
@@ -78,8 +83,10 @@ export const reviewQueueTools: ToolDefinition[] = [
         .describe('The error signature the rule addresses, e.g. http:404:NOT_FOUND.'),
       traceIds: z.array(TraceId).max(20).optional().describe('Up to 20 trace ids of the calls behind the rule.'),
     }),
-    execute: async (input, { client }) =>
-      client.request({
+    execute: async (input, { client, config }) => {
+      if (!await learningEnabled(client, config)) throw new SwfteApiError({ status: 404, code: 'NOT_FOUND',
+        message: 'Not found', method: 'GET', path: '/v2/learning/capabilities' });
+      return client.request({
         method: 'POST',
         path: PROPOSALS_PATH,
         body: compact({
@@ -89,11 +96,10 @@ export const reviewQueueTools: ToolDefinition[] = [
           traceIds: input.traceIds,
         }),
         retries: 0,
-      }),
+      });
+    },
   },
 ];
 
-/* ── Section 2: recipe book (appended by a later package) ─────────────────── */
-
-/** Every learning tool, registered in tools/index.ts. */
+/** Review tools only; recipeTools is registered separately in tools/index.ts. */
 export const learningTools: ToolDefinition[] = [...reviewQueueTools];
