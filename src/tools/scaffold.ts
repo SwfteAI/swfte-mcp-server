@@ -13,7 +13,7 @@
  * no overwrite without `force`, no secret on disk.
  */
 import { z } from 'zod';
-import { CatalogRefArg, contractHash, getContract, getEntry, parseCatalogRef } from '../catalog.js';
+import { CATALOG_UNTRUSTED_ADVISORY, CatalogRefArg, contractHash, getContract, getEntry, parseCatalogRef, presentProvenance } from '../catalog.js';
 import { agentEmbedHtml, EMBED_KEY_PATTERN, issueEmbedKey, publicAgentChatPath } from '../embed.js';
 import { bakeArtifact, syncProject, verifyProject } from '../bake.js';
 import { assertLocalFilesystem, ConfinedWriter, INLINE_NOTE } from '../fsguard.js';
@@ -28,6 +28,49 @@ export { CLIENT_ENV } from '../bake.js';
 const LOCAL_ONLY =
   'It reads swfte.json and the generated files in the project, so it needs the server running locally (stdio) ' +
   'inside the repository. From a hosted server, run the same check in the repo instead: `npx -p @swfte/mcp-server swfte verify` / `swfte sync`.';
+
+/** Hosts a widget's script/iframe may load from. */
+const EMBED_SRC_HOSTS = ['swfte.com', 'swfte.ai'];
+const hostAllowed = (h: string) => EMBED_SRC_HOSTS.some((d) => h === d || h.endsWith('.' + d));
+
+/** Widget markup is a script on the user's site: only the caller's own workspace or a verified public entry may supply it. */
+export function assertWidgetProvenance(
+  entry: { scope?: string; workspaceId?: string | null; evidence?: { level?: string } } | null,
+  callerWorkspaceId?: string
+): void {
+  if (!entry) throw new Error('Refusing to embed: could not establish who published this widget (catalog entry unavailable).');
+  if (entry.scope === 'public') {
+    if (entry.evidence?.level !== 'verified') {
+      throw new Error(`Refusing to embed a public widget from another workspace that is not verified (evidence: ${entry.evidence?.level ?? 'unknown'}). Its markup would run as a script on your site.`);
+    }
+    return;
+  }
+  if (entry.scope !== 'workspace') throw new Error('Refusing to embed: the widget scope is missing or unknown.');
+  if (typeof callerWorkspaceId !== 'string' || !callerWorkspaceId.trim()
+      || typeof entry.workspaceId !== 'string' || !entry.workspaceId.trim()) {
+    throw new Error('Refusing to embed: both the caller and private widget workspace identities are required. Set SWFTE_WORKSPACE_ID for this caller.');
+  }
+  if (entry.workspaceId !== callerWorkspaceId) {
+    throw new Error('Refusing to embed a widget that belongs to a different workspace and is not a verified public entry.');
+  }
+}
+
+/** Every <script src>/<iframe src> in the markup must point at a Swfte origin (https, no userinfo). */
+export function assertEmbedSourceOrigins(html: string): void {
+  const re = /<(script|iframe)\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
+  for (const m of html.matchAll(re)) {
+    const raw = (m[2] ?? m[3] ?? m[4] ?? '').trim();
+    let u: URL | null = null;
+    try {
+      u = new URL(raw.startsWith('//') ? 'https:' + raw : raw);
+    } catch {
+      u = null;
+    }
+    if (!u || u.protocol !== 'https:' || u.username || u.password || !hostAllowed(u.hostname.toLowerCase())) {
+      throw new Error(`Refusing to embed: <${m[1]!.toLowerCase()} src="${raw.slice(0, 80)}"> is not an https Swfte origin (${EMBED_SRC_HOSTS.join(', ')}).`);
+    }
+  }
+}
 
 export const scaffoldTools: ToolDefinition[] = [
   {
@@ -76,7 +119,7 @@ export const scaffoldTools: ToolDefinition[] = [
             ? await scanInline(client, code.map((f) => ({ path: f.path, content: f.content ?? '' })))
             : await scanProject(client, writer.root, code.map((f) => f.path));
         } catch (err) {
-          complianceScan = unavailableScan(err instanceof Error ? err.message : String(err));
+          complianceScan = unavailableScan(client.redactError(err instanceof Error ? err.message : String(err)));
         }
       }
       return {
@@ -160,6 +203,10 @@ export const scaffoldTools: ToolDefinition[] = [
       catalogRef: CatalogRefArg,
       targetFile: z.string().optional().describe('File to write the snippet to, relative to the project root (e.g. "public/support.html").'),
       force: z.boolean().optional(),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe('Widgets only: the widget markup is written by its publisher (possibly another workspace) and becomes a script on your site. Without confirm:true it is returned for review and nothing is written.'),
       embedKey: z.string().optional().describe('Agents: an existing publishable embed key (swfte_pk_…) for this agent.'),
       allowedOrigins: z
         .array(z.string())
@@ -219,7 +266,31 @@ export const scaffoldTools: ToolDefinition[] = [
         };
       }
       writer.assertNoSecrets('embed markup', html);
-      return write(`<!-- Swfte embed: ${r.ref.replace(/--/g, '-')} (contract ${contractHash(contract)}) -->\n${html.trim()}\n`, {});
+      const entry = await getEntry(client, r).catch(() => null);
+      assertWidgetProvenance(entry, config.workspaceId);
+      assertEmbedSourceOrigins(html);
+      const markup = `<!-- Swfte embed: ${r.ref.replace(/--/g, '-')} (contract ${contractHash(contract)}) -->\n${html.trim()}\n`;
+      const origin = {
+        untrustedContent: CATALOG_UNTRUSTED_ADVISORY,
+        publishedBy: entry ? presentProvenance(entry) : null,
+      };
+      if (!input.confirm) {
+        // Third-party markup becomes a script on the user's site: a human reads it first.
+        return {
+          catalogRef: r.ref,
+          embeddable: true,
+          html: markup,
+          written: [],
+          requiresConfirmation: true,
+          ...origin,
+          message:
+            'Nothing was written. This markup was published by the widget author and would run on your page. ' +
+            'Review it (and who published it), then call again with confirm:true' +
+            (input.targetFile ? '' : ' and a targetFile') +
+            ' to write it.',
+        };
+      }
+      return write(markup, origin);
     },
   },
 ];

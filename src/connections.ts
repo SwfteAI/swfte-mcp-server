@@ -160,6 +160,14 @@ export interface OpenResult {
  * event loop open or write into its stdio, which for a stdio transport would
  * corrupt the protocol stream.
  */
+/**
+ * Windows: rundll32 hands the URL to the shell verb as ONE argument. `cmd /c start`
+ * would re-parse it, and `&`, `|`, `^` in a server-supplied URL are cmd metacharacters.
+ */
+export function windowsOpenCommand(url: string): [string, string[]] {
+  return ['rundll32', ['url.dll,FileProtocolHandler', url]];
+}
+
 export function openInBrowser(url: string): OpenResult {
   if (!/^https?:\/\//i.test(url)) {
     return { opened: false, reason: 'Refusing to open a non-http(s) URL.' };
@@ -183,7 +191,7 @@ export function openInBrowser(url: string): OpenResult {
     process.platform === 'darwin'
       ? ['open', [url]]
       : process.platform === 'win32'
-        ? ['cmd', ['/c', 'start', '', url]]
+        ? windowsOpenCommand(url)
         : ['xdg-open', [url]];
 
   try {

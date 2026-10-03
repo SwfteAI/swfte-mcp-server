@@ -13,6 +13,7 @@ import {
   CatalogRefArg,
   EVIDENCE_LEVELS,
   GENERATION_ESTIMATE,
+  CATALOG_UNTRUSTED_ADVISORY,
   REUSABLE_LEVELS,
   getContextPackage,
   getEntry,
@@ -227,7 +228,7 @@ async function traceDependencies(
           n.evidenceLevel = d.evidence?.level;
           detailDeps = (d.dependencies ?? []).map((x) => ({ from: r.ref, to: x.catalogRef, relation: x.relation, source: 'catalog' as const }));
         } catch (err) {
-          errors.push(`${r.ref}: ${err instanceof Error ? err.message : String(err)}`);
+          errors.push(client.redactError(`${r.ref}: ${err instanceof Error ? err.message : String(err)}`));
         }
         const live = await liveReferences(client, r);
         const seen = new Set(detailDeps.map((e) => e.to));
@@ -294,7 +295,7 @@ async function traceDependencies(
       const hit = (d.dependencies ?? []).find((x) => x.catalogRef === root.ref);
       if (hit) dependents.push({ catalogRef: ref, name: d.name, relation: hit.relation, evidenceLevel: d.evidence?.level });
     } catch (err) {
-      errors.push(`${ref}: ${err instanceof Error ? err.message : String(err)}`);
+      errors.push(client.redactError(`${ref}: ${err instanceof Error ? err.message : String(err)}`));
     }
   }
   return {
@@ -345,7 +346,7 @@ export const catalogTools: ToolDefinition[] = [
       const rec = res.recommendation as { action?: string; catalogRef?: string };
       const decision = decisionOf(rec.action);
       if (decision) emitTelemetry(ctx, { event: 'reuse_decision', decision, catalogRef: rec.catalogRef ?? null });
-      return res;
+      return { untrustedContent: CATALOG_UNTRUSTED_ADVISORY, ...res };
     },
   },
   {
@@ -364,7 +365,10 @@ export const catalogTools: ToolDefinition[] = [
       includeEvidenceRecords: z.boolean().optional().describe('Include the latest evidence records. Default true.'),
       includeSnippets: z.boolean().optional().describe('Include curl/TS/Python/MCP snippets. Default true.'),
     }),
-    execute: async (input, { client }) => getContextPackage(client, parseCatalogRef(input.catalogRef), input),
+    execute: async (input, { client }) => ({
+      untrustedContent: CATALOG_UNTRUSTED_ADVISORY,
+      ...(await getContextPackage(client, parseCatalogRef(input.catalogRef), input)),
+    }),
   },
   {
     name: 'swfte_get_evidence',
@@ -379,6 +383,7 @@ export const catalogTools: ToolDefinition[] = [
       const r = parseCatalogRef(input.catalogRef);
       const d = await getEntry(client, r);
       return {
+        untrustedContent: CATALOG_UNTRUSTED_ADVISORY,
         catalogRef: r.ref,
         name: d.name,
         evidence: presentEvidence(d.evidence, d.parentEvidence),
@@ -404,6 +409,9 @@ export const catalogTools: ToolDefinition[] = [
       depth: z.number().int().min(1).max(4).optional().describe('downstream only. Default 2.'),
       maxScan: z.number().int().min(1).max(200).optional().describe('upstream only: entries to scan. Default 40.'),
     }),
-    execute: async (input, { client }) => traceDependencies(client, input),
+    execute: async (input, { client }) => ({
+      untrustedContent: CATALOG_UNTRUSTED_ADVISORY,
+      ...(await traceDependencies(client, input)),
+    }),
   },
 ];

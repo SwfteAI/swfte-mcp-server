@@ -98,8 +98,8 @@ copy the secret into a header that has no use for it.
 
 ### Tool groups
 
-The full surface is 237 tools. Advertising all of them measurably degrades a
-model's ability to pick the right one, so a **105-tool default** is advertised:
+The full surface is 241 tools. Advertising all of them measurably degrades a
+model's ability to pick the right one, so a **109-tool default** is advertised:
 
 ```
 core, workflows, agents, chatflows, datasets, modules, deployments, connect
@@ -113,11 +113,15 @@ default surface grew from 103 to 105 because `swfte_deliver` and
 `swfte_handover_record` joined `core` beside `swfte_adopt` (nothing advertised
 covered either, so there was no duplicate to trade into `extras`).
 
+Phase 5 adds four distinct operations and raises the default budget from 105
+to 109: OpenAPI and decision reads plus bounded local decision imports in
+`core`, and a dry-run canvas translation check in `workflows`.
+
 Widen or narrow it explicitly:
 
 ```bash
 SWFTE_TOOLS=all                       # everything
-SWFTE_TOOLS=core,workflows            # 60 tools — a focused workflow session
+SWFTE_TOOLS=core,workflows            # 64 tools — a focused workflow session
 SWFTE_TOOLS=core,voice,conversations  # a voice-ops session
 ```
 

@@ -1,0 +1,52 @@
+{
+  "catalogRef" : "widget:widget_1",
+  "invoke" : {
+    "method" : "POST",
+    "path" : "/v1/widgets/widget_1/public/invoke",
+    "auth" : "public",
+    "async" : false,
+    "statusPath" : null
+  },
+  "inputSchema" : {
+    "additionalProperties" : false,
+    "properties" : {
+      "capabilitySlug" : {
+        "description" : "Optional capability to target.",
+        "type" : "string"
+      },
+      "idempotencyKey" : {
+        "description" : "Optional; a repeat within 5 minutes returns the cached response.",
+        "type" : "string"
+      },
+      "input" : {
+        "description" : "What to send the widget's brain: {\"message\": \"...\"} (or a plain string) for an agent or chatflow brain; the workflow inputs for a workflow brain."
+      }
+    },
+    "required" : [ "input" ],
+    "type" : "object"
+  },
+  "outputSchema" : {
+    "additionalProperties" : true,
+    "properties" : {
+      "response" : {
+        "description" : "The brain's result; for an agent brain {content, conversationId}."
+      },
+      "success" : {
+        "type" : "boolean"
+      }
+    },
+    "type" : "object"
+  },
+  "snippets" : {
+    "curl" : "# Call widget Sample widget (public endpoint, rate limited to 10 requests/min per IP)\n# Requires curl 7.76+ and jq.\nBASE_URL=\"https://api.example.test/agents\"\ncurl -sS --fail-with-body -X POST \"$BASE_URL/v1/widgets/widget_1/public/invoke\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"input\":{\"message\":\"Hello\"}}' | jq -r '.[\"response\"]'\n",
+    "typescript" : "// Call widget Sample widget (public endpoint, rate limited to 10 requests/min per IP)\n// Node 18+ (global fetch). Run with: npx tsx swfte-call.ts\nconst BASE_URL = \"https://api.example.test/agents\";\nconst headers: Record<string, string> = {\n  \"Content-Type\": \"application/json\",\n};\n\nasync function main() {\n  const res = await fetch(`${BASE_URL}/v1/widgets/widget_1/public/invoke`, {\n    method: \"POST\",\n    headers,\n    body: JSON.stringify({\n      \"input\": {\n        \"message\": \"Hello\"\n      }\n    }),\n  });\n  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);\n  const data = await res.json();\n  console.log(data[\"response\"]);\n}\n\nmain().catch((err) => {\n  console.error(err);\n  process.exit(1);\n});\n",
+    "python" : "# Call widget Sample widget (public endpoint, rate limited to 10 requests/min per IP)\n# pip install requests\nimport os\n\nimport requests\n\nBASE_URL = \"https://api.example.test/agents\"\nHEADERS = {\"Content-Type\": \"application/json\"}\n\nres = requests.post(f\"{BASE_URL}/v1/widgets/widget_1/public/invoke\", headers=HEADERS, json={\"input\": {\"message\": \"Hello\"}}, timeout=120)\nres.raise_for_status()\ndata = res.json()\nprint(data.get(\"response\"))\n",
+    "mcp" : "# Give Claude Code the Swfte MCP server (it reads the key from your environment):\nclaude mcp add swfte -e SWFTE_API_KEY=\"$SWFTE_API_KEY\" -e SWFTE_BASE_URL=\"https://api.example.test/agents\" -- npx -y @swfte/mcp-server\n\n# Then, in your project, ask Claude:\n#   Use swfte_get_context on widget:widget_1, then swfte_scaffold_client to generate a typed client for it in this repo and pin it in swfte.json.\n"
+  },
+  "embed" : {
+    "html" : "<iframe src=\"https://studio.example.test/widget/widget_1\" title=\"Sample widget\" style=\"width:100%;height:640px;border:0\" loading=\"lazy\" allow=\"microphone; clipboard-write\"></iframe>"
+  },
+  "contractHash" : "d61bca4b376460d7c8770d755ceea3878bcc5572e3f12e8624b31733d18038a9",
+  "version" : "2026-09-20T10:00:00Z",
+  "invokeUnavailableReason" : null
+}

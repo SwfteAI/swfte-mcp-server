@@ -17,10 +17,10 @@ If you don't know what Swfte is, [start here](https://www.swfte.com). It's the u
 
 ## What this gives you
 
-- **237 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
+- **241 MCP tools** (109 advertised by default; gate resolution needs `SWFTE_ALLOW_GATE_DECISIONS=1`) that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
 - **Stdio transport** — works out of the box with Claude Desktop and Claude Code.
 - **Workspace-scoped** — set `SWFTE_WORKSPACE_ID` once, or pass `workspaceId` per call.
-- **Zero-config security** — your API key stays on the machine running the MCP server, never in the LLM context.
+- **Credential stays local** — your API key is read from the environment of the machine running the MCP server, sent only to `SWFTE_BASE_URL`, and never written to disk or returned to the model. See [Security model](#security-model) for what the server can read, write and send.
 - **Multi-arch Docker image** — `swfte/mcp-server` on Docker Hub for amd64 + arm64.
 - **TypeScript-first** — every input is typed via Zod, schemas surfaced to the client as JSON-Schema.
 **Build a complete Studio artifact from one sentence, then prove it works — without leaving your editor.**
@@ -51,7 +51,7 @@ widget, application, or MCP server**.
   server-side page cap, read-merge-write updates where the raw PATCH would wipe
   omitted fields, retry with load-shedding detection, and typed error envelopes
   carrying the backend's own code plus a suggested action.
-- **237 tools available, 105 advertised by default**, adjustable via `SWFTE_TOOLS`.
+- **241 tools available, 109 advertised by default**, adjustable via `SWFTE_TOOLS`.
 - **Stdio transport**, multi-arch Docker image, and Zod-typed inputs published
   as JSON Schema over `tools/list`.
 
@@ -144,11 +144,13 @@ guide, [`docs/RECIPES.md`](./docs/RECIPES.md) for worked examples, and
 |---|---|---|---|
 | `SWFTE_PAT` | one of | — | Personal access token (`pat_…`). Acts as you. |
 | `SWFTE_API_KEY` | one of | — | Workspace API key (`sk-swfte-…` / `sk_…`). |
-| `SWFTE_BASE_URL` | ⛔ | `https://api.swfte.com/agents` | Point at a local or staging backend. |
+| `SWFTE_BASE_URL` | ⛔ | `https://api.swfte.com/agents` | Point at a local or staging backend. Must be https (http only for localhost/127.0.0.1). Your credential is sent to this host. |
+| `SWFTE_ALLOW_INSECURE_BASE_URL` | ⛔ | `0` | Explicit override to accept plain `http://` to a non-loopback host. |
 | `SWFTE_ALLOWED_HOSTS` | ⛔ | `api.swfte.com,localhost,127.0.0.1` | CLI: hosts a `swfte.json` `baseUrl` may name before it receives the credential (`*.example.com` for subdomains). `SWFTE_BASE_URL` is always trusted. |
 | `SWFTE_WORKSPACE_ID` | ⛔ | — | API keys only; a PAT carries its own binding. |
 | `SWFTE_TOOLS` | ⛔ | curated subset | `all`, or a comma-separated group list. |
 | `SWFTE_ALLOW_DEPLOY` | ⛔ | `0` | Required, with `confirm:true`, to provision real infrastructure. |
+| `SWFTE_ALLOW_GATE_DECISIONS` | ⛔ | `0` | Registers `swfte_relay_runs_gate_decide`, which approves/denies/edits a paused human-in-the-loop gate. Off by default: an agent should not approve its own run. |
 | `SWFTE_DEFAULT_WAIT_MS` | ⛔ | `240000` | How long build/run tools wait before returning a resumable handle. |
 | `SWFTE_DEBUG` | ⛔ | `0` | Log request lines to stderr. |
 | `SWFTE_TELEMETRY` | ⛔ | on | `0` (or `false`, `off`, `no`) sends no usage events at all. See [Telemetry](#telemetry). |
@@ -186,7 +188,7 @@ fail or slow a tool. `SWFTE_TELEMETRY=0` turns it off; nothing is sent at all.
 | **ChatFlows** | `swfte_chatflows_*` | list/get/create, validate, deploy, publish, session start/get, builder templates |
 | **Workflows** | `swfte_workflows_*` | list, get, create, validate, clone, export, publish, deployment status, pre-deploy, execute, list/get/pause/resume executions, node-level traces |
 | **Journeys** | `swfte_journeys_*` | list/get/create/update/delete templates, generate from prompt, deploy/run/test a journey, app-level multi-journey deploy |
-| **Relay Runs** | `swfte_relay_runs_*` | list, get, conversation snapshot, cancel, resolve a paused gate |
+| **Relay Runs** | `swfte_relay_runs_*` | list, get, conversation snapshot, cancel (resolving a paused gate needs `SWFTE_ALLOW_GATE_DECISIONS=1`) |
 | **Relay Mailboxes** | `swfte_relay_mailboxes_*` | resolve a connected mailbox's address for a journey's email trigger |
 | **Conversations** | `swfte_conversations_*` | initiate, list, get, transcript, terminate |
 | **Datasets** | `swfte_datasets_*` | list, get, create, documents list/create/status |
@@ -202,7 +204,7 @@ fail or slow a tool. `SWFTE_TELEMETRY=0` turns it off; nothing is sent at all.
 Every tool's input schema is published over MCP `tools/list` so your client can autocomplete and validate.
 
 Full endpoint→tool mapping is in [`docs/TOOLS.md`](docs/TOOLS.md). Underlying API reference: [swfte.com/developers](https://www.swfte.com/developers) and [swfte.com/resources](https://www.swfte.com/resources).
-### Core — 11 tools, every artifact kind
+### Core tools, every artifact kind
 
 `swfte_whoami` · `swfte_build` · `swfte_build_status` · `swfte_build_steer` ·
 `swfte_validate` · `swfte_create` · `swfte_refine` · `swfte_run` ·
@@ -234,8 +236,8 @@ or `mcp-server`.
 | Cost control | `swfte_cost_*` | `cost` | |
 | Agent mail | `swfte_agent_mail_*` | `agent-mail` | |
 
-Advertising all 237 tools measurably degrades a model's ability to pick the
-right one, so 105 are advertised by default. `SWFTE_TOOLS=all` widens it, and
+Advertising all 241 tools measurably degrades a model's ability to pick the
+right one, so 109 are advertised by default. `SWFTE_TOOLS=all` widens it, and
 `swfte_whoami` reports which groups are live and what is hidden — nothing
 disappears silently.
 
@@ -327,6 +329,23 @@ Resources and prompts carry the same flow for clients that use them:
 `swfte://capabilities`, `swfte://catalog/{kind}/{id}` (the context package),
 and the prompts `reuse-then-build`, `ship-with-analytics-and-payments`,
 `bake-into-codebase` and `pick-up-tailor-deploy`.
+
+`swfte_get_openapi` reads the artifact's backend-derived OpenAPI document;
+`swfte_get_decisions` reads its visible stored and derived rationale. Local
+Nexus imports default to a bounded preview showing opaque IDs and counts.
+`swfte decisions ingest --ref workflow:wf_123` reads the real default
+`~/.nexus`; `--from` selects a data directory inside the project. Preview
+needs no credentials and makes no HTTP calls. Only `--apply` (or
+`swfte_ingest_decisions {apply:true}`) posts imports, always as private
+PROPOSED decisions. Upstream human or model claims do not confirm them in
+Swfte. Hosted MCP sessions cannot read local Nexus data.
+
+`swfte_translate_check` checks canvas translation without exporting files.
+`swfte_export_src` accepts `source: execution | canvas | auto` (default
+`auto`): an execution artifact's 404 triggers one canvas export attempt.
+Unsupported canvas nodes produce the complete refusal list and write no
+destination files. The initial translator supports exact INPUT-to-OUTPUT
+marker semantics; other canvas behaviors require an explicit refusal.
 
 ---
 
@@ -487,6 +506,49 @@ never baked into a generated client as its default.
 
 ---
 
+### Security model
+
+What the server does on your machine and to your account, so you can decide whether to run it.
+
+`swfte_export_src` downloads a Tier2 Rust source overlay: generated steps, graph,
+manifest, build script and blueprint. Merge it with the real Tier1 BuildX Rust
+service scaffold, including `crates/swfte-sdk`, before compiling. The ZIP alone
+does not contain that static scaffold. A successful isolated step/graph ABI
+fixture is separate from a full emitted workspace Cargo check; neither proves
+deployment or execution on another host.
+
+Widget embed markup requires either explicitly verified public catalog scope or
+an exact private workspace match. Set `SWFTE_WORKSPACE_ID` for private widgets;
+missing scope or either missing private workspace identity is refused.
+
+- **Reads.** Files only inside the directory it was launched in, and only when a tool asks for one
+  (`swfte_files_upload`, `swfte_sync_src`, knowledge and preflight inputs, project detection for
+  `swfte_scaffold_client`). `.env*`, `.npmrc`, `.netrc`, `.git/`, `.ssh/`, `.aws/` and private-key
+  files are never read or uploaded. Launch it from your project, never from `$HOME` or `/`.
+- **Writes.** Only inside that directory, only files a tool names (generated clients, embed
+  snippets, an exported Tier2 Rust source overlay, `swfte.json`, analytics wiring). No `..`, no absolute paths
+  elsewhere, no writes through symlinks. It never overwrites an existing file unless you pass `force`
+  (`swfte_export_src` refuses the whole export on a conflict). It never writes to `.git/`, `.github/`,
+  `.husky/`, `.vscode/`, `.claude/`, `.cursor/`, `.mcp.json`, `.npmrc`, `package.json` or `.env*`
+  (other than merging publishable analytics keys into the env file `swfte_wire_analytics` names).
+  Your credential, or anything shaped like a secret, is never written.
+- **Sends.** Your credential goes to `SWFTE_BASE_URL` and nowhere else; redirects are never followed.
+  Generated clients assert every request stays on their base origin. Usage telemetry is described under
+  [Telemetry](#telemetry) and is off with `SWFTE_TELEMETRY=0`.
+- **Approvals.** The server exposes no tool that approves an action. Deploys need `SWFTE_ALLOW_DEPLOY=1`
+  and `confirm:true`; resolving a paused Relay gate needs `SWFTE_ALLOW_GATE_DECISIONS=1`. Mutations
+  proposed on your behalf are approved by a human in Studio.
+- **Untrusted text.** Catalog names, descriptions, rationale and embed markup are written by whoever
+  published the entry, possibly another workspace. Tool results that carry them are labelled
+  `untrustedContent`, `swfte_embed_widget` shows markup and writes nothing until `confirm:true`, and
+  only accepts widgets from your own workspace or verified public entries with `https` Swfte script
+  sources. Review generated clients and markup before you commit them.
+- **A PAT acts as you**, with your full authority. Prefer a scoped workspace API key.
+
+Report a vulnerability to security@swfte.com (see [SECURITY.md](./SECURITY.md)).
+
+---
+
 ## Example prompts
 
 - *"Build a workflow that watches a Google Sheet for new leads, researches each with an agent, and emails a summary. Then verify it works."*
@@ -508,7 +570,7 @@ More, with what each one does underneath: [`docs/RECIPES.md`](./docs/RECIPES.md)
 
 ---
 
-## Development
+## Testing
 
 ```bash
 npm install
@@ -563,12 +625,16 @@ The smoke script (`npm run smoke`) spawns the server, sends a `tools/list` JSON-
 
 ## Releases
 
-Tagging `vX.Y.Z` triggers `.github/workflows/release.yml`, which:
+Releases are published only by `.github/workflows/release.yml`, from `master`, and only after a
+human approves the `npm-publish-prod` environment (members of `SwfteAI/release-approvers`):
 
-1. Publishes `@swfte/mcp-server@X.Y.Z` to npm (with provenance).
-2. Builds a multi-arch Docker image and pushes it to Docker Hub (`swfte/mcp-server:X.Y.Z`, `:latest`) and GHCR.
+1. `npm publish --provenance` of `@swfte/mcp-server@X.Y.Z` (version from `package.json`).
+2. A second approval (`docker-publish-prod`) for the multi-arch image on Docker Hub and GHCR.
 
-Repository secrets required: `NPM_TOKEN`, `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
+Start a release by pushing tag `vX.Y.Z` on a `master` commit, or by dispatching the workflow on
+`master` with `confirm=PUBLISH`. The optional `release-on-merge.yml` does the same on a version bump
+when the repository variable `RELEASE_ON_MERGE` is `armed`. The full procedure and the one-time
+repository setup are in [`docs/RELEASING.md`](docs/RELEASING.md); changes are in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 

@@ -1,0 +1,16 @@
+{
+  "catalogRef" : "agent:ag_pub",
+  "invoke" : null,
+  "inputSchema" : { },
+  "outputSchema" : { },
+  "snippets" : {
+    "curl" : "# agent:ag_pub has no direct invoke endpoint: This is a public listing owned by another workspace. Adopt it into your workspace (POST /v2/catalog/agent/ag_pub/adopt) and call your copy. Reading its catalog entry instead.\n# Requires curl 7.76+ and jq. Export SWFTE_API_KEY first.\nBASE_URL=\"https://api.example.test/agents\"\ncurl -sS --fail-with-body -X GET \"$BASE_URL/v2/catalog/agent/ag_pub\" \\\n  -H \"Authorization: Bearer $SWFTE_API_KEY\" | jq '.'\n",
+    "typescript" : "// agent:ag_pub has no direct invoke endpoint: This is a public listing owned by another workspace. Adopt it into your workspace (POST /v2/catalog/agent/ag_pub/adopt) and call your copy. Reading its catalog entry instead.\n// Node 18+ (global fetch). Run with: npx tsx swfte-call.ts  (export SWFTE_API_KEY first)\nconst BASE_URL = \"https://api.example.test/agents\";\nconst headers: Record<string, string> = {\n  Authorization: `Bearer ${process.env.SWFTE_API_KEY}`,\n  \"Content-Type\": \"application/json\",\n};\n\nasync function main() {\n  const res = await fetch(`${BASE_URL}/v2/catalog/agent/ag_pub`, {\n    method: \"GET\",\n    headers,\n  });\n  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);\n  const data = await res.json();\n  console.log(JSON.stringify(data, null, 2));\n}\n\nmain().catch((err) => {\n  console.error(err);\n  process.exit(1);\n});\n",
+    "python" : "# agent:ag_pub has no direct invoke endpoint: This is a public listing owned by another workspace. Adopt it into your workspace (POST /v2/catalog/agent/ag_pub/adopt) and call your copy. Reading its catalog entry instead.\n# pip install requests  (export SWFTE_API_KEY first)\nimport os\n\nimport requests\n\nBASE_URL = \"https://api.example.test/agents\"\nAPI_KEY = os.environ[\"SWFTE_API_KEY\"]\nHEADERS = {\"Authorization\": f\"Bearer {API_KEY}\", \"Content-Type\": \"application/json\"}\n\nres = requests.get(f\"{BASE_URL}/v2/catalog/agent/ag_pub\", headers=HEADERS, timeout=120)\nres.raise_for_status()\ndata = res.json()\nprint(data)\n",
+    "mcp" : "# Give Claude Code the Swfte MCP server (it reads the key from your environment):\nclaude mcp add swfte -e SWFTE_API_KEY=\"$SWFTE_API_KEY\" -e SWFTE_BASE_URL=\"https://api.example.test/agents\" -- npx -y @swfte/mcp-server\n\n# Then, in your project, ask Claude:\n#   Use swfte_get_context on agent:ag_pub, then swfte_scaffold_client to generate a typed client for it in this repo and pin it in swfte.json.\n"
+  },
+  "embed" : null,
+  "contractHash" : "b95e5e41e30e7ab0f6e9e3059bee92b12b8c27f97296e72b6bbb66384a05b767",
+  "version" : "2026-09-19T10:00:00Z",
+  "invokeUnavailableReason" : "This is a public listing owned by another workspace. Adopt it into your workspace (POST /v2/catalog/agent/ag_pub/adopt) and call your copy."
+}

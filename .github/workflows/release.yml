@@ -13,15 +13,29 @@ on:
         description: 'Type PUBLISH to confirm an intentional release'
         required: true
 
+# Read-only by default. id-token (npm provenance / trusted publishing) and packages (GHCR) are
+# granted only to the one job that needs each, below.
 permissions:
   contents: read
-  packages: write
-  id-token: write
 
 jobs:
   guard:
     runs-on: ubuntu-latest
     steps:
+      # Publish only what is on master. A manual dispatch must run from master; a tag must
+      # point at a commit master contains (otherwise any branch could be published by tagging it).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Release commit must be on master
+        run: |
+          git fetch --no-tags origin master:refs/remotes/origin/master
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${GITHUB_REF}" != "refs/heads/master" ]; then
+            echo "::error::Manual releases must be dispatched from master (got ${GITHUB_REF})"; exit 1
+          fi
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" refs/remotes/origin/master; then
+            echo "::error::${GITHUB_SHA} is not on master; refusing to publish it"; exit 1
+          fi
       - name: Confirm intentional manual release
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -39,17 +53,24 @@ jobs:
   npm-publish:
     runs-on: ubuntu-latest
     needs: [guard, verify]
+    # id-token: write lets npm mint a short-lived OIDC credential for provenance and, once the
+    # package is configured for trusted publishing on npmjs.com, for the publish itself.
+    permissions:
+      contents: read
+      id-token: write
     environment:
       name: npm-publish-prod
       url: https://www.npmjs.com/package/@swfte/mcp-server
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
           cache: npm
       - run: npm ci --no-audit --no-fund
+      # Trusted publishing needs npm >= 11.5.1 (Node 22 ships npm 10).
+      - run: npm install -g npm@11
       - run: npm run build
       - run: npm publish --access public --provenance
         env:
@@ -57,16 +78,23 @@ jobs:
           # prepublishOnly. This step only runs after the npm-publish-prod
           # environment-approval gate, so a human has confirmed intent.
           SWFTE_PUBLISH_CONFIRMED: '1'
+          # ENVIRONMENT secret (npm-publish-prod), not a repository secret: only this job, after the
+          # reviewer gate, can read it. Delete it once trusted publishing is configured for the
+          # package (npmjs.com -> package -> Settings -> Trusted publisher: SwfteAI/swfte-mcp-server,
+          # release.yml, environment npm-publish-prod); npm then authenticates by OIDC.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   docker-publish:
     runs-on: ubuntu-latest
     needs: npm-publish
+    permissions:
+      contents: read
+      packages: write
     environment:
       name: docker-publish-prod
       url: https://hub.docker.com/r/swfte/mcp-server
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Resolve version
         id: meta
@@ -88,24 +116,24 @@ jobs:
           echo "tag=$TAG"        >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push (multi-arch)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64

@@ -32,19 +32,21 @@
     "url": "https://www.swfte.com"
   },
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
   "bin": {
     "swfte-mcp-server": "dist/index.js",
     "mcp-server": "dist/index.js",
     "swfte": "dist/swfte.js"
   },
   "files": [
-    "bin",
     "dist",
-    "docs",
+    "docs/ATTACH.md",
+    "docs/RECIPES.md",
+    "docs/REGISTRIES.md",
+    "docs/TOOLS.md",
     "README.md",
     "ABOUT.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
     "LICENSE",
     "src/preflight"
   ],
@@ -70,7 +72,7 @@
     "verify:offline": "npm run typecheck && npm test && npm run preflight:mutation && npm run build && node --import tsx scripts/protocol-smoke.ts && node scripts/package-smoke.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.10.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "fflate": "^0.8.3",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.23.5"

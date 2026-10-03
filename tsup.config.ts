@@ -9,6 +9,10 @@ export default defineConfig({
   clean: true,
   dts: true,
   sourcemap: true,
+  // Maps ship for stack traces only: no sourcesContent, so the tarball carries no second copy of the source and no absolute paths.
+  esbuildOptions(options) {
+    options.sourcesContent = false;
+  },
   splitting: false,
   shims: false,
   banner: { js: '#!/usr/bin/env node' },

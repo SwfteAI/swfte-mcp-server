@@ -1,9 +1,19 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
-import { join, dirname, relative, resolve, sep } from 'node:path';
-import { assertLocalFilesystem, confineDirectory, confinementRoot, confinePath, PathConfinementError } from '../fsguard.js';
+import { randomBytes } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { assertLocalFilesystem, assertNoSecrets, ConfinedWriter, confineDirectory, confinementRoot, confinePath, denyReason, OverwriteRefusedError, PathConfinementError } from '../fsguard.js';
 import { z } from 'zod';
-import { unzipSync, zipSync } from 'fflate';
+import { unzipSync, zipSync, type Unzipped } from 'fflate';
 import type { ToolDefinition } from './_types.js';
+import { SwfteApiError, type SwfteClient } from '../client.js';
+
+const TRANSLATION_NEXT_STEP = 'Keep this workflow hosted and invoke it through its contract, or simplify the listed nodes before exporting source.';
+
+function translationRefusal(error: unknown, client: SwfteClient): Record<string, unknown> | null {
+  if (!(error instanceof SwfteApiError) || error.status !== 422 || !Array.isArray(error.envelope.refusals)) return null;
+  return { refused: true, code: 'TRANSLATION_REFUSED', refusals: client.redactErrorValue(error.envelope.refusals),
+    warnings: client.redactErrorValue(error.envelope.warnings ?? []), nextStep: TRANSLATION_NEXT_STEP };
+}
 
 const EXEC = '/v2/workflows/execution';
 
@@ -22,10 +32,41 @@ function safeJoin(root: string, entry: string): string {
   return target;
 }
 
+/** Upper bounds on what one export may unpack: entry count, any single file, and the total. */
+export const EXPORT_LIMITS = { maxEntries: 5_000, maxFileBytes: 64 * 1024 * 1024, maxTotalBytes: 256 * 1024 * 1024 };
+
+/**
+ * Unzip server bytes, refusing a zip bomb: the sizes the archive declares are checked
+ * before any entry is inflated, and the inflated sizes are checked again afterwards.
+ */
+export function unzipCapped(bytes: Uint8Array, limits: typeof EXPORT_LIMITS = EXPORT_LIMITS): Unzipped {
+  let entries = 0;
+  let total = 0;
+  const tooBig = (what: string): never => {
+    throw new Error(`Refusing to unpack the export: ${what} exceeds the safety limit (${limits.maxEntries} files, ${limits.maxFileBytes} bytes per file, ${limits.maxTotalBytes} bytes total).`);
+  };
+  const out = unzipSync(bytes, {
+    filter: (f) => {
+      entries += 1;
+      total += f.originalSize;
+      if (entries > limits.maxEntries) tooBig('the number of files');
+      if (f.originalSize > limits.maxFileBytes) tooBig(`"${f.name}"`);
+      if (total > limits.maxTotalBytes) tooBig('the unpacked size');
+      return true;
+    },
+  });
+  let actual = 0;
+  for (const [name, data] of Object.entries(out)) {
+    actual += data.length;
+    if (data.length > limits.maxFileBytes || actual > limits.maxTotalBytes) tooBig(`"${name}"`);
+  }
+  return out;
+}
+
 function walk(dir: string, root = dir, acc: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
-    // Never ship build output, VCS metadata or env files back to the server.
-    if (name === 'target' || name === '.git' || name === 'node_modules' || name.startsWith('.env') || name === EXPORT_MARKER) continue;
+    // Never ship build output, VCS metadata, env files or key material back to the server.
+    if (name === 'target' || name === 'node_modules' || name === EXPORT_MARKER || denyReason(name, 'read')) continue;
     const full = join(dir, name);
     // lstat, not stat: a symlink is never followed, so it cannot pull in a file
     // from outside the workspace.
@@ -53,8 +94,12 @@ function hasExportMarker(dir: string): boolean {
   }
 }
 
-/** Resolve an export destination under the working directory and clear it only if we own it. */
-export function prepareExportDest(destDir: string, overwrite: boolean | undefined): string {
+/**
+ * Resolve an export destination under the working directory. Nothing on disk changes here: with
+ * `overwrite` the previous export (only one we own, by marker) is replaced later, once the new one
+ * has been unpacked and validated in a sibling directory. `replacing` says that swap is needed.
+ */
+export function prepareExportDest(destDir: string, overwrite: boolean | undefined): { dest: string; replacing: boolean } {
   const dest = confinePath(destDir);
   if (dest === resolve(confinementRoot())) {
     throw new PathConfinementError('Refusing to export into the working directory itself: pass a subdirectory as destDir.');
@@ -69,11 +114,27 @@ export function prepareExportDest(destDir: string, overwrite: boolean | undefine
             'so it is not deleted. Choose a new destDir, or remove the directory yourself.'
         );
       }
-      rmSync(dest, { recursive: true, force: true });
+      return { dest, replacing: true };
     }
   }
   mkdirSync(dest, { recursive: true });
-  return dest;
+  return { dest, replacing: false };
+}
+
+/**
+ * Put `staged` in place of `dest` by rename (same parent, same filesystem). The previous directory is
+ * kept aside until the new one is in place and put back if that second rename fails.
+ */
+function swapDirectory(dest: string, staged: string): void {
+  const previous = join(dirname(dest), `${basename(dest)}.swfte-previous-${randomBytes(6).toString('hex')}`);
+  renameSync(dest, previous);
+  try {
+    renameSync(staged, dest);
+  } catch (error) {
+    renameSync(previous, dest);
+    throw error;
+  }
+  rmSync(previous, { recursive: true, force: true });
 }
 
 /**
@@ -97,40 +158,69 @@ export const codeTools: ToolDefinition[] = [
     title: 'Download the generated code workspace',
     group: 'workflows',
     description:
-      'Download an execution workflow as a real, editable Cargo workspace and unzip it locally: ' +
+      'Download an execution workflow, or an exactly translatable canvas workflow, as an editable Tier2 Rust source overlay and unzip it locally. ' +
+      'Compilation requires merging this overlay with the real Tier1 BuildX Rust service scaffold, including its SDK and build reconciliation; the ZIP alone is not a standalone Cargo workspace. ' +
       'Cargo.toml, build.rs, src/graph.rs, src/steps/*.rs, swfte-blueprint.json, docker-compose.yml. ' +
       'Each step file carries blueprint-step-id / blueprint-step-type headers and marked user regions ' +
       'that survive re-emit — edit inside those, then push back with swfte_sync_src. Returns the file ' +
       'tree plus the per-step headers so you know what you are looking at without reading every file.',
     inputSchema: z.object({
       workflowId: z.string(),
+      source: z.enum(['execution', 'canvas', 'auto']).default('auto')
+        .describe('auto tries execution first and canvas only after a 404. Canvas translation refuses unsupported semantics with the complete node list and writes nothing.'),
       destDir: z.string().describe('Subdirectory of the project to unzip into. Created if missing. Local (stdio) server only.'),
       overwrite: z
         .boolean()
         .optional()
-        .describe('Delete destDir first — only if a previous swfte_export_src created it (marker file). Off by default so local edits are not silently destroyed.'),
+        .describe('Replace destDir with the new export — only if a previous swfte_export_src created it (marker file). The new export is validated first and swapped in, so a refused download leaves the old one intact. Off by default so local edits are not silently destroyed.'),
+      force: z
+        .boolean()
+        .optional()
+        .describe('Replace files that already exist in destDir with the server copy (your local edits to them are lost). Off by default: a conflict refuses the whole export.'),
     }),
-    execute: async (input, { client, localFilesystem }) => {
+    execute: async (input, { client, config, localFilesystem }) => {
       assertLocalFilesystem(localFilesystem, 'swfte_export_src');
       // Validate the destination before downloading anything.
-      confinePath(input.destDir);
-      const { bytes, headers } = await client.getBinary(
-        `${EXEC}/${encodeURIComponent(input.workflowId)}/download-src`,
-        { timeoutMs: 180_000 }
-      );
+      confinePath(input.destDir, undefined, 'write');
+      const executionPath = `${EXEC}/${encodeURIComponent(input.workflowId)}/download-src`;
+      const canvasPath = `/v2/workflows/${encodeURIComponent(input.workflowId)}/export-src`;
+      let download: Awaited<ReturnType<typeof client.getBinary>>;
+      const source = input.source ?? 'auto';
+      try {
+        if (source === 'canvas') download = await client.getBinary(canvasPath, { timeoutMs: 180_000 });
+        else {
+          try { download = await client.getBinary(executionPath, { timeoutMs: 180_000 }); }
+          catch (error) {
+            if (source !== 'auto' || !(error instanceof SwfteApiError) || error.status !== 404) throw error;
+            download = await client.getBinary(canvasPath, { timeoutMs: 180_000 });
+          }
+        }
+      } catch (error) {
+        const refusal = translationRefusal(error, client);
+        if (refusal) return refusal;
+        throw error;
+      }
+      const { bytes, headers } = download;
 
-      const dest = prepareExportDest(input.destDir, input.overwrite);
+      const { dest, replacing } = prepareExportDest(input.destDir, input.overwrite);
 
-      const files = unzipSync(bytes);
+      const files = unzipCapped(bytes);
+      // overwrite: unpack and validate the new export in a sibling directory; the old one is swapped out
+      // only after every entry has passed the same checks, so a refused zip leaves it untouched.
+      const target = replacing ? join(dirname(dest), `${basename(dest)}.swfte-staging-${randomBytes(6).toString('hex')}`) : dest;
       const written: string[] = [];
       const steps: Array<{ file: string; stepId?: string; stepType?: string; userRegions: string[] }> = [];
 
+      // Every entry goes through the same writer as scaffold and wire: planned first,
+      // committed only if the whole plan is clean. A file already there is a conflict
+      // (never silently replaced), a symlink anywhere on the path is refused (never
+      // written through), and the deny-list and secret scan apply.
+      const writer = new ConfinedWriter({ forbidden: [config?.credential ?? ''] });
+      const destRel = relative(writer.root, target);
       for (const [name, data] of Object.entries(files)) {
         if (name.endsWith('/') || name === EXPORT_MARKER) continue;
-        // Re-confined per entry: a symlink already inside dest must not carry a write out of it.
-        const target = confinePath(safeJoin(dest, name));
-        mkdirSync(dirname(target), { recursive: true });
-        writeFileSync(target, data);
+        safeJoin(target, name); // zip-slip guard: the entry must stay inside the destination
+        writer.createBytes(writer.resolve(join(destRel, name)), data, input.force);
         written.push(name);
 
         if (name.startsWith('src/steps/') && name.endsWith('.rs') && !name.endsWith('mod.rs')) {
@@ -138,11 +228,24 @@ export const codeTools: ToolDefinition[] = [
           if (parsed.stepId) steps.push({ file: name, ...parsed });
         }
       }
-
-      writeFileSync(
-        join(dest, EXPORT_MARKER),
-        JSON.stringify({ writtenBy: 'swfte_export_src', workflowId: input.workflowId }, null, 2) + '\n'
+      writer.create(
+        writer.resolve(join(destRel, EXPORT_MARKER)),
+        JSON.stringify({ writtenBy: 'swfte_export_src', workflowId: input.workflowId }, null, 2) + '\n',
+        true
       );
+      try {
+        writer.commit();
+        if (replacing) swapDirectory(dest, target);
+      } catch (err) {
+        if (replacing) rmSync(target, { recursive: true, force: true });
+        if (err instanceof OverwriteRefusedError) {
+          throw new PathConfinementError(
+            `Refusing to overwrite existing file(s) in "${input.destDir}": ${err.files.join(', ')}. Nothing was written. ` +
+              'Choose a new destDir, pass force:true to replace just those files, or overwrite:true to replace a directory a previous swfte_export_src created.'
+          );
+        }
+        throw err;
+      }
 
       return {
         workflowId: input.workflowId,
@@ -151,6 +254,8 @@ export const codeTools: ToolDefinition[] = [
         // moved under me" — the two look identical in a diff otherwise.
         blueprintSha: headers['x-swfte-blueprint-sha'] || null,
         emitterVersion: headers['x-swfte-emitter-version'] || null,
+        translatorVersion: headers['x-swfte-translator-version'] || null,
+        sourceContentHash: headers['x-swfte-source-content-hash'] || null,
         fileCount: written.length,
         files: written.sort(),
         steps,
@@ -158,6 +263,23 @@ export const codeTools: ToolDefinition[] = [
           'Edit inside the marked user regions, then swfte_sync_src to push back. It dry-runs first ' +
           'and shows the BlueprintDiff before applying.',
       };
+    },
+  },
+
+  {
+    name: 'swfte_translate_check',
+    title: 'Check whether a canvas workflow can be exported as source',
+    group: 'workflows',
+    description: 'Read-only translation check. Returns every unsupported node and semantic mismatch; never creates an execution workflow or writes files.',
+    readOnly: true,
+    inputSchema: z.object({ workflowId: z.string().min(1) }),
+    execute: async (input, { client }) => {
+      const report = await client.request<Record<string, unknown>>({ method: 'POST',
+        path: `/v2/workflows/${encodeURIComponent(input.workflowId)}/translate-to-execution`,
+        query: { dryRun: true }, retries: 0 });
+      return report.translatable === false ? { ...report,
+        refusals: client.redactErrorValue(report.refusals ?? []), warnings: client.redactErrorValue(report.warnings ?? []),
+        nextStep: TRANSLATION_NEXT_STEP } : report;
     },
   },
 
@@ -176,7 +298,7 @@ export const codeTools: ToolDefinition[] = [
       srcDir: z.string().describe('The workspace directory previously produced by swfte_export_src, inside the project directory. Local (stdio) server only.'),
       apply: z.boolean().optional().describe('Actually commit the change. Default false (dry run).'),
     }),
-    execute: async (input, { client, localFilesystem }) => {
+    execute: async (input, { client, config, localFilesystem }) => {
       assertLocalFilesystem(localFilesystem, 'swfte_sync_src');
       const root = confineDirectory(input.srcDir);
       const blueprint = join(root, 'swfte-blueprint.json');
@@ -191,7 +313,10 @@ export const codeTools: ToolDefinition[] = [
       const entries: Record<string, Uint8Array> = {};
       for (const name of names) {
         // Zip entries must use forward slashes regardless of host platform.
-        entries[name.split(sep).join('/')] = new Uint8Array(readFileSync(join(root, name)));
+        const bytes = new Uint8Array(readFileSync(join(root, name)));
+        assertNoSecrets('to sync source content', Buffer.from(bytes).toString('utf8'), [config.credential]);
+        assertNoSecrets('to sync source bytes', Buffer.from(bytes).toString('latin1'), [config.credential]);
+        entries[name.split(sep).join('/')] = bytes;
       }
       const zipped = zipSync(entries);
 

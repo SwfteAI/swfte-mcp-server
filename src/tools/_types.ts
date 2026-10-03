@@ -29,6 +29,11 @@ export interface ToolDefinition<S extends ZodTypeAny = ZodTypeAny> {
    * Hints for MCP clients that surface them. `readOnly` lets a client skip
    * confirmation prompts; `destructive` earns one.
    */
+  /**
+   * Operator opt-in: the tool is not registered (so it cannot be listed or called,
+   * whatever SWFTE_TOOLS says) unless this ServerConfig flag is true.
+   */
+  requiresFlag?: 'allowGateDecisions';
   readOnly?: boolean;
   destructive?: boolean;
   execute: (input: z.infer<S>, ctx: ToolContext) => Promise<unknown>;

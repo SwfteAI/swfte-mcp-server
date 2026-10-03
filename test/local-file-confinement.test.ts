@@ -20,6 +20,7 @@ import { join, relative } from 'node:path';
 import { zipSync } from 'fflate';
 
 import { loadConfig } from '../src/config.js';
+import { SwfteClient } from '../src/client.js';
 import { buildServer } from '../src/server.js';
 import { createHttpHandler } from '../src/http.js';
 import { EXPORT_MARKER } from '../src/tools/code.js';
@@ -28,9 +29,13 @@ const config = () => loadConfig({ SWFTE_PAT: 'pat_test', SWFTE_TOOLS: 'all' } as
 
 /** A client that records every call. Any upload means the guard let a file through. */
 function fakeClient() {
+  const redactor = new SwfteClient(config());
   const calls: Array<{ method: string; args: unknown[] }> = [];
   const uploads: Array<{ name: string; bytes: string }> = [];
   const client = {
+    redactError(message: string) { return redactor.redactError(message); },
+    redactErrorValue<T>(value: T): T { return redactor.redactErrorValue(value); },
+    withErrorSecrets<T>(secrets: Array<string | undefined>, action: () => T): T { return redactor.withErrorSecrets(secrets, action); },
     calls,
     uploads,
     async postMultipart(path: string, form: FormData) {

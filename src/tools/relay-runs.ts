@@ -63,7 +63,8 @@ export const relayRunTools: ToolDefinition[] = [
   {
     name: 'swfte_relay_runs_gate_decide',
     title: 'Resolve a paused relay gate',
-    description: 'Approve, deny, or edit-and-approve a pending human-in-the-loop gate that paused a run before a gated tool call. Requires the relay-operator role and per-run workspace scope. Idempotent — resolving an already-decided gate returns the prior decision.',
+    requiresFlag: 'allowGateDecisions',
+    description: 'Operator opt-in (SWFTE_ALLOW_GATE_DECISIONS=1): a human approval is not something an agent should give itself. Approve, deny, or edit-and-approve a pending human-in-the-loop gate that paused a run before a gated tool call. Requires the relay-operator role and per-run workspace scope. Idempotent — resolving an already-decided gate returns the prior decision.',
     inputSchema: Workspace.extend({
       runId: z.string(),
       gateRequestId: z.string(),

@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ServerConfig } from './config.js';
+import { redactErrorValue, redactSecrets, withErrorSecrets } from './fsguard.js';
 
 export interface RequestOptions {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -119,6 +120,11 @@ function defaultExtract(page: any): unknown[] {
   return page?.content ?? page?.items ?? page?.data ?? page?.agents ?? page?.workflows ?? [];
 }
 
+/** Redirects are never followed: fetch would replay X-API-Key / X-Workspace-ID to another origin. */
+const isRedirect = (status: number): boolean => status >= 300 && status < 400;
+const BINARY_BODY_LIMIT = 32 * 1024 * 1024;
+const BINARY_ERROR_LIMIT = 1024 * 1024;
+
 export class OperationDeadlineError extends Error {
   constructor() { super('Operation time budget exhausted; an in-flight mutation may have committed. Inspect returned IDs before retrying.'); }
 }
@@ -147,6 +153,20 @@ export class SwfteClient {
 
   get configuredWorkspaceId(): string | undefined {
     return this.config.workspaceId;
+  }
+
+  /** Scrub this call's actual credential without exposing it to protocol handlers. */
+  redactError(message: string): string {
+    return redactSecrets(message, [this.config.credential]);
+  }
+
+  redactErrorValue<T>(value: T): T {
+    return redactErrorValue(value, (message) => this.redactError(message)) as T;
+  }
+
+  /** Include the resolved identity in request-local diagnostic and outbound-content guards. */
+  withErrorSecrets<T>(secrets: Array<string | undefined>, action: () => T): T {
+    return withErrorSecrets([this.config.credential, ...secrets], action);
   }
 
   async request<T = unknown>(opts: RequestOptions): Promise<T> {
@@ -189,7 +209,7 @@ export class SwfteClient {
     }
 
     if (this.config.debug) {
-      process.stderr.write(`[swfte-mcp] → ${opts.method} ${url}\n`);
+      process.stderr.write(this.redactError(`[swfte-mcp] → ${opts.method} ${url}\n`));
     }
 
     const controller = new AbortController();
@@ -198,17 +218,17 @@ export class SwfteClient {
     let res: Response;
     let text: string;
     try {
-      res = await fetch(url, { method: opts.method, headers, body, signal: controller.signal });
+      res = await fetch(url, { method: opts.method, headers, body, signal: controller.signal, redirect: 'manual' });
       text = await res.text();
     } finally {
       clearTimeout(timer);
     }
 
     if (this.config.debug) {
-      process.stderr.write(`[swfte-mcp] ← ${res.status} ${opts.method} ${opts.path}\n`);
+      process.stderr.write(this.redactError(`[swfte-mcp] ← ${res.status} ${opts.method} ${opts.path}\n`));
     }
 
-    const ok = res.ok || (opts.expectStatuses?.includes(res.status) ?? false);
+    const ok = (res.ok || (opts.expectStatuses?.includes(res.status) ?? false)) && !isRedirect(res.status);
     if (!ok) throw this.toApiError(res, text, opts);
 
     // A 202 Accepted for an async provision routinely carries an EMPTY body.
@@ -256,7 +276,8 @@ export class SwfteClient {
     } catch {
       // Non-JSON body. Most often an HTML error page from an edge/proxy hop —
       // truncate hard so a page of markup doesn't land in the model's context.
-      if (text) envelope = { body: text.length > 500 ? `${text.slice(0, 500)}…` : text };
+      const safeText = this.redactError(text);
+      if (safeText) envelope = { body: safeText.length > 500 ? `${safeText.slice(0, 500)}…` : safeText };
     }
 
     // Backends disagree on where the code lives; check every spelling we've seen.
@@ -265,18 +286,19 @@ export class SwfteClient {
       envelope.code ?? nested.code ?? (typeof envelope.error === 'string' ? envelope.error : '') ?? ''
     ) || `HTTP_${res.status}`;
 
-    const message =
-      String(envelope.message ?? nested.message ?? envelope.reason ?? '') ||
+    const message = isRedirect(res.status)
+      ? `${res.status} redirect on ${opts.method} ${opts.path} was not followed (credentials are only ever sent to the configured base URL). Check SWFTE_BASE_URL.`
+      : String(envelope.message ?? nested.message ?? envelope.reason ?? '') ||
       `${res.status} ${res.statusText} on ${opts.method} ${opts.path}`;
 
     return new SwfteApiError({
       status: res.status,
-      code,
-      message,
-      reason: typeof envelope.reason === 'string' ? envelope.reason : undefined,
-      envelope,
+      code: this.redactError(code),
+      message: this.redactError(message),
+      reason: typeof envelope.reason === 'string' ? this.redactError(envelope.reason) : undefined,
+      envelope: this.redactErrorValue(envelope),
       method: opts.method,
-      path: opts.path,
+      path: this.redactError(opts.path),
       suggestedAction: SUGGESTED_ACTIONS[code],
     });
   }
@@ -311,15 +333,15 @@ export class SwfteClient {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestBudget(opts.timeoutMs ?? 180_000));
     try {
-      const res = await fetch(url, { method: 'GET', headers, signal: controller.signal });
-      if (!res.ok) {
-        const text = await res.text();
+      const res = await fetch(url, { method: 'GET', headers, signal: controller.signal, redirect: 'manual' });
+      if (!res.ok || isRedirect(res.status)) {
+        const text = new TextDecoder().decode(await this.readBinaryBody(res, BINARY_ERROR_LIMIT, controller, path));
         throw this.toApiError(res, text, { method: 'GET', path });
       }
       const out: Record<string, string> = {};
       res.headers.forEach((v, k) => { out[k.toLowerCase()] = v; });
       return {
-        bytes: new Uint8Array(await res.arrayBuffer()),
+        bytes: await this.readBinaryBody(res, BINARY_BODY_LIMIT, controller, path),
         headers: out,
         contentType: res.headers.get('content-type') ?? '',
       };
@@ -327,6 +349,50 @@ export class SwfteClient {
       // Keep the deadline active until the streamed response body is consumed.
       clearTimeout(timer);
     }
+  }
+
+  /** Bound compressed bytes before ZIP parsing, and error bytes before JSON parsing. */
+  private async readBinaryBody(res: Response, limit: number, controller: AbortController, path: string): Promise<Uint8Array> {
+    const tooLarge = () => new SwfteApiError({
+      status: 413, code: 'RESPONSE_TOO_LARGE', message: 'The export response exceeds the download limit.', method: 'GET', path,
+    });
+    const declared = res.headers.get('content-length');
+    if (declared && /^\d+$/.test(declared) && Number(declared) > limit) {
+      controller.abort();
+      void res.body?.cancel().catch(() => undefined);
+      throw tooLarge();
+    }
+    if (controller.signal.aborted) throw controller.signal.reason;
+    if (!res.body) return new Uint8Array();
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    let abort!: () => void;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      abort = () => reject(controller.signal.reason ?? new Error('Export download cancelled.'));
+      controller.signal.addEventListener('abort', abort, { once: true });
+    });
+    try {
+      while (true) {
+        // Custom fetch implementations may not connect their stream to the signal.
+        const { done, value } = await Promise.race([reader.read(), cancelled]);
+        if (done) break;
+        total += value.byteLength;
+        if (total > limit) throw tooLarge();
+        chunks.push(value);
+      }
+    } catch (error) {
+      controller.abort();
+      void reader.cancel().catch(() => undefined);
+      throw error;
+    } finally {
+      controller.signal.removeEventListener('abort', abort);
+      reader.releaseLock();
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    return bytes;
   }
 
   /**
@@ -351,13 +417,13 @@ export class SwfteClient {
     let res: Response;
     let text: string;
     try {
-      res = await fetch(url, { method: 'POST', headers, body: form, signal: controller.signal });
+      res = await fetch(url, { method: 'POST', headers, body: form, signal: controller.signal, redirect: 'manual' });
       text = await res.text();
     } finally {
       clearTimeout(timer);
     }
 
-    if (!res.ok) throw this.toApiError(res, text, { method: 'POST', path });
+    if (!res.ok || isRedirect(res.status)) throw this.toApiError(res, text, { method: 'POST', path });
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
@@ -457,7 +523,7 @@ export class SwfteClient {
         // the deadline; `request` has already burned its own retry budget.
         if (this.config.debug) {
           process.stderr.write(
-            `[swfte-mcp] poll error (continuing): ${err instanceof Error ? err.message : String(err)}\n`
+            this.redactError(`[swfte-mcp] poll error (continuing): ${err instanceof Error ? err.message : String(err)}\n`)
           );
         }
       }

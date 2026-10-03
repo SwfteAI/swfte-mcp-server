@@ -525,7 +525,31 @@ function resolvedInvoke(spec: ClientSpec): CatalogContract['invoke'] {
   const self = new Set(['id', ...(SELF_PLACEHOLDERS[spec.kind] ?? [])]);
   const sub = (p: string) => p.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, k: string) => (self.has(k) ? encodeURIComponent(spec.id) : m));
   const inv = spec.contract.invoke;
-  return { ...inv, path: sub(String(inv.path ?? '')), statusPath: inv.statusPath ?? null };
+  if (inv.outputPath !== undefined && inv.outputPath !== null) {
+    if (!Array.isArray(inv.outputPath) || inv.outputPath.length === 0 || inv.outputPath.some((key) =>
+      typeof key !== 'string' || key.length === 0)) {
+      throw new Error('Refusing to generate a client: invoke.outputPath must be a nonempty list of JSON field names.');
+    }
+  }
+  const path = sub(String(inv.path ?? ''));
+  assertSafeInvokePath(path, 'invoke.path');
+  const statusPath = inv.statusPath ?? null;
+  if (statusPath !== null) assertSafeInvokePath(sub(String(statusPath)), 'invoke.statusPath');
+  return { ...inv, path, statusPath };
+}
+
+/**
+ * A contract path is appended to the caller's base URL. One that does not start with a
+ * single "/" (e.g. "@evil.example/x") can change the request host and send the caller's
+ * API key there, so a hostile or compromised catalog must not be able to emit one.
+ */
+const SAFE_INVOKE_PATH = /^\/[A-Za-z0-9/_\-.{}%~:?&=,+]*$/;
+export function assertSafeInvokePath(path: string, label = 'path'): void {
+  if (!SAFE_INVOKE_PATH.test(path) || path.startsWith('//') || path.includes('..')) {
+    throw new Error(
+      `Refusing to generate a client: the contract's ${label} is not a plain absolute path (got ${JSON.stringify(path.slice(0, 80))}). A path like this could send the API key to another host.`
+    );
+  }
 }
 
 function schemasFor(spec: ClientSpec) {
@@ -553,7 +577,7 @@ export function renderTypeScriptClient(spec: ClientSpec): string {
   return withChecksum(`// ${GENERATED_MARKER} (swfte add / swfte_scaffold_client). Do not edit by hand — run \`swfte sync\`.
 // Source of truth: Swfte Studio catalog entry ${tsComment(spec.catalogRef)}
 // Artifact: ${tsComment(spec.name)}${spec.description ? `\n// ${tsComment(spec.description)}` : ''}
-// Contract hash: ${spec.contractHash} (recorded in swfte.json; a different hash means the contract moved).${pinComment(spec, '//')}
+// Contract hash: ${tsComment(spec.contractHash)} (recorded in swfte.json; a different hash means the contract moved).${pinComment(spec, '//')}
 //
 // ${isPublic ? 'Public endpoint: no credential is sent.' : 'Server-side only: reads SWFTE_API_KEY from the environment. Never bundle this file into browser code.'}
 // Configure via .env: SWFTE_API_KEY, SWFTE_BASE_URL, SWFTE_WORKSPACE_ID.
@@ -643,6 +667,8 @@ async function call(opts: ClientOptions, method: string, path: string, body: unk
     }
   }
   let url = baseUrl + path;
+  // A path can never change the host: the API key only goes to the configured base origin.
+  if (new URL(url).origin !== new URL(baseUrl).origin) throw new Error(\`Refusing to send the request: \${path} leaves the base URL origin.\`);
   let payload: string | undefined;
   if (body !== undefined) {
     if (method === 'GET') {
@@ -658,9 +684,10 @@ async function call(opts: ClientOptions, method: string, path: string, body: unk
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1, deadline - Date.now()));
   try {
-    const res = await f(url, { method, headers, body: payload, signal: controller.signal });
+    // redirect: 'manual' keeps X-API-Key from following a redirect to another origin.
+    const res = await f(url, { method, headers, body: payload, signal: controller.signal, redirect: 'manual' });
     const text = await res.text();
-    if (!res.ok) throw new SwfteRequestError(res.status, text, path);
+    if (!res.ok || (res.status >= 300 && res.status < 400)) throw new SwfteRequestError(res.status, text, path);
     if (!text) return undefined;
     try {
       return JSON.parse(text);
@@ -673,7 +700,22 @@ async function call(opts: ClientOptions, method: string, path: string, body: unk
 }
 
 const statusOf = (s: any): string => String(s?.execution?.status ?? s?.status ?? 'UNKNOWN').toUpperCase();
-const outputOf = (s: any): unknown => s?.execution?.outputData ?? s?.outputData ?? s?.output ?? s?.result;
+const OUTPUT_PATH = ${JSON.stringify(inv.outputPath ?? null)} as readonly string[] | null;
+// A failed or cancelled run has no declared output: only a successful one must carry it.
+const outputOf = (s: any, strict: boolean): unknown => {
+  if (OUTPUT_PATH !== null) {
+    let value: unknown = s;
+    for (const key of OUTPUT_PATH) {
+      if (value === null || typeof value !== 'object' || Array.isArray(value) || !Object.prototype.hasOwnProperty.call(value, key)) {
+        if (!strict) return undefined;
+        throw new Error('The response does not contain the declared invoke.outputPath.');
+      }
+      value = (value as Record<string, unknown>)[key];
+    }
+    return value;
+  }
+  return s?.execution?.outputData ?? s?.outputData ?? s?.output ?? s?.result;
+};
 
 /**
  * ${tsComment(spec.description || `Call ${spec.name}.`)}
@@ -695,7 +737,7 @@ ${chat ? `    const reply = started?.content ?? started?.response;
     const snapshot = await call(opts, 'GET', statusPath, undefined, deadline);
     const status = statusOf(snapshot);
     if (TERMINAL.has(status) || WAITING.has(status)) {
-      return { ok: SUCCESS.has(status), status, executionId, output: outputOf(snapshot) as ${base}Output | undefined, raw: snapshot };
+      return { ok: SUCCESS.has(status), status, executionId, output: outputOf(snapshot, SUCCESS.has(status)) as ${base}Output | undefined, raw: snapshot };
     }
     if (Date.now() + (opts.pollIntervalMs ?? 2_000) > deadline) {
       throw new Error(\`Timed out waiting for execution \${executionId} (last status \${status}). It may still finish; poll \${statusPath}.\`);
@@ -743,7 +785,7 @@ export function renderPythonClient(spec: ClientSpec): string {
   return withChecksum(`# ${GENERATED_MARKER} (swfte add / swfte_scaffold_client). Do not edit by hand - run \`swfte sync\`.
 # Source of truth: Swfte Studio catalog entry ${pyComment(spec.catalogRef)}
 # Artifact: ${pyComment(spec.name)}${spec.description ? `\n# ${pyComment(spec.description)}` : ''}
-# Contract hash: ${spec.contractHash} (recorded in swfte.json; a different hash means the contract moved).${pinComment(spec, '#')}
+# Contract hash: ${pyComment(spec.contractHash)} (recorded in swfte.json; a different hash means the contract moved).${pinComment(spec, '#')}
 #
 # ${isPublic ? 'Public endpoint: no credential is sent.' : 'Server-side only: reads SWFTE_API_KEY from the environment.'}
 # Configure via .env: SWFTE_API_KEY, SWFTE_BASE_URL, SWFTE_WORKSPACE_ID. Standard library only (Python 3.8+).
@@ -808,6 +850,16 @@ def _fill(path: str, values: Dict[str, str]) -> str:
     return re.sub(r"\\{([A-Za-z_][A-Za-z0-9_]*)\\}", repl, path)
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect would carry X-API-Key to another origin; surface it as an error instead."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _call(method: str, path: str, body: Any, api_key: Optional[str], base_url: Optional[str], workspace_id: Optional[str], timeout_s: float) -> Any:
     base = (base_url or os.environ.get("SWFTE_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
     headers = {"Accept": "application/json", "X-Swfte-Client": SWFTE_CLIENT}
@@ -822,6 +874,9 @@ def _call(method: str, path: str, body: Any, api_key: Optional[str], base_url: O
             if ws:
                 headers["X-Workspace-ID"] = ws
     url = base + path
+    # A path can never change the host: the API key only goes to the configured base origin.
+    if urllib.parse.urlsplit(url)[:2] != urllib.parse.urlsplit(base)[:2]:
+        raise ValueError(f"Refusing to send the request: {path} leaves the base URL origin.")
     data = None
     if body is not None:
         if method == "GET":
@@ -833,7 +888,7 @@ def _call(method: str, path: str, body: Any, api_key: Optional[str], base_url: O
             data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=max(1.0, timeout_s)) as res:
+        with _OPENER.open(req, timeout=max(1.0, timeout_s)) as res:
             text = res.read().decode("utf-8")
     except urllib.error.HTTPError as err:
         raise SwfteRequestError(err.code, err.read().decode("utf-8", "replace"), path) from None
@@ -854,7 +909,19 @@ def _status(snapshot: Any) -> str:
     return "UNKNOWN"
 
 
-def _output(snapshot: Any) -> Any:
+_OUTPUT_PATH = ${inv.outputPath == null ? 'None' : JSON.stringify(inv.outputPath)}
+
+
+def _output(snapshot: Any, strict: bool = True) -> Any:
+    if _OUTPUT_PATH is not None:
+        value = snapshot
+        for key in _OUTPUT_PATH:
+            if not isinstance(value, dict) or key not in value:
+                if not strict:
+                    return None
+                raise ValueError("The response does not contain the declared invoke.outputPath.")
+            value = value[key]
+        return value
     if not isinstance(snapshot, dict):
         return None
     execution = snapshot.get("execution")
@@ -898,7 +965,7 @@ def ${fn}(
         snapshot = _call("GET", status_path, None, api_key, base_url, workspace_id, remaining)
         status = _status(snapshot)
         if status in TERMINAL or status in WAITING:
-            return {"ok": status in SUCCESS, "status": status, "execution_id": execution_id, "output": _output(snapshot), "reply": None, "raw": snapshot}
+            return {"ok": status in SUCCESS, "status": status, "execution_id": execution_id, "output": _output(snapshot, status in SUCCESS), "reply": None, "raw": snapshot}
         if time.monotonic() + poll_interval_s > deadline:
             raise TimeoutError(f"Timed out waiting for execution {execution_id} (last status {status}); poll {status_path}.")
         time.sleep(poll_interval_s)

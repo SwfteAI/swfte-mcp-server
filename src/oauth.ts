@@ -40,6 +40,7 @@ import type { OAuthClientInformationFull, OAuthTokens } from '@modelcontextproto
 
 import { SwfteApiError, SwfteClient } from './client.js';
 import { ConfigError, detectCredentialKind, type ServerConfig } from './config.js';
+import { redactSecrets } from './fsguard.js';
 
 /** How long a browser login may take, workspace picker included, before the state dies. */
 const LOGIN_STATE_TTL_MS = 15 * 60_000;
@@ -64,6 +65,44 @@ const VERIFICATION_CACHE_MAX = 500;
 
 /** Fallback lifetime reported to the client when the exchange does not state one. */
 const DEFAULT_TOKEN_LIFETIME_S = 90 * 24 * 60 * 60;
+
+/** A token envelope is small; bound bytes before buffering or diagnostic clipping. */
+const MAX_EXCHANGE_RESPONSE_BYTES = 16 * 1024;
+
+async function discardExchangeBody(response: Response): Promise<void> {
+  try { await response.body?.cancel(); } catch { /* Preserve the original refusal. */ }
+}
+
+async function readExchangeText(response: Response): Promise<string> {
+  const declared = response.headers.get('content-length');
+  if (declared !== null && (!/^\d+$/.test(declared) || !Number.isSafeInteger(Number(declared))
+      || Number(declared) > MAX_EXCHANGE_RESPONSE_BYTES)) {
+    await discardExchangeBody(response);
+    throw new Error('Token exchange response exceeds the byte limit or declares an invalid length.');
+  }
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) throw new Error('Token exchange response contains non-byte data.');
+      if (value.byteLength === 0) continue;
+      total += value.byteLength;
+      if (total > MAX_EXCHANGE_RESPONSE_BYTES) throw new Error('Token exchange response exceeds the byte limit.');
+      chunks.push(value.slice());
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch (error) {
+    try { await reader.cancel(); } catch { /* Preserve the original read failure. */ }
+    throw error;
+  } finally { reader.releaseLock(); }
+}
 
 /**
  * The identity probe. It is the cheapest authenticated call that proves the credential
@@ -456,7 +495,7 @@ export class SwfteOAuthProvider implements OAuthServerProvider {
       // from the query would make this an open redirector. Answer in place instead.
       return new Response(
         `Login could not be completed: the sign-in link is invalid or has expired (${
-          err instanceof Error ? err.message : 'unknown'
+          redactSecrets(err instanceof Error ? err.message : 'unknown', [rawState, this.opts.exchangeToken, this.opts.config.credential])
         }). Start again with \`claude mcp login\`.`,
         { status: 400, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } }
       );
@@ -469,9 +508,9 @@ export class SwfteOAuthProvider implements OAuthServerProvider {
     if (upstreamError) {
       // The user declined, or agents-service refused. That is an answer, and the client
       // is entitled to hear it rather than time out waiting on its loopback listener.
-      back.searchParams.set('error', upstreamError);
+      back.searchParams.set('error', redactSecrets(upstreamError, [this.opts.exchangeToken, this.opts.config.credential]));
       const description = url.searchParams.get('error_description');
-      if (description) back.searchParams.set('error_description', description);
+      if (description) back.searchParams.set('error_description', redactSecrets(description, [this.opts.exchangeToken, this.opts.config.credential]));
       return redirect(back.href);
     }
 
@@ -600,7 +639,7 @@ export class SwfteOAuthProvider implements OAuthServerProvider {
         throw new InvalidTokenError('The personal access token is invalid, expired, or revoked.');
       }
       throw new ServerError(
-        `Could not verify the credential: ${err instanceof Error ? err.message : String(err)}`
+        client.redactError(`Could not verify the credential: ${err instanceof Error ? err.message : String(err)}`)
       );
     }
 
@@ -703,7 +742,7 @@ export class SwfteOAuthProvider implements OAuthServerProvider {
       code = open<CodeEnvelope>(this.opts.signingSecret, authorizationCode, 'code', this.now);
     } catch (err) {
       throw new InvalidGrantError(
-        `Authorization code is invalid or expired (${err instanceof Error ? err.message : 'unknown'}).`
+        redactSecrets(`Authorization code is invalid or expired (${err instanceof Error ? err.message : 'unknown'}).`, [authorizationCode, this.opts.exchangeToken])
       );
     }
     if (code.c !== client.client_id) {
@@ -716,10 +755,12 @@ export class SwfteOAuthProvider implements OAuthServerProvider {
   }
 
   private async postExchange(upstreamCode: string): Promise<ExchangeResponse> {
+    const redact = (message: string) => redactSecrets(message, [upstreamCode, this.opts.exchangeToken, this.opts.config.credential]);
     let res: Response;
     try {
       res = await this.fetch(this.opts.exchangeUrl, {
         method: 'POST',
+        redirect: 'manual',
         headers: {
           'content-type': 'application/json',
           accept: 'application/json',
@@ -730,15 +771,22 @@ export class SwfteOAuthProvider implements OAuthServerProvider {
       });
     } catch (err) {
       throw new ServerError(
-        `Could not reach the token exchange: ${err instanceof Error ? err.message : String(err)}`
+        redact(`Could not reach the token exchange: ${err instanceof Error ? err.message : String(err)}`)
       );
     }
 
-    const text = await res.text();
+    if (res.status >= 300 && res.status < 400) {
+      await discardExchangeBody(res);
+      throw new ServerError('The token exchange redirected; the one-time code and service credential were not replayed.');
+    }
+    let text: string;
+    try { text = await readExchangeText(res); }
+    catch (err) { throw new ServerError(redact(`Could not read the token exchange response: ${err instanceof Error ? err.message : String(err)}`)); }
     if (!res.ok) {
       // The everyday case is a code that was already redeemed or has aged out — both are
       // the client's problem to retry, not a server fault, so they must not become 500s.
-      const detail = text.length > 300 ? `${text.slice(0, 300)}…` : text;
+      const safeText = redact(text);
+      const detail = safeText.length > 300 ? `${safeText.slice(0, 300)}…` : safeText;
       if (res.status >= 400 && res.status < 500) {
         throw new InvalidGrantError(`The login code was rejected (${res.status}): ${detail}`);
       }

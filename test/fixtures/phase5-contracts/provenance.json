@@ -1,0 +1,125 @@
+{
+  "backendCommit" : "e20181d3fcf447b74d53ca9ba3a3b9c4944da4dc",
+  "captureSourceSha256" : "c31622f83ac5797a5766b33f2718e7bb39dc7da0379afae49b10ff92bc00a0a5",
+  "cases" : [ {
+    "catalogRef" : "workflow:wf_1",
+    "file" : "workflow_wf_1.contract.json",
+    "kind" : "workflow",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "9c576a0e0f40307dc9b71effbcd456fbf028a33f97c130785ad827b76eb23fe6",
+    "variant" : "provider-everyKind"
+  }, {
+    "catalogRef" : "agent:agent_1",
+    "file" : "agent_agent_1.contract.json",
+    "kind" : "agent",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "995761093a1b8c97f9a2decda972b78337abd6de6c5e5e1d9344afad33dd27aa",
+    "variant" : "provider-everyKind"
+  }, {
+    "catalogRef" : "chatflow:chatflow_1",
+    "file" : "chatflow_chatflow_1.contract.json",
+    "kind" : "chatflow",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "1175f02ac64c3075c71181aca5229570d42fff380e62f8cb9a166b3f9535bf03",
+    "variant" : "provider-everyKind"
+  }, {
+    "catalogRef" : "widget:widget_1",
+    "file" : "widget_widget_1.contract.json",
+    "kind" : "widget",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "0e2318630aded54b7503de6bdfbc483b4edbfc2b3babe7f12f45c3c861dc0da1",
+    "variant" : "provider-everyKind"
+  }, {
+    "catalogRef" : "application:application_1",
+    "file" : "application_application_1.contract.json",
+    "kind" : "application",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "977031acf4b2e66d953778187bb6dc4f98d2543d6fc9873121bc2f14398fab84",
+    "variant" : "provider-everyKind"
+  }, {
+    "catalogRef" : "mcp-server:mcp-server_1",
+    "file" : "mcp-server_mcp-server_1.contract.json",
+    "kind" : "mcp-server",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "0f2d9c477b135bfddf95e12f311098bd127a5cf323e985f90110467c76a1ba42",
+    "variant" : "provider-everyKind"
+  }, {
+    "catalogRef" : "model:model_1",
+    "file" : "model_model_1.contract.json",
+    "kind" : "model",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "d103bd122c321358071227be04279dcc1b2e67e63ba6a3d9b8401d46ca81006a",
+    "variant" : "provider-everyKind"
+  }, {
+    "catalogRef" : "module:module_1",
+    "file" : "module_module_1.contract.json",
+    "kind" : "module",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "ecdfb93756d8ce43d2184de3a640c714a638af0797cdde5b441a4de3b529e969",
+    "variant" : "provider-everyKind"
+  }, {
+    "catalogRef" : "solution:solution_1",
+    "file" : "solution_solution_1.contract.json",
+    "kind" : "solution",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "36235e4327d8d64639446452991a61317fcaeb844fadf8030e5d0c21862fd36b",
+    "variant" : "provider-everyKind"
+  }, {
+    "catalogRef" : "model:gpt-4o-mini",
+    "file" : "model_gpt-4o-mini.contract.json",
+    "kind" : "model",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "c404c74c9cee4c74fe8979454b00ee514ad75840c85982dd9adc236cb3e17cc5",
+    "variant" : "provider-everyKind"
+  }, {
+    "catalogRef" : "workflow:wf_pub",
+    "file" : "workflow_wf_pub.contract.json",
+    "kind" : "workflow",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "a9a62b9b9d6d090988ccbe7c58887e31a89ef963fdcb0d06cc78c9cb104be0af",
+    "variant" : "provider-everyKind"
+  }, {
+    "catalogRef" : "spreadsheet:x_1",
+    "file" : "spreadsheet_x_1.contract.json",
+    "kind" : "spreadsheet",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "62f35b69779df6f1021cae8ad41d9643acd555bf0b2680d280c3fe9aea7f59de",
+    "variant" : "provider-everyKind"
+  }, {
+    "catalogRef" : "agent:ag_pub",
+    "file" : "agent_ag_pub_public-agent.contract.json",
+    "kind" : "agent",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "384376a7c2b778bd29c721134dffa475ebcee346ec09c6dac05f87f8b7a647d3",
+    "variant" : "public-agent"
+  }, {
+    "catalogRef" : "model:sdxl",
+    "file" : "model_sdxl_image-model.contract.json",
+    "kind" : "model",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "8a895be47be59af4e3d43126845c937cb1f2f8effdd9764fb0920dfca409cd74",
+    "variant" : "image-model"
+  }, {
+    "catalogRef" : "workflow:wf_1",
+    "file" : "workflow_wf_1_pinned-workflow.contract.json",
+    "kind" : "workflow",
+    "origin" : "actual backend CatalogContract record; SotContractProviderTest fixture factory and real SotCatalogContractProvider",
+    "sha256" : "1f83c8193272b4e90303b88b3c8e49f5eff0e007bf1cba87c35eabfb1cdbbb14",
+    "variant" : "pinned-workflow"
+  } ],
+  "derivedGoldenSha256" : "9c576a0e0f40307dc9b71effbcd456fbf028a33f97c130785ad827b76eb23fe6",
+  "format" : 1,
+  "mode" : "driver-captured-real-backend-records",
+  "sourceSha256" : {
+    "src/main/java/com/swfte/scp/agentservice/catalog/CatalogKind.java" : "03d0b4bb7f87bdb6c3597b5770714b8917c6f68810cf25de535bc289d6cafb43",
+    "src/main/java/com/swfte/scp/agentservice/catalog/contract/ContractHash.java" : "d5ddef165ea29cc2f102da4c8cbac1d5aac4c64e104b8f8a35ef9a4ba281d5ae",
+    "src/main/java/com/swfte/scp/agentservice/catalog/contract/ContractSnippets.java" : "1173354fdb5e66be4b59b503a637c95a2350fae43decfa144c342805638b348b",
+    "src/main/java/com/swfte/scp/agentservice/catalog/contract/SotCatalogContractProvider.java" : "bfa74e4412bfb34ad655e590e5ccc95c17c6c942cd4cec749caa957d51020036",
+    "src/main/java/com/swfte/scp/agentservice/catalog/contract/WorkflowSchemaDeriver.java" : "2ddbd48ee2b0de350d3230090b6fa83d75926f701d63dc297829b19e14e1e0fa",
+    "src/main/java/com/swfte/scp/agentservice/catalog/contract/WorkflowSchemaService.java" : "7ab60d4becbf79eb520cfdc0dffe00342524dbce2a390d484d41a3031669e451",
+    "src/main/java/com/swfte/scp/agentservice/catalog/model/CatalogContract.java" : "f0944014b2a1d9bb1d083eb2f858e20d4f956f3f8b690a15a7aa9195d3649b16",
+    "src/test/java/com/swfte/scp/agentservice/catalog/contract/SotContractProviderTest.java" : "2727e313f63911d5cf95a65ef329e6ee09853e1fe07a14d0fc66cebfc14adbdf",
+    "src/test/java/com/swfte/scp/agentservice/catalog/contract/SotDerivedFixtureGoldenTest.java" : "7f7a4847e903840b589f49d58a050f9cec7f7ae62a2a619296a39ab79adcb889",
+    "src/test/java/com/swfte/scp/agentservice/catalog/contract/SotSchemaDerivationTest.java" : "08d1abf733aaea15ee349e91af9b660f466552117662b99958fb173bb8f79de2"
+  }
+}

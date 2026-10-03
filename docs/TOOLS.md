@@ -1,7 +1,14 @@
 # Tool reference
 
-`@swfte/mcp-server` exposes **237 tools**, of which a curated **105** are
+`@swfte/mcp-server` exposes **241 tools**, of which a curated **109** are
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
+
+`swfte_translate_check` is a read-only dry-run POST to
+`/v2/workflows/{id}/translate-to-execution?dryRun=true`. `swfte_export_src`
+can select execution or canvas source; automatic selection tries execution
+first and falls back to `/v2/workflows/{id}/export-src` only on 404. A canvas
+422 refusal writes no local output. Local Nexus imports are restricted to
+stdio, preview by default, and never trust upstream status or confirmation.
 
 Tools that take a `workspaceId` only honour it for **API-key** credentials. A
 PAT carries its own workspace binding, injected server-side, and any value sent
@@ -16,6 +23,9 @@ alongside it is overridden.
 | `swfte_find_existing` | GET | `/v2/catalog/search` |
 | `swfte_get_context` | GET | `/v2/catalog/{kind}/{id}` + `/v2/catalog/{kind}/{id}/contract` |
 | `swfte_get_evidence` | GET | `/v2/catalog/{kind}/{id}` |
+| `swfte_get_decisions` | GET | `/v2/catalog/{kind}/{id}/decisions` |
+| `swfte_get_openapi` | GET | `/v2/catalog/{kind}/{id}/openapi` |
+| `swfte_ingest_decisions` | local preview / explicit POST | local Nexus read; only `apply:true` calls `/v2/catalog/{kind}/{id}/decisions/import` |
 | `swfte_trace_dependencies` | GET | `/v2/catalog/{kind}/{id}` (+ the artifact's own record; upstream scans `/v2/catalog/search`) |
 | `swfte_scaffold_client` | GET | `/v2/catalog/{kind}/{id}` + `/contract` — writes locally |
 | `swfte_embed_widget` | GET / POST | widgets: `/v2/catalog/{kind}/{id}/contract`; agents: markup calling `POST /v1/public/agents/{id}/chat` with a `swfte_pk_` embed key (optionally issued via `POST /v2/agents/{id}/embed-keys`) — writes locally |
@@ -161,7 +171,7 @@ Every rule has been shown to fail under a deliberate mutation
 no mutation can kill is reported BROKEN there rather than counted as passing.
 
 A rule that cannot run reports **skip**, and a skip is never a pass. See
-[PUBLISH-GATE.md](./PUBLISH-GATE.md) for the gate, its three verdicts, and the
+[src/preflight/README.md](../src/preflight/README.md) for the gate, its three verdicts, and the
 two overrides.
 
 ### What `swfte_verify` checks

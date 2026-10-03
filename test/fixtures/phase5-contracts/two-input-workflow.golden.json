@@ -1,0 +1,57 @@
+{
+  "catalogRef" : "workflow:wf_1",
+  "invoke" : {
+    "method" : "POST",
+    "path" : "/v2/workflows/wf_1/invoke",
+    "auth" : "api_key",
+    "async" : true,
+    "statusPath" : "/v2/workflows/executions/{executionId}/status",
+    "outputPath" : [ "execution", "outputData", "parameters", "end_1" ]
+  },
+  "inputSchema" : {
+    "additionalProperties" : true,
+    "properties" : {
+      "amount" : {
+        "type" : "number"
+      },
+      "customerEmail" : {
+        "description" : "Who to reply to",
+        "type" : "string"
+      }
+    },
+    "required" : [ "amount", "customerEmail" ],
+    "type" : "object"
+  },
+  "outputSchema" : {
+    "additionalProperties" : false,
+    "description" : "Outputs of END node 'end_1', reported by the status endpoint at execution.outputData.parameters[\"end_1\"].",
+    "properties" : {
+      "_end_time" : {
+        "description" : "ISO-8601 time the END node ran.",
+        "type" : "string"
+      },
+      "_workflow_completed" : {
+        "description" : "Set by the END node when the workflow finished.",
+        "type" : "boolean"
+      },
+      "amount" : {
+        "description" : "The 'amount' input, passed through.",
+        "type" : "number"
+      },
+      "summary" : {
+        "description" : "Value of variable 'summary' when the END node ran; its type is not declared."
+      }
+    },
+    "type" : "object"
+  },
+  "snippets" : {
+    "curl" : "# Run workflow Refund triage and wait for its result (publish it first: invoke runs the published version)\n# Requires curl 7.76+ and jq. Export SWFTE_API_KEY first.\nBASE_URL=\"https://api.example.test/agents\"\n(\nEXECUTION_ID=$(curl -sS --fail-with-body -X POST \"$BASE_URL/v2/workflows/wf_1/invoke\" \\\n  -H \"Authorization: Bearer $SWFTE_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"amount\":1,\"customerEmail\":\"example customerEmail\"}' | jq -r '.executionId // empty')\n[ -n \"$EXECUTION_ID\" ] || { echo \"invoke failed\" >&2; exit 1; }\nwhile :; do\n  RESULT=$(curl -sS --fail-with-body \"$BASE_URL/v2/workflows/executions/${EXECUTION_ID}/status\" -H \"Authorization: Bearer $SWFTE_API_KEY\") || exit 1\n  STATUS=$(printf '%s' \"$RESULT\" | jq -r '.execution.status')\n  case \"$STATUS\" in PENDING|RUNNING|QUEUED) sleep 2 ;; *) break ;; esac\ndone\ncase \"$STATUS\" in SUCCESS|SUCCEEDED|COMPLETED) ;; *) echo \"Execution $EXECUTION_ID ended $STATUS\" >&2; exit 1 ;; esac\nprintf '%s' \"$RESULT\" | jq '.execution.outputData.parameters[\"end_1\"]'\n)\n",
+    "typescript" : "// Run workflow Refund triage and wait for its result (publish it first: invoke runs the published version)\n// Node 18+ (global fetch). Run with: npx tsx swfte-call.ts  (export SWFTE_API_KEY first)\nconst BASE_URL = \"https://api.example.test/agents\";\nconst headers: Record<string, string> = {\n  Authorization: `Bearer ${process.env.SWFTE_API_KEY}`,\n  \"Content-Type\": \"application/json\",\n};\n\nasync function main() {\n  const res = await fetch(`${BASE_URL}/v2/workflows/wf_1/invoke`, {\n    method: \"POST\",\n    headers,\n    body: JSON.stringify({\n      \"customerEmail\": \"example customerEmail\",\n      \"amount\": 1\n    }),\n  });\n  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);\n  const { executionId } = await res.json();\n  let status = \"PENDING\";\n  let result: any;\n  while ([\"PENDING\", \"RUNNING\", \"QUEUED\"].includes(status)) {\n    await new Promise((resolve) => setTimeout(resolve, 2000));\n    const poll = await fetch(`${BASE_URL}/v2/workflows/executions/${encodeURIComponent(executionId)}/status`, { headers });\n    if (!poll.ok) throw new Error(`HTTP ${poll.status}: ${await poll.text()}`);\n    result = await poll.json();\n    status = result.execution?.status;\n  }\n  if (![\"SUCCESS\", \"SUCCEEDED\", \"COMPLETED\"].includes(status)) throw new Error(`Execution ${executionId} ended ${status}`);\n  console.log(result.execution.outputData?.parameters?.[\"end_1\"]);\n}\n\nmain().catch((err) => {\n  console.error(err);\n  process.exit(1);\n});\n",
+    "python" : "# Run workflow Refund triage and wait for its result (publish it first: invoke runs the published version)\n# pip install requests  (export SWFTE_API_KEY first)\nimport os\nimport time\n\nimport requests\n\nBASE_URL = \"https://api.example.test/agents\"\nAPI_KEY = os.environ[\"SWFTE_API_KEY\"]\nHEADERS = {\"Authorization\": f\"Bearer {API_KEY}\", \"Content-Type\": \"application/json\"}\n\nres = requests.post(f\"{BASE_URL}/v2/workflows/wf_1/invoke\", headers=HEADERS, json={\"customerEmail\": \"example customerEmail\", \"amount\": 1}, timeout=120)\nres.raise_for_status()\nexecution_id = res.json()[\"executionId\"]\nstatus, result = \"PENDING\", {}\nwhile status in (\"PENDING\", \"RUNNING\", \"QUEUED\"):\n    time.sleep(2)\n    poll = requests.get(f\"{BASE_URL}/v2/workflows/executions/{execution_id}/status\", headers=HEADERS, timeout=30)\n    poll.raise_for_status()\n    result = poll.json()\n    status = result[\"execution\"][\"status\"]\nif status not in (\"SUCCESS\", \"SUCCEEDED\", \"COMPLETED\"):\n    raise RuntimeError(f\"Execution {execution_id} ended {status}\")\nparams = (result[\"execution\"].get(\"outputData\") or {}).get(\"parameters\") or {}\nprint(params.get(\"end_1\"))\n",
+    "mcp" : "# Give Claude Code the Swfte MCP server (it reads the key from your environment):\nclaude mcp add swfte -e SWFTE_API_KEY=\"$SWFTE_API_KEY\" -e SWFTE_BASE_URL=\"https://api.example.test/agents\" -- npx -y @swfte/mcp-server\n\n# Then, in your project, ask Claude:\n#   Use swfte_get_context on workflow:wf_1, then swfte_scaffold_client to generate a typed client for it in this repo and pin it in swfte.json.\n"
+  },
+  "embed" : null,
+  "contractHash" : "7ac54917f9f6ae55143f9d0dff90e8334bf54bf1ffebaec13e9d8c40c256438e",
+  "version" : "1.0.0",
+  "invokeUnavailableReason" : null
+}
