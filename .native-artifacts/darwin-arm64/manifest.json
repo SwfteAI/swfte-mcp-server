@@ -1,0 +1,25 @@
+{
+  "schema": "swfte-native-artifact/1",
+  "protocol": "SWFTE_CF1",
+  "wireVersion": 1,
+  "tuple": "darwin-arm64",
+  "bytes": 51880,
+  "sha256": "e2656fb9673b1e6fc643b2caef635b70f317b9ff3c495036cac540ce93f859ef",
+  "sourceSha256": "5f1c5a210b590036ab71d102f04fed7a413d654554f75bfe0e5a0de02fb93d82",
+  "compiler": "/usr/bin/clang",
+  "flags": [
+    "-std=c11",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-O2",
+    "-arch",
+    "arm64",
+    "-mmacosx-version-min=11.0"
+  ],
+  "producer": {
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "macosMinimum": "11.0"
+}
