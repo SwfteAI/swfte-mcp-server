@@ -341,7 +341,7 @@ PROPOSED decisions. Upstream human or model claims do not confirm them in
 Swfte. Hosted MCP sessions cannot read local Nexus data.
 
 `swfte_translate_check` checks canvas translation without exporting files.
-`swfte_export_code` accepts `source: execution | canvas | auto` (default
+`swfte_export_src` accepts `source: execution | canvas | auto` (default
 `auto`): an execution artifact's 404 triggers one canvas export attempt.
 Unsupported canvas nodes produce the complete refusal list and write no
 destination files. The initial translator supports exact INPUT-to-OUTPUT

@@ -28,7 +28,17 @@ First release published to npm (the `v0.1.0` tag was never published).
 - `SWFTE_BASE_URL` must be https, or http on loopback (override: `SWFTE_ALLOW_INSECURE_BASE_URL=1`).
 - Windows browser launch uses `rundll32` instead of `cmd /c start`.
 - Fatal errors are redacted before they reach stderr.
+- Every configured credential, including short ones and their JSON-escaped and percent-encoded forms, is scrubbed from
+  errors, diagnostics and the CLI/stdio fatal paths, and refused in uploaded or exported files.
+- `swfte_export_src` with `overwrite: true` validates the new export in a sibling directory and swaps it in; a refused
+  download no longer deletes the previous export.
+- `swfte_get_openapi` results carry the untrusted-content advisory.
 - Dependency advisories fixed (`npm audit --omit=dev` is clean; CI enforces it).
+
+### Added
+
+- Generated TypeScript and Python clients follow the backend's `invoke.outputPath` to the declared workflow output.
+- `scripts/sync-derived-fixture.mjs` syncs and verifies the G3 golden against an agents-service checkout.
 
 ### Packaging and release
 

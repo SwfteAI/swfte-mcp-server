@@ -4,7 +4,7 @@
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
 
 `swfte_translate_check` is a read-only dry-run POST to
-`/v2/workflows/{id}/translate-to-execution?dryRun=true`. `swfte_export_code`
+`/v2/workflows/{id}/translate-to-execution?dryRun=true`. `swfte_export_src`
 can select execution or canvas source; automatic selection tries execution
 first and falls back to `/v2/workflows/{id}/export-src` only on 404. A canvas
 422 refusal writes no local output. Local Nexus imports are restricted to
