@@ -309,6 +309,23 @@ export const shipTools: ToolDefinition[] = [
     execute: async (input, { client }) => {
       const adapter = requireVerb(input.kind, 'refine');
       const result = (await adapter.refine(client, input.artifact, input.feedback)) as any;
+      if (input.kind === 'workflow') {
+        const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+        const own = (key: string, accepts: (value: unknown) => boolean) => !Object.hasOwn(result, key) || result[key] === null || accepts(result[key]);
+        const valid = record(result) && typeof result.status === 'string' && !!result.status.trim()
+          && ['validationAvailable', 'retryable'].every(key => own(key, value => typeof value === 'boolean'))
+          && ['retryableReason', 'userMessage'].every(key => own(key, value => typeof value === 'string'))
+          && ['needsInput', 'needsAttention', 'repairs', 'findings'].every(key => own(key, value => Array.isArray(value) && value.every(record)));
+        if (!valid) return { refined: false, reason: 'INVALID_WIZARD_RESPONSE',
+          ...(record(result) && typeof result.status === 'string' && result.status.trim() ? { status: result.status } : {}) };
+        const outcome: Record<string, unknown> = {};
+        for (const key of ['needsInput', 'needsAttention', 'repairs', 'userMessage', 'validationAvailable', 'retryableReason', 'retryable', 'findings']) {
+          if (Object.hasOwn(result, key)) outcome[key] = result[key];
+        }
+        if (!Object.hasOwn(result, 'generatedWorkflow') || !record(result.generatedWorkflow))
+          return { refined: false, reason: 'INVALID_WIZARD_RESPONSE', status: result.status, ...outcome };
+        return { refined: true, status: result.status, message: result.message, artifact: result.generatedWorkflow, ...outcome };
+      }
       return {
         refined: true,
         status: result?.status,

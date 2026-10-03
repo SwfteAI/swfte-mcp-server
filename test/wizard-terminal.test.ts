@@ -77,19 +77,21 @@ function progress(extra: Record<string, unknown> = {}) {
   };
 }
 
-type Seen = { method: string; path: string; body: unknown };
+type Seen = { method: string; path: string; body: unknown; workspace?: string; authorization?: string };
 type Harness = {
   seen: Seen[];
   polls: () => number;
-  call: (tool: 'swfte_build' | 'swfte_build_status', waitMs?: number, autoCreate?: boolean) => Promise<any>;
+  call: (tool: 'swfte_build' | 'swfte_build_status' | 'swfte_refine', waitMs?: number, autoCreate?: boolean) => Promise<any>;
 };
 
 async function withTransport(
   snapshots: Array<Record<string, unknown>>,
   action: (harness: Harness) => Promise<void>,
+  refine?: { responses: unknown[]; kind?: 'workflow' | 'agent' },
 ) {
   const seen: Seen[] = [];
   let polls = 0;
+  let refinements = 0;
   async function handle(req: IncomingMessage, res: ServerResponse) {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
@@ -98,6 +100,8 @@ async function withTransport(
       method: req.method ?? '',
       path: new URL(req.url ?? '/', 'http://127.0.0.1').pathname,
       body: text ? JSON.parse(text) : undefined,
+      workspace: req.headers['x-workspace-id'] as string | undefined,
+      authorization: req.headers.authorization,
     };
     seen.push(entry);
     let body: unknown;
@@ -107,6 +111,8 @@ async function withTransport(
       body = { sessionId: SESSION };
     } else if (entry.method === 'GET' && entry.path === STATUS_PATH) {
       body = snapshots[Math.min(polls++, snapshots.length - 1)];
+    } else if (refine && entry.method === 'POST' && entry.path === `/v2/${refine.kind === 'agent' ? 'agents' : 'workflows'}/wizard/refine`) {
+      body = refine.responses[Math.min(refinements++, refine.responses.length - 1)];
     } else {
       status = 400;
       body = { code: 'UNEXPECTED_FIXTURE_REQUEST', message: entry.method + ' ' + entry.path };
@@ -135,10 +141,11 @@ async function withTransport(
     SWFTE_PAT: ['pat', 'wizard', 'transport', 'fixture'].join('_'),
     SWFTE_BASE_URL: 'http://127.0.0.1:' + (http.address() as AddressInfo).port,
     SWFTE_TELEMETRY: '0',
+    SWFTE_WORKSPACE_ID: 'ws-refine-fixture',
     SWFTE_TOOLS: 'core',
   } as never);
   const swfte = new SwfteClient(config);
-  const tools = shipTools.filter(tool => tool.name === 'swfte_build' || tool.name === 'swfte_build_status');
+  const tools = shipTools.filter(tool => tool.name === 'swfte_build' || tool.name === 'swfte_build_status' || tool.name === 'swfte_refine');
   const server = buildServer({ config, tools, resolveClient: () => swfte });
   const mcp = new Client({ name: 'wizard-transport-test', version: '1.0.0' });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
@@ -150,7 +157,9 @@ async function withTransport(
       call: async (tool, waitMs = 8_000, autoCreate = false) => {
         const result: any = await mcp.callTool({
           name: tool,
-          arguments: tool === 'swfte_build'
+          arguments: tool === 'swfte_refine'
+            ? { kind: refine?.kind ?? 'workflow', artifact: clone(GRAPH), feedback: 'Retain selected provider and improve the draft.' }
+            : tool === 'swfte_build'
             ? { kind: 'workflow', prompt: 'Build an isolated transport draft with the selected provider.', autoCreate, waitMs }
             : { kind: 'workflow', sessionId: SESSION, waitMs },
         });
@@ -388,4 +397,55 @@ test('nonterminal coverage timeout stays resumable and preserves partial graph c
     assert.equal(Object.hasOwn(result, 'artifact'), false);
     onlyWizardRequests(h, false);
   });
+});
+
+
+test('public workflow refine preserves outage choices and authenticated current graph', async () => {
+  const final={...unavailable(),findings:[{severity:'BLOCKING',nodeId:'review-node',field:'prompt'}]};
+  await withTransport([],async h=>{
+    const result=await h.call('swfte_refine');assert.equal(result.refined,true);assert.equal(result.status,'NEEDS_INPUT');
+    for(const key of ['needsInput','needsAttention','repairs','userMessage','validationAvailable','retryableReason','retryable','findings'] as const)assert.deepEqual(result[key],final[key]);
+    assert.equal(result.validationAvailable,false);assert.deepEqual(result.artifact,GRAPH);
+    assert.equal(h.seen.length,1);assert.equal(h.seen[0].path,'/v2/workflows/wizard/refine');assert.equal(h.seen[0].workspace,'ws-refine-fixture');assert.match(h.seen[0].authorization??'',/^Bearer /);
+    assert.deepEqual((h.seen[0].body as any).currentWorkflow,GRAPH);assert.equal((h.seen[0].body as any).feedback,'Retain selected provider and improve the draft.');
+  },{responses:[final]});
+});
+test('public workflow refine recovery uses only later actual clean response',async()=>{
+  await withTransport([],async h=>{
+    assert.equal((await h.call('swfte_refine')).validationAvailable,false);
+    const recovered=await h.call('swfte_refine');assert.equal(recovered.status,'READY');assert.equal(recovered.validationAvailable,true);assert.deepEqual(recovered.needsAttention,[]);assert.equal(Object.hasOwn(recovered,'retryableReason'),false);assert.equal(h.seen.length,2);
+  },{responses:[unavailable(),clean()]});
+});
+test('public workflow refine absent availability stays unknown and actual failed statuses remain',async()=>{
+  for(const status of ['INCOMPLETE','FAILED'])await withTransport([],async h=>{
+    const result=await h.call('swfte_refine');assert.equal(result.status,status);assert.equal(Object.hasOwn(result,'validationAvailable'),false);assert.deepEqual(result.artifact,GRAPH);assert.equal(h.seen.length,1);
+  },{responses:[{status,generatedWorkflow:GRAPH}]});
+});
+test('public workflow refine preserves explicit nullable outcome fields',async()=>{
+  const final={status:'NEEDS_INPUT',generatedWorkflow:GRAPH,needsInput:null,needsAttention:null,repairs:null,findings:null,userMessage:null,validationAvailable:null,retryableReason:null,retryable:null};
+  await withTransport([],async h=>{const result=await h.call('swfte_refine');for(const key of Object.keys(final).filter(k=>k!=='generatedWorkflow'))assert.deepEqual(result[key],(final as any)[key]);assert.equal(result.refined,true);}, {responses:[final]});
+});
+test('public workflow refine malformed response is refused without fabricated artifact',async()=>{
+  const invalid:unknown[]=[null,[],false,{status:''},{status:1},{status:'READY',validationAvailable:'true'},{status:'READY',retryable:1},{status:'READY',retryableReason:{}},{status:'READY',userMessage:[]},...['needsInput','needsAttention','repairs','findings'].flatMap(key=>[{status:'READY',[key]:{}},{status:'READY',[key]:[null]},{status:'READY',[key]:[[]]}])];
+  for(const value of invalid)await withTransport([],async h=>{const result=await h.call('swfte_refine');assert.equal(result.refined,false);assert.equal(result.reason,'INVALID_WIZARD_RESPONSE');assert.equal(Object.hasOwn(result,'artifact'),false);assert.equal(Object.hasOwn(result,'validationAvailable'),false);assert.equal(h.seen.length,1);},{responses:[value]});
+});
+test('public agent refine retains legacy nonworkflow response behavior',async()=>{
+  const agent={name:'Existing agent'};await withTransport([],async h=>{const result=await h.call('swfte_refine');assert.equal(result.refined,true);assert.equal(result.status,'READY');assert.deepEqual(result.artifact,agent);assert.equal(Object.hasOwn(result,'validationAvailable'),false);assert.equal(h.seen[0].path,'/v2/agents/wizard/refine');},{kind:'agent',responses:[{status:'READY',generatedAgent:agent}]});
+});
+
+test('public workflow refine malformed availability refuses a populated otherwise valid DTO',async()=>{
+  await withTransport([],async h=>{
+    const result=await h.call('swfte_refine');assert.equal(result.refined,false);assert.equal(result.reason,'INVALID_WIZARD_RESPONSE');assert.equal(result.status,'READY');assert.equal(Object.hasOwn(result,'artifact'),false);assert.equal(Object.hasOwn(result,'validationAvailable'),false);assert.equal(h.seen.length,1);
+  },{responses:[{...clean(),validationAvailable:'true'}]});
+});
+
+test('public workflow refine invalid explicit native artifact preserves actual outcome on refusal',async()=>{
+  const variants:Array<Record<string,unknown>>=[{}, {generatedWorkflow:null},{generatedWorkflow:'not a graph'},{generatedWorkflow:1},{generatedWorkflow:false},{generatedWorkflow:[]},{workflow:GRAPH}];
+  for(const artifact of variants) {
+    const {generatedWorkflow: _unused,...outcome}=unavailable();
+    await withTransport([],async h=>{
+      const result=await h.call('swfte_refine');assert.equal(result.refined,false);assert.equal(result.reason,'INVALID_WIZARD_RESPONSE');assert.equal(Object.hasOwn(result,'artifact'),false);assert.equal(result.status,'NEEDS_INPUT');
+      for(const key of ['needsInput','needsAttention','repairs','userMessage','validationAvailable','retryableReason','retryable'])assert.deepEqual(result[key],(outcome as any)[key]);assert.equal(h.seen.length,1);
+    },{responses:[{...outcome,...artifact}]});
+  }
 });
