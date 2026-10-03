@@ -10,6 +10,7 @@ import { releaseAnalysis as releaseTypeScriptAnalysis } from './detectors/ts/ind
 import { releaseAnalysis as releasePythonAnalysis } from './detectors/py/index.js';
 import { releaseAnalysis as releaseJavaAnalysis } from './detectors/java/index.js';
 import { cmp } from './fingerprint.js';
+import { NativeScanReader, withNativeScanReader } from './native-reader.js';
 import type { DetectedSite, Detector, Implementation, SourceFile } from './types.js';
 import {
   contextOf,
@@ -18,9 +19,8 @@ import {
   DEFAULT_MAX_FILES,
   DEFAULT_SKIP_DIRS,
   packageOf,
-  readSource,
-  scanReader,
-  walkProject,
+  readNativeSource,
+  walkProjectWithReader,
   type EnvFileRules,
 } from './walk.js';
 
@@ -55,15 +55,21 @@ function releaseSourceCaches(): void {
 }
 
 export async function detectProject(root: string, opts: DetectOptions = {}): Promise<DetectOutcome> {
+  try { return await withNativeScanReader(root, reader => detectProjectWithReader(reader, opts)); }
+  finally { releaseSourceCaches(); }
+}
+
+/** Never closes the borrowed native root, but always releases source/parser caches. */
+export async function detectProjectWithReader(reader: NativeScanReader, opts: DetectOptions = {}): Promise<DetectOutcome> {
   try {
-    return scanProject(root, opts);
+    return scanProject(reader, opts);
   } finally {
     // Empty scans and failures before the first detector are also privacy boundaries.
     releaseSourceCaches();
   }
 }
 
-function scanProject(root: string, opts: DetectOptions): DetectOutcome {
+function scanProject(reader: NativeScanReader, opts: DetectOptions): DetectOutcome {
   const detectors = opts.detectors ?? DETECTORS;
   const walkOpts = {
     skipDirs: opts.skipDirs ?? [...DEFAULT_SKIP_DIRS],
@@ -72,8 +78,7 @@ function scanProject(root: string, opts: DetectOptions): DetectOutcome {
     maxFileBytes: opts.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES,
     envFiles: opts.envFiles ?? DEFAULT_ENV_FILES,
   };
-  const walked = walkProject(root, walkOpts);
-  const reader = scanReader(root);
+  const walked = walkProjectWithReader(reader, walkOpts);
 
   const sites: Array<{ site: DetectedSite; order: number }> = [];
   const implementations: Implementation[] = [];
@@ -85,7 +90,7 @@ function scanProject(root: string, opts: DetectOptions): DetectOutcome {
 
   for (const entry of walked.files) {
     try {
-      const read = readSource(reader, entry, walkOpts);
+      const read = readNativeSource(reader, entry, walkOpts);
       if (!('text' in read)) {
         // A file that became unreadable or oversized after the walk leaves the map incomplete.
         if (read.skipped === 'unreadable') truncated = true;

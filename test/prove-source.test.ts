@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, mkdir, rename, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -26,12 +26,100 @@ test('secret refuses before consent or upload; key removed twin uploads exactly 
       status: 'PENDING', verdict: 'UNAVAILABLE', checks: [], findings: [], dependency_gaps: ['RUN_PENDING'], behavior_trace: [], explained: [] } as T;
   } };
   try {
+    await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'fixture', license: 'MIT' }));
     const key = ['AK', 'IA', 'A1B2C3D4E5F6G7H8'].join(''); await writeFile(join(root, 'source.ts'), `const credential = '${key}';`);
     const refused = await runSourceProof(client, { path: root, level: 'diff' }, { intake, learning: boundary });
     assert.equal('token' in refused && refused.token, 'PROOF_REFUSED'); assert.equal(uploads, 0); assert.equal(requests, 0);
     await writeFile(join(root, 'source.ts'), 'const total = 2;');
     const clean = await runSourceProof(client, { path: root, level: 'diff', requestedChecks: ['scan'] }, { intake, learning: boundary });
     assert.equal('token' in clean && clean.token, false); assert.equal(uploads, 1); assert.equal(requests, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('held upload reader admits exact nested bytes, refuses aliases and is revoked before POST', async () => {
+  const root = await fixture(); let retained: ((path: string) => Promise<Uint8Array>) | undefined;
+  let uploads = 0; let starts = 0;
+  const intake: SourceIntake = { resolveLevel: async () => 'tree', authorizeSource: async () => ({}),
+    prepareUpload: async ({ snapshot, readSource }) => {
+      uploads++; retained = readSource;
+      assert.equal(Buffer.from(await readSource('nested/value.ts')).toString(), 'safe');
+      await assert.rejects(readSource('../value.ts'), /refused/);
+      return { payloadRef: 'fixture_bytes', runKey: snapshot.run_key, manifest: snapshot.manifest };
+    } };
+  try {
+    await mkdir(join(root, 'nested')); await writeFile(join(root, 'nested/value.ts'), 'safe');
+    await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'fixture', license: 'MIT' }));
+    const result = await runSourceProof({ baseUrl: 'https://api.example.invalid', request: async <T>({ body }: { body?: unknown }) => {
+      starts++; await assert.rejects(retained!('nested/value.ts'), /ROOT_CLOSED/);
+      const request = body as { run_key: string };
+      return { schema: 'nexus.proof.v1', run_id: `pr_${'a'.repeat(64)}`, run_key: request.run_key, level: 'tree',
+        status: 'PENDING', verdict: 'UNAVAILABLE', checks: [], findings: [], dependency_gaps: ['RUN_PENDING'], behavior_trace: [], explained: [] } as T;
+    } }, { path: root, level: 'tree', requestedChecks: ['scan'] }, { intake, learning: boundary });
+    assert.equal('status' in result && result.status, 'PENDING'); assert.equal(uploads, 1); assert.equal(starts, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('actual native upload read fails closed for late parent and root replacement, before POST', async () => {
+  for (const replacement of ['parent', 'root']) {
+    const root = await fixture(); const outside = await mkdtemp(join(tmpdir(), 'prove-upload-outside-'));
+    let uploads = 0; let starts = 0; let retained: ((path: string) => Promise<Uint8Array>) | undefined;
+    const moved = `${root}-retained`;
+    try {
+      await mkdir(join(root, 'nested')); await writeFile(join(root, 'nested/value.ts'), 'safe');
+      // Same bytes defeat the hash-only twin: namespace confinement must cause the refusal.
+      await writeFile(join(outside, 'value.ts'), 'safe');
+      const intake: SourceIntake = { resolveLevel: async () => 'tree', authorizeSource: async () => ({}),
+        prepareUpload: async ({ readSource, snapshot }) => {
+          uploads++; retained = readSource;
+          assert.equal(Buffer.from(await readSource('nested/value.ts')).toString(), 'safe');
+          if (replacement === 'parent') {
+            await rename(join(root, 'nested'), join(root, 'retained')); await symlink(outside, join(root, 'nested'));
+          } else {
+            await rename(root, moved); await mkdir(root); await mkdir(join(root, 'nested'));
+            await writeFile(join(root, 'nested/value.ts'), 'safe');
+          }
+          // Check the immediate read, so later tree drift cannot masquerade as this control.
+          let refusal: unknown;
+          try { await readSource('nested/value.ts'); } catch (error) { refusal = error; }
+          assert(refusal instanceof Error, `late ${replacement} read must refuse before any later tree check`);
+          assert.match(refusal.message, replacement === 'parent' ? /SYMLINK_REFUSED/ : /STALE_CONTENT/);
+          throw refusal;
+        } };
+      await assert.rejects(runSourceProof({ baseUrl: 'https://api.example.invalid', request: async <T>() => { starts++; return {} as T; } },
+        { path: root, level: 'tree', requestedChecks: ['scan'] }, { intake, learning: boundary }), /SYMLINK_REFUSED|STALE_CONTENT/);
+      assert.equal(uploads, 1); assert.equal(starts, 0);
+      await assert.rejects(retained!('nested/value.ts'), /ROOT_CLOSED|STALE_CONTENT/);
+    } finally { await rm(root, { recursive: true, force: true }); await rm(moved, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
+  }
+});
+
+test('adapter mutation during awaited tree recheck cannot change the validated upload receipt sent to POST', async () => {
+  const root = await fixture(); let starts = 0; let mutated = false;
+  let admittedKey = ''; let originalManifest: TreeSnapshot['manifest'] | undefined;
+  const originalRef = 'fixture_admitted_payload';
+  const intake: SourceIntake = { resolveLevel: async () => 'diff', authorizeSource: async () => ({}),
+    prepareUpload: async ({ snapshot }) => {
+      admittedKey = snapshot.run_key;
+      originalManifest = JSON.parse(JSON.stringify(snapshot.manifest)) as TreeSnapshot['manifest'];
+      const payload = { payloadRef: originalRef, runKey: snapshot.run_key,
+        manifest: JSON.parse(JSON.stringify(snapshot.manifest)) as TreeSnapshot['manifest'] };
+      setImmediate(() => {
+        mutated = true; payload.payloadRef = 'fixture_other_payload';
+        payload.manifest.files[0]!.sha256 = 'f'.repeat(64);
+        payload.manifest.files.push({ path: 'unchecked.ts', sha256: 'e'.repeat(64), status: 'M' });
+        payload.manifest.lockfiles.push('unchecked.ts');
+      });
+      return payload;
+    } };
+  try {
+    const result = await runSourceProof({ baseUrl: 'https://api.example.invalid', request: async <T>({ body }: { body?: unknown }) => {
+      starts++; assert.equal(mutated, true, 'mutation must occur inside the awaited recheck window');
+      const sent = body as { payload_ref: string; manifest: TreeSnapshot['manifest']; run_key: string };
+      assert.equal(sent.payload_ref, originalRef); assert.deepEqual(sent.manifest, originalManifest); assert.equal(sent.run_key, admittedKey);
+      return { schema: 'nexus.proof.v1', run_id: `pr_${'a'.repeat(64)}`, run_key: sent.run_key, level: 'diff', status: 'PENDING',
+        verdict: 'UNAVAILABLE', checks: [], findings: [], dependency_gaps: ['RUN_PENDING'], behavior_trace: [], explained: [] } as T;
+    } }, { path: root, level: 'diff', requestedChecks: ['scan'] }, { intake, learning: boundary });
+    assert.equal('status' in result && result.status, 'PENDING'); assert.equal(starts, 1);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 test('missing07 and absent08 private-origin policy make zero remote requests', async () => {
@@ -67,15 +155,15 @@ test('tree edit during consent is stale and upload never starts', async () => {
     assert.equal(uploads, 0);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
-test('prohibited source license refuses the real upload boundary', async () => {
-  const root = await fixture(); let uploads = 0;
+test('scan-only prohibited source license refuses upload and POST', async () => {
+  const root = await fixture(); let uploads = 0; let starts = 0;
   const intake: SourceIntake = { resolveLevel: async () => 'tree', authorizeSource: async () => ({}),
     prepareUpload: async () => { uploads++; throw new Error('must not upload'); } };
   try {
     await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'fixture', license: 'Elastic-2.0' }));
-    const result = await runSourceProof({ baseUrl: 'https://api.example.invalid', request: async <T>() => ({} as T) },
-      { path: root, level: 'tree' }, { intake, learning: boundary });
-    assert(result.dependency_gaps.includes('SOURCE_LICENSE_REFUSED')); assert.equal(uploads, 0);
+    const result = await runSourceProof({ baseUrl: 'https://api.example.invalid', request: async <T>() => { starts++; return {} as T; } },
+      { path: root, level: 'tree', requestedChecks: ['scan'] }, { intake, learning: boundary });
+    assert(result.dependency_gaps.includes('SOURCE_LICENSE_REFUSED')); assert.equal(uploads, 0); assert.equal(starts, 0);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 test('hosted MCP refuses local source before touching server disk', async () => {

@@ -35,7 +35,9 @@ export interface VerdictResult { token: VerdictToken; exitCode: 0 | 1; reason?: 
 export interface SourceIntake {
   resolveLevel(path: string, requested?: ProofLevel): Promise<ProofLevel>;
   authorizeSource(input: { path: string; level: ProofLevel; destination: string }): Promise<unknown>;
-  prepareUpload(input: { path: string; level: ProofLevel; consent: unknown; snapshot: TreeSnapshot }):
+  /** snapshot.root is descriptive metadata. Source bytes must come exclusively from readSource. */
+  prepareUpload(input: { level: ProofLevel; consent: unknown; snapshot: TreeSnapshot;
+    readSource(path: string): Promise<Uint8Array> }):
     Promise<{ payloadRef: string; runKey: string; manifest: ProofManifest }>;
 }
 export interface ProofLearningBoundary {

@@ -36,8 +36,12 @@ test('local executes fixed check, reports absent build/test unknown and refuses 
     assert.equal(clean.checks.find(check => check.name === 'test')?.ok, null);
     assert.equal(clean.checks.find(check => check.name === 'local-diff')?.ok, true);
     await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'fixture', license: 'BUSL-1.1' }));
-    const prohibited = await runLocal(root);
+    const prohibited = await runLocal(root, ['scan']);
     assert.equal(prohibited.verdict, 'FAIL'); assert(prohibited.findings.some(finding => finding.rule_id === 'license-refused'));
+    assert.equal(prohibited.checks.some(check => check.name === 'deps'), false);
+    await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'fixture', license: 'MIT' }));
+    const scanOnly = await runLocal(root, ['scan']);
+    assert.equal(scanOnly.findings.length, 0); assert.equal(scanOnly.verdict, 'PARTIAL');
     await assert.rejects(runLocal(root, ['arbitrary-command']));
   } finally { await rm(root, { recursive: true, force: true }); }
 });

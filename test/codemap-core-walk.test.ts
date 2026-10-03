@@ -1,7 +1,7 @@
 /**
  * The confined walk (docs/codemap/CONTRACT.md §7, §2.1).
  *
- * Reads are observed, not inferred: fs.openSync / fs.readFileSync are spied for the tests that say a
+ * Reads are observed, not inferred: native read plus legacy fs reads are spied for tests that say a
  * file is never opened (.env, unsupported languages, symlink targets, a lock path that escapes the
  * root), so a walker that opened one and then discarded it would still fail.
  */
@@ -12,6 +12,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { PathConfinementError } from '../src/fsguard.js';
+import { NativeFilesystem, NativeFilesystemError } from '../src/native-filesystem.js';
 import {
   contextOf,
   DEFAULT_ENV_FILES,
@@ -37,11 +38,16 @@ function write(root: string, rel: string, text: string) {
   fs.writeFileSync(abs, text);
 }
 
-/** Every path handed to openSync / readFileSync while `fn` runs. */
+/** Every selected native read and separately scoped legacy pathname read while `fn` runs. */
 function opened<T>(fn: () => T): { result: T; paths: string[] } {
   const paths: string[] = [];
   const realOpen = fs.openSync as (...a: unknown[]) => number;
   const realRead = fs.readFileSync as (...a: unknown[]) => unknown;
+  const realNativeRead = NativeFilesystem.prototype.read;
+  const native = mock.method(NativeFilesystem.prototype, 'read', function(this: NativeFilesystem, rel: string, maxBytes?: number) {
+    paths.push(join(root, rel));
+    return realNativeRead.call(this, rel, maxBytes);
+  });
   const o = mock.method(fs, 'openSync', (p: fs.PathLike, ...rest: unknown[]) => {
     paths.push(String(p));
     return realOpen.call(fs, p, ...rest);
@@ -55,6 +61,7 @@ function opened<T>(fn: () => T): { result: T; paths: string[] } {
   } finally {
     o.mock.restore();
     r.mock.restore();
+    native.mock.restore();
   }
 }
 
@@ -202,8 +209,9 @@ describe('never opened', () => {
   });
 
   test('a home-directory or filesystem-root scan confines nothing and is refused', () => {
-    assert.throws(() => walkProject(homedir()), PathConfinementError);
-    assert.throws(() => walkProject('/'), PathConfinementError);
+    const refused = (error: unknown) => error instanceof NativeFilesystemError && error.code === 'PATH_REFUSED';
+    assert.throws(() => walkProject(homedir()), refused);
+    assert.throws(() => walkProject('/'), refused);
   });
 });
 

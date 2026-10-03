@@ -243,6 +243,7 @@ export async function uploadManifest(cfg: UploadConfig, repoId: string, manifest
   if (!REPO_ID_PATTERN.test(repoId)) throw new CodemapApiError(0, 'INVALID_REPO_ID', 'The repo id must be r_ + 32 hex.');
   const checked = checkManifest(manifest); // the allowlist, every time (a queued manifest included)
   const body = serializeManifest(checked);
+  const expectedCallSites = checked.callSites.length;
   if (checked.repo.id !== repoId) throw new CodemapApiError(0, 'REPO_MISMATCH', 'The manifest names a different repo than the upload path.');
   const raw = Buffer.from(body, 'utf8');
   const gzip = Boolean(opts.gzip);
@@ -254,9 +255,11 @@ export async function uploadManifest(cfg: UploadConfig, repoId: string, manifest
   }
   if (answer.status !== 200) throw apiError('POST', path, answer.status, answer.body);
   const b = answer.body;
-  if (!isObj(b) || (b.status !== 'stored' && b.status !== 'duplicate') || b.commitSha !== checked.commitSha || typeof b.callSites !== 'number' || !Number.isInteger(b.callSites) || b.callSites < 0) {
+  if (!isObj(b) || (b.status !== 'stored' && b.status !== 'duplicate') || b.commitSha !== checked.commitSha || typeof b.callSites !== 'number' || !Number.isInteger(b.callSites) || b.callSites < 0
+    || (b.status === 'stored' && b.callSites !== expectedCallSites)) {
     throw new CodemapApiError(200, 'UNEXPECTED_ANSWER', `POST ${path} answered 200 without a stored/duplicate receipt for this commit; nothing is reported as uploaded.`);
   }
+  // A stored receipt must agree with the manifest sent. A legacy duplicate never confirms its body.
   return { status: b.status, commitSha: checked.commitSha, callSites: b.callSites };
 }
 

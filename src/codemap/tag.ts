@@ -89,17 +89,48 @@ function jEdits(path: string, text: string, sites: AssignedSite[]): Edit[] {
     const call = matches[0]!;
     const args = argsOf(call);
     const tag = `com.swfte.sdk.CallSite.of("${id}")`;
-    const existing = args.find(arg => /^(?:com\.swfte\.sdk\.)?CallSite\.of\(/.test(arg.text));
-    if (existing) return { start: existing.startIndex, end: existing.endIndex, text: tag };
+    const explicitTag = (text: string) => /^(?:com\.swfte\.sdk\.)?CallSite\.of\(/.test(text);
     const name = nameOf(call);
+    if (name === 'startSession') {
+      const receiver = call.childForFieldName('object');
+      if (!receiver || receiver.type !== 'method_invocation' || nameOf(receiver) !== 'chatflows'
+        || argsOf(receiver).length !== 0 || !receiver.childForFieldName('object')) {
+        throw new Error('Unknown Java session receiver.');
+      }
+      if (!((args.length === 2 && !args.some(arg => explicitTag(arg.text)))
+        || (args.length === 3 && explicitTag(args[2]!.text)
+          && !args.slice(0, 2).some(arg => explicitTag(arg.text))))) {
+        throw new Error('Unknown Java session overload.');
+      }
+    }
+    const receiver = call.childForFieldName('object');
+    let resource = receiver && receiver.type === 'method_invocation' && argsOf(receiver).length === 0
+      && receiver.childForFieldName('object') ? nameOf(receiver) : '';
+    if (name === 'test') {
+      const owner = receiver?.childForFieldName('object');
+      resource = resource === 'builder' && owner?.type === 'method_invocation' && nameOf(owner) === 'chatflows'
+        && argsOf(owner).length === 0 && owner.childForFieldName('object') ? 'chatflows' : '';
+    }
+    const expected = name === 'chat' ? ['agents', 'agent']
+      : name === 'test' || name === 'startSession' ? ['chatflows', 'chatflow'] : ['workflows', 'workflow'];
+    if (resource !== expected[0] || site.artifact.kind !== expected[1]) throw new Error('Unknown Java SDK receiver.');
+    // Native overloads are admitted before the existing-tag shortcut. A tag in the ID,
+    // inputs, options or timing arguments cannot manufacture a valid final overload.
+    const plain: Record<string, number[]> = {
+      invoke: [2], invokeVersion: [3], invokeAndWait: [2, 4, 5], invokeVersionAndWait: [3, 6],
+      execute: [2, 3], chat: [2, 3], test: [2], startSession: [2],
+    };
+    const tagged: Record<string, number[]> = {
+      invoke: [3], invokeVersion: [4], invokeAndWait: [3, 5, 6], invokeVersionAndWait: [4, 7],
+      execute: [3, 4], chat: [4], test: [3], startSession: [3],
+    };
+    const tags = args.filter(arg => explicitTag(arg.text));
+    if (tags.length ? tags.length !== 1 || tags[0] !== args.at(-1) || !tagged[name]?.includes(args.length)
+      : !plain[name]?.includes(args.length)) throw new Error('Unknown Java native overload.');
+    const existing = tags[0];
+    if (existing) return { start: existing.startIndex, end: existing.endIndex, text: tag };
     let prefix = '';
     if (name === 'chat' && args.length === 2) prefix = ', null';
-    if (name === 'invokeAndWait' && args.length !== 2 && args.length !== 5) throw new Error('Unknown Java polling overload.');
-    if (name === 'invokeVersionAndWait' && args.length !== 3 && args.length !== 6) throw new Error('Unknown Java pinned polling overload.');
-    if (name === 'invokeVersion' && args.length !== 3) throw new Error('Unknown Java pinned invoke overload.');
-    if (name === 'invoke' && args.length !== 2) throw new Error('Unknown Java invoke overload.');
-    if (name === 'execute' && ![2, 3].includes(args.length)) throw new Error('Unknown Java execute overload.');
-    if (!['invoke', 'invokeAndWait', 'invokeVersion', 'invokeVersionAndWait', 'execute', 'chat', 'test'].includes(name)) throw new Error('Java SDK does not expose attribution for this method.');
     const argumentSpan = call.childForFieldName('arguments')!;
     return { start: argumentSpan.endIndex - 1, end: argumentSpan.endIndex - 1, text: `${prefix}, ${tag}` };
   }));

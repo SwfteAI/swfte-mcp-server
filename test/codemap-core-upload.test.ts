@@ -150,6 +150,36 @@ describe('uploadManifest', () => {
     assert.equal((await uploadManifest(cfg(f.fn), REPO, manifest())).status, 'duplicate');
   });
 
+  test('a stored receipt must acknowledge the count in the sent manifest, without an offline fallback', async () => {
+    for (const callSites of [0, 2]) {
+      let queued = 0;
+      const f = fakeFetch(() => json(200, { status: 'stored', commitSha: SHA, callSites }));
+      await assert.rejects(uploadManifest(cfg(f.fn), REPO, manifest(), {
+        queue: { enqueue: () => { queued++; return 'unexpected-queue'; } },
+      }), (e: unknown) => e instanceof CodemapApiError && e.code === 'UNEXPECTED_ANSWER' && e.status === 200);
+      assert.equal(f.calls.length, 1);
+      assert.equal(JSON.parse(Buffer.from(f.calls[0]!.init.body as Uint8Array).toString('utf8')).callSites.length, 1);
+      assert.equal(queued, 0, 'an inconsistent receipt is not an offline upload');
+    }
+  });
+
+  test('a genuine empty manifest can be acknowledged as stored with zero call sites', async () => {
+    const f = fakeFetch(() => json(200, { status: 'stored', commitSha: SHA, callSites: 0 }));
+    assert.deepEqual(await uploadManifest(cfg(f.fn), REPO, manifest({ callSites: [] })), {
+      status: 'stored', commitSha: SHA, callSites: 0,
+    });
+    assert.equal(f.calls.length, 1);
+    assert.equal(JSON.parse(Buffer.from(f.calls[0]!.init.body as Uint8Array).toString('utf8')).callSites.length, 0);
+  });
+
+  test('a legacy duplicate remains an unconfirmed duplicate even when its count differs', async () => {
+    const f = fakeFetch(() => json(200, { status: 'duplicate', commitSha: SHA, callSites: 2 }));
+    assert.deepEqual(await uploadManifest(cfg(f.fn), REPO, manifest()), {
+      status: 'duplicate', commitSha: SHA, callSites: 2,
+    });
+    assert.equal(f.calls.length, 1);
+  });
+
   test('gzip: Content-Encoding gzip and the decoded body is the serialized manifest', async () => {
     const f = fakeFetch(() => json(200, { status: 'stored', commitSha: SHA, callSites: 1 }));
     await uploadManifest(cfg(f.fn), REPO, manifest(), { gzip: true });

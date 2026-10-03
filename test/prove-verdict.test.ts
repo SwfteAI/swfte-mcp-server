@@ -11,17 +11,29 @@ import type { ProvingRunResult } from '../src/prove/types.js';
 const hash = 'a'.repeat(64);
 const positive = (): ProvingRunResult => ({ schema: 'nexus.proof.v1', run_id: `pr_${hash}`, run_key: hash, level: 'diff',
   status: 'COMPLETE', verdict: 'PASS', checks: [{ name: 'scan', ok: true, detail: 'fixture measurement', evidence_ref: 'scan_fixture' }],
-  findings: [], dependency_gaps: [], behavior_trace: [{ category: 'proof_admission', record_id: null, content_hash: hash }, { category: 'scan', record_id: 'scan_fixture', content_hash: hash }], explained: [],
+  findings: [], dependency_gaps: [], behavior_trace: [{ category: 'proof_admission', record_id: null, content_hash: hash }, { category: 'scan', record_id: 'scan_fixture', content_hash: hash },
+    { category: 'run_ledger', record_id: `pr_${hash}_a_${'b'.repeat(32)}:0`, content_hash: hash }], explained: [],
   evidence_record_id: 'cer_fixture' });
 const verification = () => ({ recordId: 'cer_fixture', signatureValid: true, status: 'VALID', fresh: true,
   recordedContentHash: hash, currentContentHash: hash });
 
-test('passing current server result requires real existing evidence verify response', async () => {
+test('gate fixture needs native attempt seal plus authoritative verdict and evidence freshness reads', async () => {
   const paths: string[] = [];
   const result = await readVerdict({ baseUrl: 'https://api.example.invalid', request: async <T>(options: { path: string }) => {
     paths.push(options.path); return (options.path.endsWith('/verify') ? verification() : positive()) as T;
   } }, hash, 'diff');
   assert.equal(result.token, 'PROOF_PASS'); assert.equal(result.exitCode, 0); assert.equal(paths.length, 2);
+});
+test('unsealed PASS and wrong or duplicate native attempt seals cannot reach gate PASS', async () => {
+  for (const traces of [positive().behavior_trace.filter(trace => trace.category !== 'run_ledger'),
+    [...positive().behavior_trace, positive().behavior_trace[2]!],
+    positive().behavior_trace.map(trace => trace.category === 'run_ledger' ? { ...trace, record_id: `pr_${'c'.repeat(64)}_a_${'b'.repeat(32)}:0` } : trace)]) {
+    const calls: string[] = [];
+    const result = await readVerdict({ baseUrl: 'https://api.example.invalid', request: async <T>({ path }: { path: string }) => {
+      calls.push(path); return { ...positive(), behavior_trace: traces } as T;
+    } }, hash, 'diff');
+    assert.equal(result.token, 'PROOF_UNPROVEN'); assert.deepEqual(calls, ['/v2/proving/runs/verdict']);
+  }
 });
 test('forged local PROOF_PASS is ignored; server fail remains fail and unreachable remains unproven', async () => {
   const root = await mkdtemp(join(tmpdir(), 'prove-forge-'));
@@ -64,7 +76,9 @@ test('executable verdict mutants are killed by assertions after clean positive a
   const root = await mkdtemp(join(tmpdir(), 'prove-verdict-mutants-'));
   const original = await readFile(new URL('../src/prove/verdict.ts', import.meta.url), 'utf8');
   const zodUrl = pathToFileURL(createRequire(import.meta.url).resolve('zod')).href;
-  const portable = original.replace("from 'zod'", `from '${zodUrl}'`);
+  // Temporary mutant still imports the actual shared decoder, rather than failing module loading.
+  const receiptUrl = new URL('../src/prove/receipt.ts', import.meta.url).href;
+  const portable = original.replace("from 'zod'", `from '${zodUrl}'`).replace("from './receipt.js'", `from '${receiptUrl}'`);
   const offline = { baseUrl: 'https://api.example.invalid', request: async () => { throw new Error('offline'); } };
   const failed = { baseUrl: offline.baseUrl, request: async <T>() => ({ ...positive(), verdict: 'FAIL' }) as T };
   const degradationOracle = async (read: typeof readVerdict): Promise<void> => {

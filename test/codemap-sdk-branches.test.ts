@@ -18,6 +18,7 @@ const sources = {
     "client.workflows.invokeVersion('wf_dynamic', requestedVersion, { third: 3 });",
     "client.workflows.invokeVersion('wf_invalid', 0, { fourth: 4 });",
     "client.workflows.invokeVersion('wf_string', '5', { fifth: 5 });",
+    "client.workflows.invokeVersion('wf_empty', '', { sixth: 6 });",
   ].join('\n') + '\n',
   'src/callers.py': [
     'from swfte import Swfte',
@@ -28,6 +29,7 @@ const sources = {
     "client.workflows.invoke_version('wf_dynamic', requested_version, {'third': 3})",
     "client.workflows.invoke_version('wf_invalid', 0, {'fourth': 4})",
     "client.workflows.invoke_version('wf_string', '5', {'fifth': 5})",
+    "client.workflows.invoke_version('wf_empty', '', {'sixth': 6})",
   ].join('\n') + '\n',
   'src/Callers.java': [
     'import com.swfte.sdk.SwfteClient;',
@@ -39,6 +41,7 @@ const sources = {
     'client.workflows().invokeVersion("wf_dynamic", requestedVersion, Map.of("third", 3));',
     'client.workflows().invokeVersion("wf_invalid", 0, Map.of("fourth", 4));',
     'client.workflows().invokeVersion("wf_string", "5", Map.of("fifth", 5));',
+    'client.workflows().invokeVersion("wf_empty", "", Map.of("sixth", 6));',
     '} }',
   ].join('\n') + '\n',
 };
@@ -46,21 +49,22 @@ const sources = {
 test('all three SDK version/wait/builder branches have correct pins, inputs and unknown-version refusal', async () => {
   const root = project(sources);
   try {
-    const result = await detectProject(root, { envFiles, locks: [], lockDir: null });
+    const result = await detectProject(root, { envFiles });
     const expected = [
       ['wf_pinned', '3', 'workflow', 'run', ['first']],
       ['wf_wait', '4', 'workflow', 'run', ['second']],
       ['cf_builder', null, 'chatflow', 'chat', ['question']],
       [null, null, 'workflow', 'run', ['third']],
       [null, null, 'workflow', 'run', ['fourth']],
-      [null, null, 'workflow', 'run', ['fifth']],
+      ['wf_string', '5', 'workflow', 'run', ['fifth']],
+      [null, null, 'workflow', 'run', ['sixth']],
     ];
     for (const path of Object.keys(sources)) {
       const sites = result.sites.filter(site => site.relPath === path).sort((a, b) => a.line - b.line);
-      assert.equal(sites.length, 6, path);
+      assert.equal(sites.length, 7, path);
       assert.deepEqual(sites.map(site => [site.artifact.id, site.artifact.pinnedVersion, site.artifact.kind, site.op, site.inputKeys]), expected, path);
-      assert.deepEqual(sites.map(site => site.artifact.unresolved), [false, false, false, true, true, true], path);
-      assert.deepEqual(sites.map(site => site.category), ['managed', 'managed', 'managed', 'dynamic', 'dynamic', 'dynamic'], path);
+      assert.deepEqual(sites.map(site => site.artifact.unresolved), [false, false, false, true, true, false, true], path);
+      assert.deepEqual(sites.map(site => site.category), ['managed', 'managed', 'managed', 'dynamic', 'dynamic', 'managed', 'dynamic'], path);
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -71,7 +75,7 @@ test('builder-shaped decoys on other resources and fork imports do not create ca
     'src/other.ts': "import Swfte from '@swfte/sdk';\nclient.workflows.builder.test('wf_wrong', {q:1});\nclient.chatflows.test('cf_wrong', {q:1});\n",
     'src/Other.java': 'import com.swfte.sdk.SwfteClient;\nclass Other { void run(SwfteClient c) { c.workflows().builder().test("wf_wrong", java.util.Map.of()); } }\n',
   });
-  try { assert.deepEqual((await detectProject(root, { envFiles, locks: [], lockDir: null })).sites, []); }
+  try { assert.deepEqual((await detectProject(root, { envFiles })).sites, []); }
   finally { rmSync(root, { recursive: true, force: true }); }
 });
 

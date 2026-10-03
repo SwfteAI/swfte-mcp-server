@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, symlink, rm, mkdir, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { canonicalTreeKey, excludedSourcePath, readSourceFile, sha256, treeKey, assertTreeUnchanged } from '../src/prove/treekey.js';
+import { canonicalTreeKey, excludedSourcePath, readSourceFile, sha256, treeKey, assertTreeUnchanged, ProofSourceRoot } from '../src/prove/treekey.js';
 const exec = promisify(execFile);
 
 async function repo(): Promise<string> {
@@ -51,9 +51,24 @@ test('source symlink to outside is refused with a safe file positive control', a
     await writeFile(join(outside, 'outside.txt'), 'private'); await writeFile(join(root, 'safe.ts'), 'safe');
     assert.equal(Buffer.from(await readSourceFile(root, 'safe.ts')).toString(), 'safe');
     await symlink(join(outside, 'outside.txt'), join(root, 'linked.ts'));
-    await assert.rejects(treeKey(root), /Symlinks/);
+    await assert.rejects(treeKey(root), /SYMLINK_REFUSED/);
     await assert.rejects(readSourceFile(root, '../outside.txt'), /refused/);
   } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
+});
+test('actual held native reader refuses late parent replacement after a nested positive', async () => {
+  const root = await repo(); const outside = await mkdtemp(join(tmpdir(), 'prove-late-parent-'));
+  let held: ProofSourceRoot | undefined;
+  try {
+    await mkdir(join(root, 'nested')); await writeFile(join(root, 'nested/value.ts'), 'safe');
+    await writeFile(join(outside, 'value.ts'), 'outside'); held = new ProofSourceRoot(root);
+    assert.equal(Buffer.from(await readSourceFile(held, 'nested/value.ts')).toString(), 'safe');
+    const snapshot = await treeKey(root, held);
+    assert.equal(snapshot.run_key, canonicalTreeKey([{ path: 'nested/value.ts', sha256: sha256('safe') }]));
+    await rename(join(root, 'nested'), join(root, 'retained'));
+    await symlink(outside, join(root, 'nested'));
+    await assert.rejects(readSourceFile(held, 'nested/value.ts'), /SYMLINK_REFUSED/);
+    await assert.rejects(assertTreeUnchanged(snapshot, held), /SYMLINK_REFUSED|STALE_CONTENT/);
+  } finally { held?.close(); await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
 });
 test('subdirectory and remote URL targets are not accepted as repository roots', async () => {
   await assert.rejects(treeKey('https://example.invalid/repo'), /local repository/);

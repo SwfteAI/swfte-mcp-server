@@ -28,8 +28,21 @@ export async function reportWatchAttempt(client: ProvingClient | undefined, resu
   }
   return outcome;
 }
+/** Numeric summaries only: details, paths and source strings never enter CLI measurement output. */
+function measurementLine(result: Extract<SourceProofResult, { token: string }>): string {
+  const passed = result.checks.filter(check => check.ok === true).length;
+  const failed = result.checks.filter(check => check.ok === false).length;
+  const unknown = result.checks.filter(check => check.ok == null).length;
+  const categories = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
+  const counts = categories.map(severity => `${severity.toLowerCase()}=${result.findings.filter(finding => finding.severity === severity).length}`);
+  counts.push(`other=${result.findings.filter(finding => !categories.includes(finding.severity)).length}`);
+  const prefix = result.level === 'local' && ['FAIL', 'PARTIAL'].includes(result.verdict)
+    ? `Local measurements: ${result.verdict} · checks ` : 'Source checks: ';
+  return `${prefix}passed=${passed} failed=${failed} unknown=${unknown} · findings ${counts.join(' ')}`;
+}
 /** Coordinator calls this from the shared CLI dispatcher; no module installs hooks or auto-starts. */
 export async function handleProveCommand(args: string[], context: ProveCliContext): Promise<number> {
+  if (context.signal?.aborted) return 1;
   const values = [...args];
   const subcommand = ['verdict', 'init-gate', 'watch'].includes(values[0] ?? '') ? values.shift()! : 'source';
   let path = context.cwd; let level: ProofLevel | undefined; let sessionId: string | undefined; let watch = false;
@@ -50,8 +63,9 @@ export async function handleProveCommand(args: string[], context: ProveCliContex
     try {
       const snapshot = await treeKey(path);
       const result = await readVerdict(context.client, snapshot.run_key, level ?? 'diff');
+      if (context.signal?.aborted) return 1;
       context.output(verdictLine(result)); return result.exitCode;
-    } catch { context.output('PROOF_UNPROVEN unproven: current tree could not be read'); return 1; }
+    } catch { if (!context.signal?.aborted) context.output('PROOF_UNPROVEN unproven: current tree could not be read'); return 1; }
   }
   if (subcommand === 'init-gate') {
     const result = await installProvingGate(path);
@@ -82,10 +96,13 @@ export async function handleProveCommand(args: string[], context: ProveCliContex
     if (context.signal?.aborted) return 1;
     if (!('token' in result) && result.verdict === 'PASS') {
       const verified = await readVerdict(context.client, result.run_key, result.level);
+      if (context.signal?.aborted) return 1;
       context.output(verdictLine(verified)); return verified.exitCode;
     }
+    if ('token' in result) context.output(measurementLine(result));
+    if (context.signal?.aborted) return 1;
     context.output('token' in result ? result.token + (result.dependency_gaps.length ? ` unproven: ${result.dependency_gaps.join(', ')}` : '')
       : `swfte · ${result.verdict} · tree ${result.run_key.slice(0, 12)}`);
     return 1;
-  } catch { context.output('PROOF_UNPROVEN unproven: source, consent or proving dependency unavailable'); return 1; }
+  } catch { if (!context.signal?.aborted) context.output('PROOF_UNPROVEN unproven: source, consent or proving dependency unavailable'); return 1; }
 }

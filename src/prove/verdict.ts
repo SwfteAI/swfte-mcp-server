@@ -1,28 +1,12 @@
 import { z } from 'zod';
 import type { RequestOptions } from '../client.js';
 import type { ProofLevel, ProvingRunResult, VerdictResult } from './types.js';
+import { decodeProvingReceipt, hasProvingGateSeal } from './receipt.js';
 
 export interface ProvingClient {
   readonly baseUrl: string;
   request<T = unknown>(options: RequestOptions): Promise<T>;
 }
-const Check = z.object({ name: z.string().min(1), ok: z.boolean().nullable(), detail: z.string(), evidence_ref: z.string().nullable().optional() });
-const Hash = z.string().regex(/^[a-f0-9]{64}$/u);
-const Trace = z.union([
-  z.object({ category: z.literal('proof_admission'), record_id: z.null().optional(), content_hash: Hash }),
-  z.object({ category: z.string().min(1).refine(value => value !== 'proof_admission'), record_id: z.string().min(1), content_hash: Hash }),
-]);
-const Result = z.object({
-  schema: z.literal('nexus.proof.v1'), run_id: z.string().regex(/^pr_[a-f0-9]{64}$/u), run_key: z.string().regex(/^[a-f0-9]{64}$/u),
-  level: z.enum(['local', 'manifest', 'diff', 'tree']), status: z.enum(['PENDING', 'COMPLETE']),
-  verdict: z.enum(['PASS', 'FAIL', 'PARTIAL', 'UNAVAILABLE']), checks: z.array(Check),
-  findings: z.array(z.object({ rule_id: z.string(), severity: z.string(), file: z.string(), line: z.number().int(),
-    message: z.string(), remediation: z.string(), evidence_ref: z.string().nullable().optional() })),
-  dependency_gaps: z.array(z.string()), behavior_trace: z.array(Trace),
-  explained: z.array(z.string()), confidence: z.number().finite().optional(), report_url: z.string().optional(),
-  evidence_record_id: z.string().optional(), review_packet_url: z.string().optional(),
-});
-
 export function assertProvingDestination(baseUrl: string): void {
   const url = new URL(baseUrl);
   if (url.username || url.password || url.search || url.hash) throw new Error('Invalid configured proving destination');
@@ -31,19 +15,7 @@ export function assertProvingDestination(baseUrl: string): void {
   }
 }
 export function parseRun(value: unknown, runKey: string, level: ProofLevel, expectedAdmissionHash?: string): ProvingRunResult {
-  const result = Result.parse(value);
-  if (result.run_key !== runKey || result.level !== level) throw new Error('STALE_CONTENT: result belongs to another tree');
-  const admissions = result.behavior_trace.filter(trace => trace.category === 'proof_admission');
-  const unmeasured = result.behavior_trace.length === 0 && result.verdict === 'UNAVAILABLE'
-    && result.dependency_gaps.length > 0 && result.checks.every(check => check.ok === null && !check.evidence_ref)
-    && !result.evidence_record_id;
-  if (admissions.length > 1 || (result.status === 'COMPLETE' && !unmeasured && admissions.length !== 1)
-    || (expectedAdmissionHash !== undefined && (!/^[a-f0-9]{64}$/u.test(expectedAdmissionHash)
-      || admissions.length !== 1 || admissions[0]!.content_hash !== expectedAdmissionHash))) {
-    throw new Error('Invalid sealed proof admission');
-  }
-  // The server canonical seal binds this hash. A client cannot recompute it from result fields alone.
-  return result;
+  return decodeProvingReceipt(value, { runKey, level, admissionHash: expectedAdmissionHash });
 }
 
 /** Read only the accepted run identity; never starts/uploads another run when polling. */
@@ -56,7 +28,10 @@ export async function readPendingRun(client: ProvingClient, runId: string, runKe
   return result;
 }
 
-/** Always reads the server and, for PASS, the existing compliance verify route. No local result is read. */
+/** Always reads native15 authoritative GET, which re-verifies admission, canonical RUN_END and issuer
+ * measuredHash. The additional compliance route checks tree identity/freshness, not measuredHash.
+ * Decoding and trace syntax alone never certify a result. No local result is read.
+ */
 export async function readVerdict(client: ProvingClient | undefined, runKey: string, level: ProofLevel): Promise<VerdictResult> {
   if (!/^[a-f0-9]{64}$/u.test(runKey)) return { token: 'PROOF_UNPROVEN', exitCode: 1, reason: 'invalid tree key' };
   if (!client) return { token: 'PROOF_UNPROVEN', exitCode: 1, reason: 'signed out' };
@@ -67,7 +42,7 @@ export async function readVerdict(client: ProvingClient | undefined, runKey: str
     if (run.status === 'PENDING') return { token: 'PROOF_PENDING', exitCode: 1, run };
     if (run.verdict === 'FAIL') return { token: 'PROOF_FAIL', exitCode: 1, run };
     if (run.verdict !== 'PASS' || run.dependency_gaps.length || !run.evidence_record_id || !run.checks.length
-      || run.checks.some(check => check.ok !== true || !check.evidence_ref) || !run.behavior_trace.length
+      || run.checks.some(check => check.ok !== true || !check.evidence_ref) || !hasProvingGateSeal(run)
       || run.findings.some(finding => ['CRITICAL', 'HIGH'].includes(finding.severity))) {
       return { token: 'PROOF_UNPROVEN', exitCode: 1, reason: run.dependency_gaps.join(', ') || 'checks or signed evidence incomplete', run };
     }

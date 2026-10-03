@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readSourceFile, sha256, treeKey } from './treekey.js';
+import { ProofSourceRoot, readSourceFile, sha256, treeKey } from './treekey.js';
+import { realpath } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import type { ProofCheck, ProofFinding, TreeSnapshot } from './types.js';
 
 const exec = promisify(execFile);
@@ -51,31 +53,36 @@ export function secretFindings(path: string, content: string): ProofFinding[] {
   return findings;
 }
 
-export async function inspectSource(snapshot: TreeSnapshot): Promise<ProofFinding[]> {
+export async function inspectSource(snapshot: TreeSnapshot, held?: ProofSourceRoot): Promise<ProofFinding[]> {
+  const source = held ?? new ProofSourceRoot(snapshot.root);
+  try {
   const findings: ProofFinding[] = [];
   for (const file of snapshot.manifest.files) {
-    const bytes = await readSourceFile(snapshot.root, file.path);
+    const bytes = await readSourceFile(source, file.path);
     if (sha256(bytes) !== file.sha256) throw new Error('STALE_CONTENT: source changed during local scan');
     findings.push(...secretFindings(file.path, Buffer.from(bytes).toString('utf8')));
   }
   return findings;
+  } finally { if (!held) source.close(); }
 }
 
 export interface LocalProof {
   snapshot: TreeSnapshot; verdict: 'FAIL' | 'PARTIAL'; checks: ProofCheck[]; findings: ProofFinding[];
 }
 /** Checks are fixed read-only commands; repository npm scripts or supplied shell commands never run. */
-export async function runLocal(path: string, requested: string[] = ['scan', 'deps']): Promise<LocalProof> {
+export async function runLocal(path: string, requested: string[] = ['scan', 'deps'], held?: ProofSourceRoot): Promise<LocalProof> {
   if (requested.some(check => !['build', 'test', 'scan', 'data', 'traffic', 'attack', 'deps'].includes(check))) {
     throw new Error('Unknown local check');
   }
-  const snapshot = await treeKey(path); const findings = await inspectSource(snapshot); const checks: ProofCheck[] = [];
+  const source = held ?? new ProofSourceRoot(await realpath(resolve(path)));
+  try {
+  const snapshot = await treeKey(path, source); const findings = await inspectSource(snapshot, source); const checks: ProofCheck[] = [];
   if (requested.includes('scan')) checks.push({ name: 'scan', ok: findings.length === 0,
     detail: findings.length ? 'Source secret detected; upload refused' : 'No credential pattern matched; static safety remains untested' });
-  if (requested.includes('deps')) {
+  { // Source admission is mandatory; requested dimensions only select reported measurements.
     let checked = 0; let unknown = 0; const licenses: ProofFinding[] = [];
     for (const file of snapshot.manifest.files.filter(file => /(?:^|\/)package(?:-lock)?\.json$/u.test(file.path))) {
-      const bytes = await readSourceFile(snapshot.root, file.path);
+      const bytes = await readSourceFile(source, file.path);
       if (sha256(bytes) !== file.sha256) throw new Error('STALE_CONTENT');
       let manifest: Record<string, unknown>;
       try { manifest = JSON.parse(Buffer.from(bytes).toString('utf8')) as Record<string, unknown>; }
@@ -92,7 +99,7 @@ export async function runLocal(path: string, requested: string[] = ['scan', 'dep
       }
     }
     findings.push(...licenses);
-    checks.push({ name: 'deps', ok: licenses.length ? false : null,
+    if (requested.includes('deps')) checks.push({ name: 'deps', ok: licenses.length ? false : null,
       detail: `Inspected ${checked} manifest entries; ${unknown} licenses unknown. Advisory cache and complete dependency licenses are unavailable.` });
   }
   try {
@@ -102,5 +109,6 @@ export async function runLocal(path: string, requested: string[] = ['scan', 'dep
   for (const check of requested.filter(check => !['scan', 'deps'].includes(check))) {
     checks.push({ name: check, ok: null, detail: 'Not run: local commands require an independent user-approved check runner' });
   }
-  return { snapshot, verdict: checks.some(check => check.ok === false) ? 'FAIL' : 'PARTIAL', checks, findings };
+  return { snapshot, verdict: findings.length || checks.some(check => check.ok === false) ? 'FAIL' : 'PARTIAL', checks, findings };
+  } finally { if (!held) source.close(); }
 }

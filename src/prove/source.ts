@@ -1,5 +1,7 @@
 import type { ProofLearningBoundary, ProofLevel, ProvingRunResult, SourceIntake } from './types.js';
-import { assertTreeUnchanged, canonicalTreeKey } from './treekey.js';
+import { assertTreeUnchanged, canonicalTreeKey, ProofSourceRoot, readSourceFile, sha256 } from './treekey.js';
+import { realpath } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { inspectSource, runLocal } from './local.js';
 import { assertProvingDestination, parseRun, type ProvingClient } from './verdict.js';
 
@@ -20,7 +22,10 @@ export async function runSourceProof(client: ProvingClient | undefined,
     if (client && client.baseUrl !== destination) throw new Error('PROVING_DESTINATION_CHANGED: new consent required');
   };
   ensureAdmission();
-  const local = await runLocal(input.path, input.requestedChecks ?? ['scan', 'deps']);
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//u.test(input.path)) throw new Error('A local repository path is required');
+  const source = new ProofSourceRoot(await realpath(resolve(input.path)));
+  try {
+  const local = await runLocal(input.path, input.requestedChecks ?? ['scan', 'deps'], source);
   ensureAdmission();
   // Watch authorization belongs to the measured verified tree, not a newer tree found during this call.
   if (input.expectedRunKey !== undefined && (!/^[a-f0-9]{64}$/u.test(input.expectedRunKey)
@@ -42,40 +47,57 @@ export async function runSourceProof(client: ProvingClient | undefined,
   ensureAdmission();
   const level = await ports.intake.resolveLevel(local.snapshot.root, input.level);
   ensureAdmission();
-  await assertTreeUnchanged(local.snapshot);
+  await assertTreeUnchanged(local.snapshot, source);
   ensureAdmission();
   if (level === 'local') return { schema: 'nexus.proof.v1', run_key: local.snapshot.run_key, level, verdict: local.verdict,
     token: 'PROOF_UNPROVEN', checks: local.checks, findings: local.findings, dependency_gaps: ['Repository policy lowered proof to local'] };
   ensureAdmission();
   const consent = await ports.intake.authorizeSource({ path: local.snapshot.root, level, destination: destination! });
   ensureAdmission();
-  await assertTreeUnchanged(local.snapshot);
+  await assertTreeUnchanged(local.snapshot, source);
   ensureAdmission();
   // A delayed consent prompt must not authorize bytes that changed while it was open.
-  const findings = await inspectSource(local.snapshot);
+  const findings = await inspectSource(local.snapshot, source);
   ensureAdmission();
   if (findings.length) return gap('SOURCE_CHANGED_OR_SECRET_REFUSED');
   const result = await ports.learning.withProofOrigin(async () => {
     ensureAdmission();
     // Origin admission may await; recheck before the next effect, not only after an upload.
-    await assertTreeUnchanged(local.snapshot);
+    await assertTreeUnchanged(local.snapshot, source);
     ensureAdmission();
-    const payload = await ports.intake!.prepareUpload({ path: local.snapshot.root, level, consent, snapshot: local.snapshot });
+    const payload = await ports.intake!.prepareUpload({ level, consent, snapshot: local.snapshot,
+      readSource: async path => {
+        ensureAdmission();
+        const file = local.snapshot.manifest.files.find(file => file.path === path);
+        if (!file) throw new Error('Source path refused: not in the admitted manifest');
+        const bytes = await readSourceFile(source, path);
+        if (sha256(bytes) !== file.sha256) throw new Error('STALE_CONTENT: upload source changed');
+        ensureAdmission();
+        return bytes;
+      } });
     ensureAdmission();
-    if (payload.runKey !== local.snapshot.run_key || canonicalTreeKey(payload.manifest.files) !== local.snapshot.run_key) {
+    // Copy adapter-owned observations before validation and before any subsequent await.
+    // Retained producer references may mutate while the independent tree recheck is pending.
+    const files = payload.manifest.files.map(file => Object.freeze({ path: file.path, sha256: file.sha256, status: file.status }));
+    const lockfiles = [...payload.manifest.lockfiles]; Object.freeze(files); Object.freeze(lockfiles);
+    const receipt = Object.freeze({ runKey: payload.runKey, payloadRef: payload.payloadRef,
+      manifest: Object.freeze({ files, lockfiles }) });
+    if (receipt.runKey !== local.snapshot.run_key || canonicalTreeKey(receipt.manifest.files) !== local.snapshot.run_key) {
       throw new Error('STALE_CONTENT: upload is bound to another tree');
     }
-    await assertTreeUnchanged(local.snapshot);
+    await assertTreeUnchanged(local.snapshot, source);
     ensureAdmission();
     const body = { schema: 'nexus.proof.v1', run_key: local.snapshot.run_key, level,
       repo_fingerprint: local.snapshot.repo_fingerprint, commit: local.snapshot.commit, dirty: local.snapshot.dirty,
-      session_id: input.sessionId ?? null, baton_id: null, trigger: input.trigger ?? 'mcp', manifest: payload.manifest,
-      payload_ref: level === 'manifest' ? null : payload.payloadRef, requested_checks: input.requestedChecks ?? ['scan', 'deps'] };
+      session_id: input.sessionId ?? null, baton_id: null, trigger: input.trigger ?? 'mcp', manifest: receipt.manifest,
+      payload_ref: level === 'manifest' ? null : receipt.payloadRef, requested_checks: input.requestedChecks ?? ['scan', 'deps'] };
     ensureAdmission();
+    source.close(); // Revoke every retained upload callback before starting the proving request.
     const response = await client.request({ method: 'POST', path: '/v2/proving/runs', body, retries: 0, timeoutMs: 10_000 });
     ensureAdmission();
     return parseRun(response, local.snapshot.run_key, level);
   });
   ensureAdmission();
   return result;
+  } finally { source.close(); }
 }

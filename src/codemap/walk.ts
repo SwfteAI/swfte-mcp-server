@@ -1,8 +1,8 @@
 /**
  * The confined file walk of the code map scanner (docs/codemap/CONTRACT.md §7, §2.1).
  *
- * Every path is resolved through fsguard's ConfinedWriter (under the scan root, no `..`, no symlink
- * anywhere along it) and every file is opened with O_NOFOLLOW, so a link planted in the tree is never
+ * Scanner traversal and source/metadata reads use a held native root capability. Descriptor-relative
+ * operations refuse intermediate links, so a link planted in the tree is never
  * followed, in or out. What the walk will not do:
  *   - descend into vendored or build output (node_modules, .venv, venv, target, build, dist, .next, .git,
  *     __pycache__), unless the caller passes its own skip list;
@@ -19,6 +19,8 @@ import fs from 'node:fs';
 import { posix } from 'node:path';
 import { GENERATED_MARKER } from '../codegen.js';
 import { ConfinedWriter } from '../fsguard.js';
+import { NATIVE_FILE_LIMIT, NativeFilesystemError } from '../native-filesystem.js';
+import { NativeScanReader, isNativeScanIncomplete } from './native-reader.js';
 import { ALIAS_PATTERN, LOCK_FILE, migrateLock, normalizeRel } from '../lock.js';
 import { cmp } from './fingerprint.js';
 import type { DetectContext, LockBinding, SourceLanguage } from './types.js';
@@ -376,12 +378,21 @@ function parseLock(text: string, dir: string, rel: string, warnings: string[]): 
  * keeps is deterministic.
  */
 export function walkProject(root: string, opts: WalkOptions = {}): WalkResult {
-  const writer = scanReader(root);
+  const reader = new NativeScanReader(root);
+  try { return walkProjectWithReader(reader, opts); } finally { reader.close(); }
+}
+
+/** Borrowed authority: the owner closes after all detection and hash rereads finish. */
+export function walkProjectWithReader(reader: NativeScanReader, opts: WalkOptions = {}): WalkResult {
   const skipDirs = new Set(opts.skipDirs ?? DEFAULT_SKIP_DIRS);
   const maxFiles = opts.maxFiles ?? DEFAULT_MAX_FILES;
   const maxFileBytes = opts.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
+  if (!Number.isSafeInteger(maxFileBytes) || maxFileBytes < 1 || maxFileBytes > NATIVE_FILE_LIMIT) {
+    throw new NativeFilesystemError('SIZE_LIMIT');
+  }
+  if (!Number.isSafeInteger(maxFiles) || maxFiles < 0) throw new WalkError('maxFiles must be a non-negative integer.');
   const result: WalkResult = {
-    root: writer.root,
+    root: reader.root,
     files: [],
     notAnalysed: {},
     truncated: false,
@@ -393,26 +404,45 @@ export function walkProject(root: string, opts: WalkOptions = {}): WalkResult {
   };
   const envFiles = checkRules(opts.envFiles ?? DEFAULT_ENV_FILES);
   const envNames = new Set<string>();
-  const readMeta = (rel: string) => readConfined(writer, rel, MAX_META_BYTES, envFiles);
+  const readMeta = (rel: string) => {
+    if (envFileKind(posix.basename(rel), envFiles) === 'secret') {
+      throw new WalkError(`Refusing to open ${rel}: env files are never read by the scanner.`);
+    }
+    try {
+      const text = reader.readText(rel, MAX_META_BYTES);
+      if (text !== null) return text;
+    } catch (error) {
+      if (!isNativeScanIncomplete(error)) throw error;
+    }
+    result.truncated = true;
+    result.warnings.push(`${rel}: enumerated metadata unreadable; scan incomplete.`);
+    return null;
+  };
 
   const stack: string[] = [''];
   walk: while (stack.length) {
     const dir = stack.pop()!;
-    const abs = dir ? writer.resolve(dir) : writer.root;
-    let entries: fs.Dirent[];
+    let listed: ReturnType<NativeScanReader['list']>;
     try {
-      entries = fs.readdirSync(abs, { withFileTypes: true });
+      listed = reader.list(dir);
     } catch (err) {
-      result.warnings.push(`${dir || '.'}: unreadable directory (${(err as NodeJS.ErrnoException).code ?? 'error'}).`);
+      if (!isNativeScanIncomplete(err)) throw err;
+      result.warnings.push(`${dir || '.'}: unreadable directory (${err.code}).`);
       result.truncated = true;
       continue;
     }
+    if (listed === null) {
+      result.warnings.push(`${dir || '.'}: enumerated directory disappeared; scan incomplete.`);
+      result.truncated = true;
+      continue;
+    }
+    const entries = [...listed.entries];
     entries.sort((a, b) => cmp(a.name, b.name));
     // This directory's package root and lock first, so every file listed from it (even when a cap
     // stops the walk part-way through the directory) is placed under the right pkgId and lock.
-    const markers = new Set(entries.filter((e) => e.isFile() && PACKAGE_MARKERS.includes(e.name)).map((e) => e.name));
+    const markers = new Set(entries.filter((e) => e.kind === 'file' && PACKAGE_MARKERS.includes(e.name)).map((e) => e.name));
     if (markers.size) result.packages.push({ dir, pkgId: packageName(readMeta, dir, markers) ?? (dir || '.') });
-    if (entries.some((e) => e.isFile() && e.name === LOCK_FILE)) {
+    if (entries.some((e) => e.kind === 'file' && e.name === LOCK_FILE)) {
       const rel = dir ? `${dir}/${LOCK_FILE}` : LOCK_FILE;
       const text = readMeta(rel);
       if (text !== null) result.locks.push({ dir, bindings: parseLock(text, dir, rel, result.warnings) });
@@ -420,15 +450,15 @@ export function walkProject(root: string, opts: WalkOptions = {}): WalkResult {
     const subdirs: string[] = [];
     for (const e of entries) {
       const rel = dir ? `${dir}/${e.name}` : e.name;
-      if (e.isSymbolicLink()) {
+      if (e.kind === 'symlink') {
         result.skipped.symlink++;
         continue;
       }
-      if (e.isDirectory()) {
+      if (e.kind === 'directory') {
         if (!skipDirs.has(e.name)) subdirs.push(rel);
         continue;
       }
-      if (!e.isFile()) continue;
+      if (e.kind !== 'file') continue;
       const envKind = envFileKind(e.name, envFiles);
       if (envKind === 'names') {
         const text = readMeta(rel);
@@ -452,18 +482,23 @@ export function walkProject(root: string, opts: WalkOptions = {}): WalkResult {
       }
       const language = LANGUAGE_BY_EXT[ext];
       if (!language) continue;
+      if (BigInt(e.identity.nlink) !== 1n) {
+        result.truncated = true;
+        result.warnings.push(`${rel}: shared inode refused; scan incomplete.`);
+        continue;
+      }
       if (result.files.length >= maxFiles) {
         result.truncated = true;
         result.warnings.push(`File cap reached (${maxFiles}); the rest of the tree was not scanned.`);
         break walk;
       }
-      const st = fs.lstatSync(writer.resolve(rel));
-      if (st.size > maxFileBytes) {
+      const size = BigInt(e.identity.size);
+      if (size > BigInt(maxFileBytes)) {
         result.skipped.tooLarge++;
         result.truncated = true;
         continue;
       }
-      result.files.push({ relPath: rel, language, size: st.size });
+      result.files.push({ relPath: rel, language, size: Number(size) });
     }
     // Reverse so the stack pops them in code-point order.
     for (let i = subdirs.length - 1; i >= 0; i--) stack.push(subdirs[i]!);
@@ -516,6 +551,19 @@ export function scanReader(root: string): ConfinedWriter {
  */
 export function readSource(writer: ConfinedWriter, entry: WalkEntry, opts: WalkOptions = {}): { text: string } | { skipped: 'generated' | 'unreadable' } {
   const text = readConfined(writer, entry.relPath, opts.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES, opts.envFiles ?? DEFAULT_ENV_FILES);
+  if (text === null) return { skipped: 'unreadable' };
+  if ((opts.skipGenerated ?? true) && isGeneratedByOtherTool(text)) return { skipped: 'generated' };
+  return { text };
+}
+
+/** Native scanner path; legacy helpers above remain scoped to their existing callers. */
+export function readNativeSource(reader: NativeScanReader, entry: WalkEntry, opts: WalkOptions = {}): { text: string } | { skipped: 'generated' | 'unreadable' } {
+  if (envFileKind(posix.basename(entry.relPath), opts.envFiles ?? DEFAULT_ENV_FILES) !== null) {
+    throw new WalkError('Env files are not detector source.');
+  }
+  let text: string | null;
+  try { text = reader.readText(entry.relPath, opts.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES); }
+  catch (error) { if (!isNativeScanIncomplete(error)) throw error; return { skipped: 'unreadable' }; }
   if (text === null) return { skipped: 'unreadable' };
   if ((opts.skipGenerated ?? true) && isGeneratedByOtherTool(text)) return { skipped: 'generated' };
   return { text };

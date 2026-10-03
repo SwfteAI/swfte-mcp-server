@@ -4,12 +4,13 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, unlinkSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { ConfinedWriter, confineDirectory } from '../fsguard.js';
-import { detectProject, type DetectOptions } from './detect.js';
+import { detectProject, detectProjectWithReader, type DetectOptions } from './detect.js';
+import { withNativeScanReader, type NativeScanReader } from './native-reader.js';
 import { assignIds, providerOf, repoIdFromRemote, repoIdLocal, type AssignedSite } from './fingerprint.js';
 import { buildManifest, checkManifest, serializeManifest } from './manifest.js';
 import { drainQueue, enqueue, uploadOrQueue } from './queue.js';
 import { CodemapApiError, CodemapOfflineError, fetchWorkspaceKey, optInRepository, repositoryOptIns, type UploadConfig, type UploadResult } from './upload.js';
-import { DEFAULT_ENV_FILES, DEFAULT_MAX_FILES, DEFAULT_MAX_FILE_BYTES, DEFAULT_SKIP_DIRS, readConfined, walkProject } from './walk.js';
+import { DEFAULT_ENV_FILES, DEFAULT_MAX_FILES, DEFAULT_MAX_FILE_BYTES, DEFAULT_SKIP_DIRS, envFileKind, readConfined, walkProjectWithReader, WalkError } from './walk.js';
 import { tagCallSites } from './tag.js';
 import { provenanceForSites } from './provenance.js';
 import type { Manifest, ManifestRepo, Scanner } from './types.js';
@@ -103,37 +104,52 @@ function cacheCallers(root: string, sites: AssignedSite[]): void {
 }
 
 async function sourceHashes(root: string, options?: DetectOptions): Promise<{ outcome: Awaited<ReturnType<typeof detectProject>>; hashes: Record<string, string>; sourceDigest: string; commitCurrent: boolean }> {
+  return withNativeScanReader(root, reader => sourceHashesWithReader(reader, root, options));
+}
+
+/** Private borrowed pass: no network/queue await may be introduced inside this lifetime. */
+async function sourceHashesWithReader(reader: NativeScanReader, root: string, options?: DetectOptions): Promise<{
+  outcome: Awaited<ReturnType<typeof detectProject>>; hashes: Record<string, string>; sourceDigest: string; commitCurrent: boolean;
+}> {
   const observed = new Map<string, string>();
-  const outcome = await detectProject(root, { ...options, preprocess: file => {
+  const outcome = await detectProjectWithReader(reader, { ...options, preprocess: file => {
     observed.set(file.relPath, createHash('sha256').update(file.text).digest('hex'));
     return options?.preprocess ? options.preprocess(file) : file;
   } });
-  const reader = new ConfinedWriter({ root });
+  if (outcome.truncated) throw new Error('Source scan incomplete; no bound scan can be admitted.');
   const hashes: Record<string, string> = {};
   const tracked = committedBlobs(root);
   let commitCurrent = true;
   for (const path of [...outcome.packages.keys()].sort()) {
-    const text = readConfined(reader, path, options?.maxFileBytes ?? 1024 * 1024);
+    const text = reader.readText(path, options?.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES);
     if (text === null) throw new Error('Source changed during scan; run it again.');
     hashes[path] = createHash('sha256').update(text).digest('hex');
     const blobHash = createHash('sha1').update('blob ' + Buffer.byteLength(text) + '\0').update(text).digest('hex');
     if (tracked.get(path) !== blobHash) commitCurrent = false;
     if (hashes[path] !== observed.get(path)) throw new Error('Source changed during scan; run it again.');
   }
-  const context = walkProject(root, options);
+  const context = walkProjectWithReader(reader, options);
+  if (context.truncated) throw new Error('Source metadata scan incomplete; no bound scan can be admitted.');
   const metadataPaths = new Set(context.locks.map(lock => (lock.dir ? lock.dir + '/' : '') + 'swfte.json'));
   const markers = ['package.json', 'pyproject.toml', 'setup.cfg', 'pom.xml', 'settings.gradle', 'settings.gradle.kts', 'build.gradle', 'build.gradle.kts'];
   for (const pkg of context.packages) {
+    const directory = reader.list(pkg.dir);
+    if (directory === null) throw new Error('Source metadata changed during scan; run it again.');
+    const files = new Set(directory.entries.filter(entry => entry.kind === 'file').map(entry => entry.name));
     for (const marker of markers) {
       const path = (pkg.dir ? pkg.dir + '/' : '') + marker;
-      if (existsSync(reader.resolve(path))) metadataPaths.add(path);
+      if (files.has(marker)) metadataPaths.add(path);
     }
   }
   const metadataHashes: Record<string, string | null> = {};
   for (const path of [...metadataPaths].sort()) {
-    const text = readConfined(reader, path, 1024 * 1024, options?.envFiles ?? DEFAULT_ENV_FILES);
-    metadataHashes[path] = text === null ? null : digest(text);
-    if (text === null || tracked.get(path) !== createHash('sha1').update('blob ' + Buffer.byteLength(text) + '\0').update(text).digest('hex')) commitCurrent = false;
+    if (envFileKind(basename(path), options?.envFiles ?? DEFAULT_ENV_FILES) === 'secret') {
+      throw new WalkError(`Refusing to open ${path}: env files are never read by the scanner.`);
+    }
+    const text = reader.readText(path, DEFAULT_MAX_FILE_BYTES);
+    if (text === null) throw new Error('Source metadata changed during scan; run it again.');
+    metadataHashes[path] = digest(text);
+    if (tracked.get(path) !== createHash('sha1').update('blob ' + Buffer.byteLength(text) + '\0').update(text).digest('hex')) commitCurrent = false;
   }
   const sourceDigest = digest({ hashes, sites: outcome.sites, implementations: outcome.implementations,
     packages: [...outcome.packages.entries()].sort(([a], [b]) => a.localeCompare(b)),
