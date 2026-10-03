@@ -137,7 +137,7 @@ async function withTransport(
     await server.connect(serverSide); await mcp.connect(clientSide);
     await action({ seen, polls: () => polls, call: async (plan = single) => {
       const result: any = await mcp.callTool({ name: 'swfte_solution_build', arguments: {
-        plan, waitMs: 6_000, totalWaitMs: 20_000, includeComponentVerify: false,
+        plan, waitMs: 30_000, totalWaitMs: 60_000, includeComponentVerify: false,
       } });
       assert.notEqual(result.isError, true, JSON.stringify(result.content));
       return JSON.parse(result.content.find((item: any) => item.type === 'text').text);

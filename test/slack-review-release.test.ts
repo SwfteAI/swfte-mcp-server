@@ -13,12 +13,27 @@ const action = { id: 'action_1', capability: 'release.ramp', target: { kind: 'mo
   environment: 'production', status: 'PROPOSED', requiresApproval: true, contentHash, planHash,
   params: { releaseId: 'release/a', stage: 'AB', candidateWeight: '5000', planHash } };
 
+function planWire() { return {
+  steps: [{ stage: 'SHADOW', candidateWeight: 0, minimumUnits: 0 }, { stage: 'AB', candidateWeight: 5000, minimumUnits: 100 }],
+  assignment: { unit: 'RUN', saltRef: 'salt:v1' }, cohorts: [], primaryMetric: 'success', baselineRate: .5, mde: .1, alpha: .05, power: .8,
+  minDurationDays: 0, maxDurationDays: 14, expectedDailyUnits: 1000, userFacing: false, guardrails: [],
+  inference: { designId: 'server-design', fixedHorizonPerArm: 100, maximumPerArm: 200, informationFractions: [.5, 1], boundaries: [3, 2],
+    allocation: { designId: 'allocation-design', alpha: .001, admissionFraction: .25 } }
+}; }
+
+// swfte_release_propose_ramp first reads the full native release row as its authority (GET), then proposes (POST).
+// `calls` carries the proposal and every non-authority call, so each test still asserts exactly one proposal call.
+const authorityRow = { releaseId: 'release/a', workspaceId: 'ws_a', targetId: 'target', environment: 'production', subject: 'ARTIFACT_TRAFFIC', kind: 'MODEL',
+  artifactId: 'model_1', baseline: { version: 'v1', contentHash: `sha256:${'d'.repeat(64)}`, bundleHash: null }, candidate: { version: 'v2', contentHash, bundleHash: null },
+  stage: 'AB', plan: planWire(), planHash, candidateWeight: 5000, revision: 1, ledgerSeq: 3, underpowered: false, allocationMismatch: false };
+
 function harness(name: string, reply: unknown) {
   const tool = [...reviewTools, ...releaseTools].find(t => t.name === name)!;
   const calls: any[] = [];
-  const ctx = { client: { request: async (request: unknown) => {
+  const ctx = { client: { request: async (request: any) => {
+    if (name === 'swfte_release_propose_ramp' && request.method === 'GET') return authorityRow;
     calls.push(request); if (reply instanceof Error) throw reply; return reply;
-  } } } as unknown as ToolContext;
+  } }, config: { workspaceId: 'ws_a' } } as unknown as ToolContext;
   return { calls, run: (input: unknown) => tool.execute(tool.inputSchema.parse(input), ctx) };
 }
 

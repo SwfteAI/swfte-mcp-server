@@ -215,8 +215,8 @@ describe('knowledge document names never become filesystem paths', () => {
 
 describe('swfte_export_src overwrite only deletes a directory it owns', () => {
   beforeEach(() => {
-    rmSync(join(project, 'victim'), { recursive: true });
-    rmSync(join(project, 'exported'), { recursive: true });
+    rmSync(join(project, 'victim'), { recursive: true, force: true });
+    rmSync(join(project, 'exported'), { recursive: true, force: true });
   });
 
   test('export_src overwrite refuses to delete a directory it did not create', async () => {

@@ -406,7 +406,7 @@ test('public workflow refine preserves outage choices and authenticated current 
     const result=await h.call('swfte_refine');assert.equal(result.refined,true);assert.equal(result.status,'NEEDS_INPUT');
     for(const key of ['needsInput','needsAttention','repairs','userMessage','validationAvailable','retryableReason','retryable','findings'] as const)assert.deepEqual(result[key],final[key]);
     assert.equal(result.validationAvailable,false);assert.deepEqual(result.artifact,GRAPH);
-    assert.equal(h.seen.length,1);assert.equal(h.seen[0].path,'/v2/workflows/wizard/refine');assert.equal(h.seen[0].workspace,'ws-refine-fixture');assert.match(h.seen[0].authorization??'',/^Bearer /);
+    assert.equal(h.seen.length,1);assert.equal(h.seen[0].path,'/v2/workflows/wizard/refine');assert.equal(h.seen[0].workspace,undefined); /* PAT: the server derives the tenant; the client sends no X-Workspace-ID */assert.match(h.seen[0].authorization??'',/^Bearer /);
     assert.deepEqual((h.seen[0].body as any).currentWorkflow,GRAPH);assert.equal((h.seen[0].body as any).feedback,'Retain selected provider and improve the draft.');
   },{responses:[final]});
 });

@@ -63,7 +63,7 @@ test('selected CLI peek propagates native admission failure before backend/defau
   try {
     for (const argv of [['add', 'workflow:wf_owned'], ['sync'], ['upgrade', 'owned']]) {
       const errors: string[] = [], output: string[] = [];
-      const code = await runCli(argv, { cwd: root, env: { SWFTE_PAT: 'fixture_credential_123', SWFTE_TELEMETRY: '0' }, out: line => output.push(line), err: line => errors.push(line) });
+      const code = await runCli(argv, { cwd: root, env: { SWFTE_PAT: 'pat_fixture_credential_123', SWFTE_TELEMETRY: '0' }, out: line => output.push(line), err: line => errors.push(line) });
       assert.notEqual(code, 0); assert.match(errors.join('\n'), /NATIVE_ARTIFACT_MISSING_OR_INVALID/);
       assert.equal(output.length, 0);
     }
@@ -116,7 +116,7 @@ test('mounted CLI add/sync/upgrade and scaffold/sync use genuine native publicat
   NativeFilesystem.prototype.close = function() { closes++; return close.call(this); };
   NativeFilesystem.prototype.replace = function(input) { const result = replace.call(this, input); if (result.action !== 'unchanged') publications.push(input.rel); return result; };
   process.chdir(root);
-  const env = { SWFTE_PAT: 'fixture_credential_123', SWFTE_TELEMETRY: '0' }, config = loadConfig(env);
+  const env = { SWFTE_PAT: 'pat_fixture_credential_123', SWFTE_TELEMETRY: '0' }, config = loadConfig(env);
   const io = { cwd: root, env, out: (_: string) => {}, err: (_: string) => {} };
   try {
     assert.equal(await runCli(['add', 'workflow:wf_owned', '--alias', 'owned', '--framework', 'plain-ts', '--no-pin', '--no-compliance'], io), 0);

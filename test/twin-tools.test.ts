@@ -168,19 +168,20 @@ test('changing both receiver and grant during packaging cannot substitute a new 
 test('real client positive retains configured base path and posts bundle to exactly consented full URL',async()=>gitFixture(async(root,commit)=>{
   const config=loadConfig({SWFTE_API_KEY:'sk_test_twin_destination',SWFTE_BASE_URL:apiBase,SWFTE_WORKSPACE_ID:'w'});
   const client=new SwfteClient(config);const originalFetch=globalThis.fetch;const effects:Array<{url:string;method:string}>=[];
+  const grant=readiness(); // one grant for every readiness read: expiresAt embeds Date.now(), and the push requires the grant be identical across reads
   globalThis.fetch=async(input,init)=>{
     const url=String(input);const method=init?.method??'GET';effects.push({url,method});
     if(method==='GET'){
       assert.equal(new URL(url).pathname,'/agents/v2/twins/intake/readiness');
       assert.equal(new URL(url).searchParams.get('consentId'),'consent');
-      return new Response(JSON.stringify(readiness()),{status:200});
+      return new Response(JSON.stringify(grant),{status:200});
     }
     assert.equal(method,'POST');assert.equal(url,intakeDestination);
     const form=init?.body as FormData;const bytes=Buffer.from(await(form.get('archive') as Blob).arrayBuffer());
     assert.equal(form.get('expectedHash'),'sha256:'+createHash('sha256').update(bytes).digest('hex'));
     return new Response(JSON.stringify(proposal(form,commit)),{status:200});
   };
-  try{const c=context(readiness(),{configured:'w'});c.ctx.client=client;
+  try{const c=context(grant,{configured:'w'});c.ctx.client=client;
     const result=await push.execute({...args,repoPath:root},c.ctx);
     assert.equal((result as {snapshotId:string}).snapshotId,'snapshot');
     assert.deepEqual(effects.map(e=>e.method),['GET','GET','POST']);

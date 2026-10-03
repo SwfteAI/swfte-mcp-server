@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, symlink, rm, mkdir, rename } from 'node:fs/promises';
+import { mkdtemp, writeFile, symlink, rm, mkdir, rename, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -60,7 +60,7 @@ test('actual held native reader refuses late parent replacement after a nested p
   let held: ProofSourceRoot | undefined;
   try {
     await mkdir(join(root, 'nested')); await writeFile(join(root, 'nested/value.ts'), 'safe');
-    await writeFile(join(outside, 'value.ts'), 'outside'); held = new ProofSourceRoot(root);
+    await writeFile(join(outside, 'value.ts'), 'outside'); held = new ProofSourceRoot(await realpath(root)); // treeKey compares against the real path (macOS tmpdir is a symlink)
     assert.equal(Buffer.from(await readSourceFile(held, 'nested/value.ts')).toString(), 'safe');
     const snapshot = await treeKey(root, held);
     assert.equal(snapshot.run_key, canonicalTreeKey([{ path: 'nested/value.ts', sha256: sha256('safe') }]));

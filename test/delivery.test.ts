@@ -403,7 +403,7 @@ describe('swfte_handover_record', () => {
     await assert.rejects(run('swfte_handover_record', { catalogRef: 'workflow:wf_77' }), /Refusing to overwrite existing file\(s\): HANDOVER-workflow-wf_77\.md/);
     assert.equal(readFileSync(join(tmp, 'HANDOVER-workflow-wf_77.md'), 'utf8'), '# my notes\n');
 
-    const forced = await run('swfte_handover_record', { catalogRef: 'workflow:wf_77' });
+    const forced = await run('swfte_handover_record', { catalogRef: 'workflow:wf_77', force: true });
     assert.equal(forced.written[0].action, 'overwrite');
     assert.equal(readFileSync(join(tmp, 'HANDOVER-workflow-wf_77.md'), 'utf8'), RUNBOOK);
 

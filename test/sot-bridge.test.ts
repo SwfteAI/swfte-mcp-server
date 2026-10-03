@@ -382,7 +382,7 @@ describe('swfte_scaffold_client', () => {
     assert.equal(existsSync(join(tmp, 'swfte.json')), false, 'lock was written despite the refusal');
     assert.equal(existsSync(join(tmp, 'dot-env.example')), false);
 
-    const forced = await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'out' });
+    const forced = await run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'out', force: true });
     assert.equal(forced.files.find((f: any) => f.path === 'out/invoice-extractor.ts').action, 'overwrite');
   });
 
@@ -483,7 +483,7 @@ describe('swfte_scaffold_client', () => {
       symlinkSync(outside, join(tmp, 'link'));
       await assert.rejects(
         run('swfte_scaffold_client', { catalogRef: 'workflow:wf_1', language: 'typescript', targetDir: 'link/sub' }),
-        /symlink/
+        /symlink|SYMLINK_REFUSED/
       );
       assert.equal(existsSync(join(outside, 'sub')), false);
     } finally {

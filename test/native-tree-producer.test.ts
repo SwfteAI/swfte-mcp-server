@@ -73,7 +73,8 @@ test('actual list caps and invalid component names refuse read-only without manu
  }finally{fs.close();}
 }));
 
-test('native enumeration rejects malformed UTF8 filename bytes on the actual filesystem',()=>fixture(root=>{
+// APFS (macOS) refuses to create a non-UTF-8 filename (EILSEQ), so the fixture cannot exist there; Linux runs it.
+test('native enumeration rejects malformed UTF8 filename bytes on the actual filesystem',{skip:process.platform==='darwin'?'APFS refuses non-UTF-8 filenames (EILSEQ)':false},()=>fixture(root=>{
  const path=Buffer.concat([Buffer.from(root+'/'),Buffer.from([0xc0,0xaf])]);writeFileSync(path,'unchanged');
  const fs=NativeFilesystem.openRoot(root);try {assert.throws(()=>fs.list(),refused('PATH_REFUSED'));assert.equal(readFileSync(path,'utf8'),'unchanged');}finally{fs.close();}
 }));

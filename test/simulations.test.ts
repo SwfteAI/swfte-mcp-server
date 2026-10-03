@@ -15,6 +15,7 @@ import { summarizeRun, validateSpecObject, validateSpecYaml } from '../src/tools
 const WS = 'ws-fixture-1';
 // Workspace-scoped credential mode: the client sends X-Workspace-ID (PAT mode lets the server derive it).
 const config = () => ({ ...loadConfig({ SWFTE_PAT: 'pat_fake_value', SWFTE_WORKSPACE_ID: WS } as never), credentialKind: 'api-key' as const });
+const unboundConfig = () => ({ ...loadConfig({ SWFTE_PAT: 'pat_fake_value' } as never), credentialKind: 'api-key' as const });
 
 // Copied from agents-service testkit Fixtures.VALID_YAML.
 const VALID_YAML = `apiVersion: swfte.dev/simulation/v1
@@ -77,7 +78,10 @@ const run = async (name: string, input: unknown) => {
   const t = allTools.find((x) => x.name === name);
   assert.ok(t, `missing tool ${name}`);
   const parsed = t!.inputSchema.parse(input);
-  return t!.execute(parsed, { client: new SwfteClient(config()), config: config() }) as Promise<any>;
+  // A per-call workspaceId is honoured only when the API-key credential has no configured workspace; with one
+  // configured the client refuses a different one (WORKSPACE_OVERRIDE). Tests that choose a workspace say so.
+  const cfg = (input as { workspaceId?: string } | null)?.workspaceId !== undefined ? unboundConfig() : config();
+  return t!.execute(parsed, { client: new SwfteClient(cfg), config: cfg }) as Promise<any>;
 };
 const wsHeader = (s: Seen) => s.headers['X-Workspace-ID'];
 
@@ -407,6 +411,16 @@ describe('simulation API tools', () => {
     assert.equal((await run('swfte_simulation_create', { validationPackRunId: RUN_ID })).created, true);
     assert.equal(seen.every(request => request.path.endsWith('/reuse')), true);
   });
+  test('a workspace chosen per call cannot override a configured API-key workspace (no request is sent)', async () => {
+    const t = allTools.find((x) => x.name === 'swfte_simulation_create')!;
+    const cfg = config();
+    const before = seen.length;
+    await assert.rejects(
+      t.execute(t.inputSchema.parse({ spec: { kind: 'Simulation' }, workspaceId: 'ws-other' }), { client: new SwfteClient(cfg), config: cfg }),
+      (error: unknown) => error instanceof SwfteApiError && error.status === 403 && error.code === 'WORKSPACE_OVERRIDE');
+    assert.equal(seen.length, before);
+  });
+
   test('saved reuse binds explicit and configured workspace', async () => {
     route('POST', /\/validation-packs\/[^/]+\/reuse$/, { status: 201, body: savedCreatedFixture('foreign') });
     await assert.rejects(run('swfte_simulation_create', { validationPackRunId: RUN_ID }), /VALIDATION_PACK_REUSE_INVALID/);
