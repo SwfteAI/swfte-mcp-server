@@ -510,12 +510,23 @@ never baked into a generated client as its default.
 
 What the server does on your machine and to your account, so you can decide whether to run it.
 
+`swfte_export_src` downloads a Tier2 Rust source overlay: generated steps, graph,
+manifest, build script and blueprint. Merge it with the real Tier1 BuildX Rust
+service scaffold, including `crates/swfte-sdk`, before compiling. The ZIP alone
+does not contain that static scaffold. A successful isolated step/graph ABI
+fixture is separate from a full emitted workspace Cargo check; neither proves
+deployment or execution on another host.
+
+Widget embed markup requires either explicitly verified public catalog scope or
+an exact private workspace match. Set `SWFTE_WORKSPACE_ID` for private widgets;
+missing scope or either missing private workspace identity is refused.
+
 - **Reads.** Files only inside the directory it was launched in, and only when a tool asks for one
   (`swfte_files_upload`, `swfte_sync_src`, knowledge and preflight inputs, project detection for
   `swfte_scaffold_client`). `.env*`, `.npmrc`, `.netrc`, `.git/`, `.ssh/`, `.aws/` and private-key
   files are never read or uploaded. Launch it from your project, never from `$HOME` or `/`.
 - **Writes.** Only inside that directory, only files a tool names (generated clients, embed
-  snippets, an exported Cargo workspace, `swfte.json`, analytics wiring). No `..`, no absolute paths
+  snippets, an exported Tier2 Rust source overlay, `swfte.json`, analytics wiring). No `..`, no absolute paths
   elsewhere, no writes through symlinks. It never overwrites an existing file unless you pass `force`
   (`swfte_export_src` refuses the whole export on a conflict). It never writes to `.git/`, `.github/`,
   `.husky/`, `.vscode/`, `.claude/`, `.cursor/`, `.mcp.json`, `.npmrc`, `package.json` or `.env*`

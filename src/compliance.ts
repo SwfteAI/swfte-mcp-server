@@ -561,7 +561,7 @@ export async function scanFiles(
     } catch (err) {
       complete = false;
       const what = req.files ? `${req.files.length} file(s): ${req.files.slice(0, 3).map((f) => f.path).join(', ')}${req.files.length > 3 ? ', …' : ''}` : 'snippet';
-      batchErrors.push(`${what} — not checked: ${err instanceof Error ? err.message : String(err)}`);
+      batchErrors.push(client.redactError(`${what} — not checked: ${err instanceof Error ? err.message : String(err)}`));
     }
   }
   const notScanned = input.notScanned ?? [];
@@ -621,7 +621,7 @@ export async function scanProject(client: SwfteClient | null, root: string | und
   try {
     collected = collectLocalFiles({ paths, root });
   } catch (err) {
-    return unavailableScan(err instanceof Error ? err.message : String(err));
+    return unavailableScan(client.redactError(err instanceof Error ? err.message : String(err)));
   }
   return scanFiles(client, { files: collected.files, notScanned: collected.notScanned, notes: collected.notes });
 }
@@ -718,7 +718,7 @@ export async function getEvidenceRecord(client: SwfteClient, id: string, opts: {
   if (opts.verify === false) return { ...base, verification: null, conclusion: 'NOT_VERIFIED', note: 'verify:false — the signature and freshness were not checked.' };
 
   const [server, key] = await Promise.all([
-    client.request<Record<string, any>>({ method: 'GET', path: `${COMPLIANCE_BASE}/evidence-records/${enc}/verify`, retries: 1 }).catch((err) => ({ error: err instanceof Error ? err.message : String(err) })),
+    client.request<Record<string, any>>({ method: 'GET', path: `${COMPLIANCE_BASE}/evidence-records/${enc}/verify`, retries: 1 }).catch((err) => ({ error: client.redactError(err instanceof Error ? err.message : String(err)) })),
     client.request<SigningKey>({ method: 'GET', path: `${COMPLIANCE_BASE}/evidence-records/signing-key`, retries: 1 }).catch(() => null),
   ]);
   const local = localRecordCheck(record, key);

@@ -36,12 +36,65 @@
  */
 
 import { closeSync, constants as FS, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, writeSync } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
 /** Credential shapes that must never land in a written file. Publishable `swfte_pk_` keys are allowed. */
 export const SECRET_PATTERN =
   /\b(pat_[A-Za-z0-9]{8,}|sk-swfte-[A-Za-z0-9_-]{8,}|swfte_sk_[A-Za-z0-9_-]{8,}|sk_(?:live|test)_[A-Za-z0-9]{8,}|sk-[A-Za-z0-9]{20,}|gh[po]_[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16})\b/;
+
+const errorSecrets = new AsyncLocalStorage<readonly string[]>();
+
+/** Request-local literals for diagnostic/file guards, never for normal API payloads. */
+export function withErrorSecrets<T>(secrets: Array<string | undefined>, action: () => T): T {
+  return errorSecrets.run([...(errorSecrets.getStore() ?? []), ...secrets.filter((s): s is string => !!s)], action);
+}
+
+function secretForms(secrets: Array<string | undefined>): string[] {
+  const forms = new Set<string>();
+  for (const secret of [...(errorSecrets.getStore() ?? []), ...secrets]) {
+    if (!secret) continue;
+    forms.add(secret);
+    forms.add(JSON.stringify(secret).slice(1, -1));
+    // Debug URLs escape opaque values in path/query positions. Scrub both
+    // percent encodings and form query encoding without decoding the message.
+    const encodedForms = [new URLSearchParams({ value: secret }).toString().slice(6)];
+    try { encodedForms.push(encodeURIComponent(secret)); } catch { /* The literal still protects an ill-formed string. */ }
+    for (const encoded of encodedForms) {
+      forms.add(encoded);
+      forms.add(encoded.replace(/%[0-9A-F]{2}/g, (part) => part.toLowerCase()));
+    }
+  }
+  return [...forms].sort((a, b) => b.length - a.length);
+}
+
+/** Fold percent hex only; ordinary literal letters retain their exact case. */
+function literalPattern(form: string): RegExp {
+  const pattern = form.replace(/[.*+?^$()|[\]{}\\]/g, '\\$&').replace(/%[0-9a-f]{2}/gi, (part) =>
+    '%' + [...part.slice(1)].map((hex) => /[a-f]/i.test(hex) ? '[' + hex.toLowerCase() + hex.toUpperCase() + ']' : hex).join(''));
+  return new RegExp(pattern, 'g');
+}
+
+/** Same content policy for outbound bytes and planned files, including short known literals. */
+export function assertNoSecrets(label: string, content: string, forbidden: Array<string | undefined> = []): void {
+  if (secretForms(forbidden).some((secret) => literalPattern(secret).test(content))) {
+    throw new Error(`Refusing ${label}: it contains a configured Swfte credential.`);
+  }
+  if (SECRET_PATTERN.test(content)) throw new Error(`Refusing ${label}: it contains a secret-shaped token.`);
+}
+
+/** Clone only an explicit failure/detail subtree; callers never apply this to ordinary success data. */
+export function redactErrorValue(value: unknown, redact: (message: string) => string, ancestors = new WeakSet<object>()): unknown {
+  if (typeof value === 'string') return redact(value);
+  if (value === null || typeof value !== 'object') return value;
+  if (ancestors.has(value)) return '[circular]';
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) return value.map((item) => redactErrorValue(item, redact, ancestors));
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [redact(key), redactErrorValue(item, redact, ancestors)]));
+  } finally { ancestors.delete(value); }
+}
 
 /** What a hosted (inline) run says instead of having written anything. */
 export const INLINE_NOTE =
@@ -453,13 +506,7 @@ export class ConfinedWriter {
 
   /** Plain secret check, exposed so tools can vet content they return rather than write. */
   assertNoSecrets(label: string, content: string): void {
-    for (const f of this.forbidden) {
-      if (f && f.length >= 8 && content.includes(f)) {
-        throw new Error(`Refusing to write ${label}: it contains the configured Swfte credential.`);
-      }
-    }
-    const m = SECRET_PATTERN.exec(content);
-    if (m) throw new Error(`Refusing to write ${label}: it contains a secret-shaped token (${m[0].slice(0, 6)}…).`);
+    assertNoSecrets(`to write ${label}`, content, this.forbidden);
   }
 
   /** Commit the plan. Throws, having written nothing, if any conflict or secret was found. */
@@ -548,8 +595,13 @@ export function gitignoreCovers(root: string, file: string): boolean {
  * lands in CI logs.
  */
 export function redactSecrets(message: string, secrets: Array<string | undefined> = []): string {
+  const forms = secretForms(secrets);
+  // The usual marker itself contains some accepted short credentials ("r").
+  // Choose once against every call literal so later replacements cannot put
+  // an earlier literal back. An empty marker is safe if every candidate clashes.
+  const marker = ['[redacted]', '*', '#', '\u2588'].find((candidate) => forms.every((secret) => !candidate.includes(secret))) ?? '';
   let out = String(message);
-  for (const s of secrets) if (s && s.length >= 6) out = out.split(s).join('[redacted]');
-  out = out.replace(new RegExp(SECRET_PATTERN.source, 'g'), '[redacted]');
-  return out.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, '$1[redacted]@');
+  for (const secret of forms) out = out.replace(literalPattern(secret), () => marker);
+  out = out.replace(new RegExp(SECRET_PATTERN.source, 'g'), () => marker);
+  return out.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, (_, scheme: string) => `${scheme}${marker}@`);
 }

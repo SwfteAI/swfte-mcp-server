@@ -439,8 +439,8 @@ export async function getContextPackage(
   const contractError = contractResult.ok
     ? undefined
     : contractResult.err instanceof SwfteApiError
-      ? { status: contractResult.err.status, code: contractResult.err.code, message: contractResult.err.message }
-      : { message: contractResult.err instanceof Error ? contractResult.err.message : String(contractResult.err) };
+      ? client.redactErrorValue({ status: contractResult.err.status, code: contractResult.err.code, message: contractResult.err.message })
+      : { message: client.redactError(contractResult.err instanceof Error ? contractResult.err.message : String(contractResult.err)) };
   if (!contractResult.ok && !(contractResult.err instanceof SwfteApiError)) throw contractResult.err;
 
   const facets = detail.facets ?? [];

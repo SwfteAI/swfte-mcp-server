@@ -34,6 +34,8 @@ function fakeClient() {
   const uploads: Array<{ name: string; bytes: string }> = [];
   const client = {
     redactError(message: string) { return redactor.redactError(message); },
+    redactErrorValue<T>(value: T): T { return redactor.redactErrorValue(value); },
+    withErrorSecrets<T>(secrets: Array<string | undefined>, action: () => T): T { return redactor.withErrorSecrets(secrets, action); },
     calls,
     uploads,
     async postMultipart(path: string, form: FormData) {

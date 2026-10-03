@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { zipSync } from 'fflate';
 import { codeTools } from '../src/tools/code.js';
-import { SwfteApiError } from '../src/client.js';
+import { SwfteApiError, SwfteClient } from '../src/client.js';
 import { loadConfig } from '../src/config.js';
 
 let root: string, previous: string;
@@ -22,7 +22,7 @@ function error(status: number, envelope: Record<string, unknown> = {}) {
 }
 function execute(client: unknown, input: Record<string, unknown> = {}) {
   return exportTool.execute(exportTool.inputSchema.parse({ workflowId: 'wf/1', destDir: 'source', ...input }),
-    { client: client as never, config, localFilesystem: true });
+    { client: Object.assign(new SwfteClient(config), client), config, localFilesystem: true });
 }
 
 test('Auto exports an execution workflow without attempting canvas', async () => {
@@ -71,7 +71,7 @@ test('Translation check always sends dryRun and works in a hosted server without
   const report = { translatable: false, refusals: [{ nodeId: 'llm' }] };
   assert.equal(checkTool.readOnly, true);
   const result: any = await checkTool.execute(checkTool.inputSchema.parse({ workflowId: 'wf/1' }), {
-    client: { request: async (request: unknown) => { requests.push(request); return report; } } as never,
+    client: Object.assign(new SwfteClient(config), { request: async (request: unknown) => { requests.push(request); return report; } }),
     config, localFilesystem: false,
   });
   assert.deepEqual(requests, [{ method: 'POST', path: '/v2/workflows/wf%2F1/translate-to-execution', query: { dryRun: true }, retries: 0 }]);

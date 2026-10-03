@@ -45,7 +45,12 @@ export function assertWidgetProvenance(
     }
     return;
   }
-  if (callerWorkspaceId && entry.workspaceId && entry.workspaceId !== callerWorkspaceId) {
+  if (entry.scope !== 'workspace') throw new Error('Refusing to embed: the widget scope is missing or unknown.');
+  if (typeof callerWorkspaceId !== 'string' || !callerWorkspaceId.trim()
+      || typeof entry.workspaceId !== 'string' || !entry.workspaceId.trim()) {
+    throw new Error('Refusing to embed: both the caller and private widget workspace identities are required. Set SWFTE_WORKSPACE_ID for this caller.');
+  }
+  if (entry.workspaceId !== callerWorkspaceId) {
     throw new Error('Refusing to embed a widget that belongs to a different workspace and is not a verified public entry.');
   }
 }
@@ -114,7 +119,7 @@ export const scaffoldTools: ToolDefinition[] = [
             ? await scanInline(client, code.map((f) => ({ path: f.path, content: f.content ?? '' })))
             : await scanProject(client, writer.root, code.map((f) => f.path));
         } catch (err) {
-          complianceScan = unavailableScan(err instanceof Error ? err.message : String(err));
+          complianceScan = unavailableScan(client.redactError(err instanceof Error ? err.message : String(err)));
         }
       }
       return {

@@ -226,7 +226,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
   try {
     p = parseArgs(argv);
   } catch (err) {
-    io.err(`${err instanceof Error ? err.message : String(err)}\n\n${USAGE}`);
+    io.err(`${redactSecrets(err instanceof Error ? err.message : String(err), [io.env.SWFTE_API_KEY, io.env.SWFTE_PAT])}\n\n${USAGE}`);
     return 2;
   }
   if (flag(p, 'version')) {

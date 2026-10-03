@@ -11,6 +11,12 @@ import { SwfteApiError, SwfteClient, type RequestOptions } from '../src/client.j
 import { loadConfig } from '../src/config.js';
 import { UnsupportedKindError } from '../src/kinds/index.js';
 import type { ToolDefinition } from '../src/tools/_types.js';
+import { catalogTools } from '../src/tools/catalog.js';
+import { contractHash, type CatalogContract } from '../src/catalog.js';
+import { codeTools } from '../src/tools/code.js';
+import { scaffoldTools } from '../src/tools/scaffold.js';
+import { getEvidenceRecord, scanFiles, scanProject } from '../src/compliance.js';
+import { assertNoSecrets } from '../src/fsguard.js';
 
 // All credentials in this file are synthetic. Opaque ones deliberately defeat
 // the generic known-shape scrubber, so the resolved caller identity matters.
@@ -156,6 +162,21 @@ test('hostedToolErrorsRedactResolvedCredentialAndIncomingBearer', async (t) => {
     assert.equal(resolutions, 1);
     assert.equal(executions, 1);
   }
+});
+
+test('protocolDiagnosticMarkerUsesCompleteCallLiteralSet', async (t) => {
+  const { client } = await protocol(t, { config: config('E'),
+    resolveClient: () => new SwfteClient(config('r')),
+    tools: [tool(async () => { throw new SwfteApiError({ status: 503, code: 'HTTP_503',
+      message: 'down r E *', method: 'POST', path: '/safe', envelope: {} }); })],
+  }, auth('*'));
+  const body = JSON.parse(await toolError(client));
+  assert.equal(body.status, 503);
+  assert.equal(body.code, 'HTTP_503');
+  // Only diagnostic values are credential-bearing here. Fixed field/type
+  // labels legitimately contain individual letters such as "r" and "E".
+  noSecrets(body.message, 'r', 'E', '*');
+  assert.match(body.message, /^down /);
 });
 
 test('resolverFailuresRedactIncomingBearerWithoutRetryingResolution', async (t) => {
@@ -394,4 +415,221 @@ test('shortOpaqueIncomingBearerIsRedactedBeforeResolution', async (t) => {
   noSecrets(message, bearer);
   noSecrets(wire, bearer);
   assert.equal(resolutions, 1);
+});
+
+test('unknownPromptRedactsConfiguredAndIncomingOpaqueLiteralsOnActualSdkWire', async (t) => {
+  const credential = 'prompt-config-opaque-fixture', bearer = 'prompt-bearer-opaque-fixture';
+  let resolutions = 0;
+  const { client, wire } = await protocol(t, { config: config(credential), tools: [],
+    resolveClient: () => { resolutions++; return new SwfteClient(config(credential)); } }, auth(bearer));
+  try { await client.getPrompt({ name: `${credential}/${bearer}` }); assert.fail('unknown prompt succeeded'); }
+  catch (error) {
+    assert.ok(error instanceof McpError);
+    assert.equal(error.code, ErrorCode.InvalidParams);
+    assert.match(error.message, /Unknown prompt/);
+    noSecrets(error.message, credential, bearer);
+  }
+  noSecrets(wire, credential, bearer);
+  assert.equal(resolutions, 0, 'unknown local prompt must not resolve a backend client');
+});
+
+class DiagnosticClient extends SwfteClient {
+  constructor(private readonly literal: string, private readonly bearer: string) { super(config(literal)); }
+  override async request<T>(request: RequestOptions): Promise<T> {
+    if (request.path.endsWith('/contract')) throw new SwfteApiError({ status: 503, code: 'STORE_UNAVAILABLE',
+      message: `contract unavailable ${this.literal} ${this.bearer}`, method: 'GET', path: request.path });
+    if (request.path.endsWith('/verify') || request.path.endsWith('/scan')) throw new Error(`verification unavailable ${this.literal} ${this.bearer}`);
+    if (request.path.endsWith('/signing-key')) return null as T;
+    if (request.path.includes('/compliance/')) return { id: 'record', status: 'ISSUED', statement: 'safe statement' } as T;
+    if (request.path.endsWith('/translate-to-execution')) return { translatable: false, refusals: [
+      { nodeId: 'input', code: 'CONFIG_VALUE_INVALID', reason: `refused ${this.literal} ${this.bearer}`, nested: { [this.literal]: this.bearer } },
+      { nodeId: 'output', code: 'CONFIG_SEMANTICS_DIVERGE', reason: 'safe output refusal' },
+    ], warnings: [`warning ${this.literal} ${this.bearer}`], sourceContentHash: 'safe-hash', translatorVersion: '2' } as T;
+    return { catalogRef: 'workflow:fixture', kind: 'workflow', id: 'fixture', name: 'safe name',
+      description: `intentional success data ${this.literal} ${this.bearer}`, scope: 'workspace', evidence: { level: 'unmeasured' } } as T;
+  }
+  override async getBinary() {
+    throw new SwfteApiError({ status: 422, code: 'TRANSLATION_REFUSED', message: 'translation refused', method: 'GET', path: '/fixture',
+      envelope: { refusals: [{ nodeId: 'input', code: 'CREDENTIAL_IN_CONFIG', reason: `refused ${this.literal} ${this.bearer}` },
+        { nodeId: 'output', code: 'CONFIG_SEMANTICS_DIVERGE', reason: 'safe reason' }], warnings: [`warning ${this.literal} ${this.bearer}`] } });
+  }
+}
+
+test('degradedContractScrubsOnlyFailureFieldsAndPreservesSuccessfulCatalogData', async (t) => {
+  const credential = 'contract-opaque-fixture', bearer = 'contract-bearer-fixture';
+  const backend = new DiagnosticClient(credential, bearer);
+  const actual = catalogTools.find((item) => item.name === 'swfte_get_context')!;
+  const { client } = await protocol(t, { config: config(), tools: [actual], resolveClient: () => backend }, auth(bearer));
+  const result = await client.callTool({ name: actual.name, arguments: { catalogRef: 'workflow:fixture' } });
+  assert.notEqual(result.isError, true);
+  const body = JSON.parse((result.content[0] as { text: string }).text);
+  assert.equal(body.contractError.status, 503);
+  assert.equal(body.contractError.code, 'STORE_UNAVAILABLE');
+  assert.match(body.contractError.message, /contract unavailable/);
+  noSecrets(body.contractError, credential, bearer);
+  assert.equal(body.description, `intentional success data ${credential} ${bearer}`);
+  assert.equal(body.contract, null);
+  assert.ok(body.nextSteps.length > 0);
+});
+
+test('degradedVerificationAndScanErrorsScrubBothCallIdentitiesWithoutClaimingPass', async (t) => {
+  const credential = 'verify-opaque-fixture', bearer = 'verify-bearer-fixture';
+  const backend = new DiagnosticClient(credential, bearer);
+  const { client, wire } = await protocol(t, { config: config(), resolveClient: () => backend, tools: [
+    tool(async (_input, { client: api }) => getEvidenceRecord(api, 'record'), 'fixture_record'),
+    tool(async (_input, { client: api }) => scanFiles(api, { files: [{ path: 'src/main.ts', content: 'export const publicValue = 1;' }] }), 'fixture_scan'),
+  ] }, auth(bearer));
+  const record = await client.callTool({ name: 'fixture_record', arguments: {} });
+  const recordBody = JSON.parse((record.content[0] as { text: string }).text);
+  assert.equal(recordBody.conclusion, 'UNVERIFIABLE');
+  assert.match(JSON.stringify(recordBody), /verification unavailable/);
+  noSecrets(recordBody, credential, bearer);
+  const scan = await client.callTool({ name: 'fixture_scan', arguments: {} });
+  const scanBody = JSON.parse((scan.content[0] as { text: string }).text);
+  assert.equal(scanBody.complete, false);
+  assert.equal(scanBody.batchErrors.length, 1);
+  assert.match(scanBody.batchErrors[0], /verification unavailable/);
+  noSecrets(scanBody, credential, bearer);
+  noSecrets(wire, credential, bearer);
+});
+
+test('translationRefusalAndDryRunScrubCompleteNestedDiagnosticsOnActualSdkWire', async (t) => {
+  const credential = 'refusal-opaque-fixture', bearer = 'refusal-bearer-fixture';
+  const backend = new DiagnosticClient(credential, bearer);
+  const tools = codeTools.filter((item) => ['swfte_export_src', 'swfte_translate_check'].includes(item.name));
+  const { client, wire } = await protocol(t, { config: config(), tools, resolveClient: () => backend }, auth(bearer));
+  for (const [name, args] of [['swfte_export_src', { workflowId: 'fixture', source: 'canvas', destDir: 'refused-source' }],
+    ['swfte_translate_check', { workflowId: 'fixture' }]] as const) {
+    const result = await client.callTool({ name, arguments: args });
+    assert.notEqual(result.isError, true);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.refusals.length, 2);
+    assert.deepEqual(body.refusals.map((item: any) => item.nodeId), ['input', 'output']);
+    assert.match(body.nextStep, /Keep this workflow hosted/);
+    noSecrets(body, credential, bearer);
+  }
+  noSecrets(wire, credential, bearer);
+});
+
+test('ordinarySuccessfulToolPayloadIsNotRewrittenByDiagnosticRedaction', async (t) => {
+  const credential = 'success-opaque-fixture', bearer = 'success-bearer-fixture';
+  const payload = { token: credential, message: bearer, nested: { ordinaryData: `${credential}/${bearer}` }, count: 3 };
+  const { client } = await protocol(t, { config: config(credential), tools: [tool(async () => payload)] }, auth(bearer));
+  const result = await client.callTool({ name: 'fixture_tool', arguments: {} });
+  assert.notEqual(result.isError, true);
+  assert.deepEqual(JSON.parse((result.content[0] as { text: string }).text), payload);
+});
+
+test('invokeOutputPathMetadataRemainsInContextAndContractHash', async (t) => {
+  const contract: CatalogContract = { catalogRef: 'workflow:fixture',
+    invoke: { method: 'POST', path: '/v2/workflows/fixture/invoke', auth: 'api_key', async: true,
+      statusPath: '/v2/workflows/executions/{executionId}/status', outputPath: ['execution', 'outputData', 'parameters', 'end'] },
+    inputSchema: { type: 'object' }, outputSchema: { type: 'object' } };
+  class ContextClient extends SwfteClient {
+    override async request<T>(request: RequestOptions): Promise<T> {
+      return (request.path.endsWith('/contract') ? contract : { catalogRef: 'workflow:fixture', kind: 'workflow', id: 'fixture', name: 'public fixture' }) as T;
+    }
+  }
+  const actual = catalogTools.find((item) => item.name === 'swfte_get_context')!;
+  const { client } = await protocol(t, { config: config(), tools: [actual], resolveClient: () => new ContextClient(config()) });
+  const result = await client.callTool({ name: actual.name, arguments: { catalogRef: 'workflow:fixture' } });
+  assert.notEqual(result.isError, true);
+  const body = JSON.parse((result.content[0] as { text: string }).text);
+  assert.deepEqual(body.contract.invoke, contract.invoke);
+  assert.equal(body.contractHash, contractHash(contract));
+  const { outputPath: _path, ...withoutResultPath } = contract.invoke;
+  assert.notEqual(contractHash(contract), contractHash({ ...contract, invoke: withoutResultPath }));
+});
+
+test('degradedProjectScanScrubsRefusedPathsAndNeverClaimsChecked', async (t) => {
+  const credential = 'project-opaque-fixture', bearer = 'project-bearer-fixture';
+  const backend = new DiagnosticClient(credential, bearer);
+  const { client, wire } = await protocol(t, { config: config(), resolveClient: () => backend, tools: [
+    tool(async (_input, { client: api }) => scanProject(api, process.cwd(), [`/outside/${credential}/${bearer}`]), 'fixture_project_scan'),
+  ] }, auth(bearer));
+  const result = await client.callTool({ name: 'fixture_project_scan', arguments: {} });
+  const body = JSON.parse((result.content[0] as { text: string }).text);
+  assert.equal(body.complete, false);
+  assert.equal(body.verdict, 'UNAVAILABLE');
+  assert.equal(body.filesScanned, 0);
+  assert.equal(body.batchErrors.length, 1);
+  assert.match(body.batchErrors[0], /outside the working directory/);
+  noSecrets(body, credential, bearer);
+  noSecrets(wire, credential, bearer);
+});
+
+test('degradedDependencyErrorsScrubBothDirectionsOnActualSdkWire', async (t) => {
+  const credential = 'dependency-opaque-fixture', bearer = 'dependency-bearer-fixture';
+  class DependencyClient extends SwfteClient {
+    override async request<T>(request: RequestOptions): Promise<T> {
+      if (request.path === '/v2/catalog/search') return { items: [{ kind: 'workflow', id: 'referrer', catalogRef: 'workflow:referrer', name: 'safe referrer' }], degraded: [] } as T;
+      throw new Error(`dependency read unavailable ${credential} ${bearer}`);
+    }
+  }
+  const actual = catalogTools.find((item) => item.name === 'swfte_trace_dependencies')!;
+  const { client, wire } = await protocol(t, { config: config(), resolveClient: () => new DependencyClient(config(credential)), tools: [actual] }, auth(bearer));
+  for (const direction of ['downstream', 'upstream']) {
+    const result = await client.callTool({ name: actual.name, arguments: { catalogRef: 'workflow:fixture', direction, depth: 1, maxScan: 1 } });
+    assert.notEqual(result.isError, true);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.errors.length, 1);
+    assert.match(body.errors[0], /dependency read unavailable/);
+    assert.equal(body.direction, direction);
+    if (direction === 'downstream') assert.deepEqual(body.edges, []);
+    else { assert.equal(body.scanned, 1); assert.deepEqual(body.dependents, []); }
+    noSecrets(body.errors, credential, bearer);
+  }
+  noSecrets(wire, credential, bearer);
+});
+
+test('inlineScaffoldScanFailureStaysAdvisoryAndScrubsCallIdentities', async (t) => {
+  const credential = 'scaffold-scan-opaque-fixture', bearer = 'scaffold-scan-bearer-fixture';
+  let scans = 0;
+  class ScaffoldClient extends SwfteClient {
+    override async request<T>(request: RequestOptions): Promise<T> {
+      if (request.path.endsWith('/contract')) return { catalogRef: 'agent:fixture',
+        invoke: { method: 'POST', path: '/v1/agents/fixture/chat/{userId}', auth: 'api_key', async: false, statusPath: null },
+        inputSchema: { type: 'object', properties: { message: { type: 'string' } } }, outputSchema: {} } as T;
+      if (request.path.endsWith('/scan')) { scans++; throw new Error(`advisory unavailable ${credential} ${bearer}`); }
+      return { catalogRef: 'agent:fixture', kind: 'agent', id: 'fixture', name: 'public fixture', scope: 'workspace' } as T;
+    }
+  }
+  const actual = scaffoldTools.find((item) => item.name === 'swfte_scaffold_client')!;
+  const { client, wire } = await protocol(t, { config: { ...config(), telemetry: false }, localFilesystem: false,
+    resolveClient: () => new ScaffoldClient(config(credential)), tools: [actual] }, auth(bearer));
+  const result = await client.callTool({ name: actual.name, arguments: { catalogRef: 'agent:fixture', framework: 'plain-ts' } });
+  assert.notEqual(result.isError, true);
+  const body = JSON.parse((result.content[0] as { text: string }).text);
+  assert.equal(body.inline, true);
+  assert.ok(body.files.some((file: any) => file.path.endsWith('.ts') && typeof file.content === 'string'));
+  assert.equal(scans, 1);
+  assert.equal(body.complianceScan.complete, false);
+  assert.equal(body.complianceScan.verdict, 'UNAVAILABLE');
+  assert.equal(body.complianceScan.batchErrors.length, 1);
+  assert.match(body.complianceScan.batchErrors[0], /advisory unavailable/);
+  noSecrets(body.complianceScan, credential, bearer);
+  noSecrets(wire, credential, bearer);
+});
+
+test('resolvedCallIdentityAndIncomingBearerGuardContentBeforeOutbound', async (t) => {
+  const credential = 'resolved-content-opaque-fixture', bearer = 'incoming-content-opaque-fixture';
+  let outbound = 0;
+  const { client, wire } = await protocol(t, { config: config(), resolveClient: () => new SwfteClient(config(credential)), tools: [
+    tool(async (input) => {
+      const content = input.mode === 'resolved' ? credential : input.mode === 'incoming' ? bearer : 'ordinary public source';
+      assertNoSecrets('to upload fixture content', content);
+      outbound++;
+      return { id: 'safe-upload', content };
+    }, 'fixture_content', z.object({ mode: z.enum(['resolved', 'incoming', 'public']) })),
+  ] }, auth(bearer));
+  for (const mode of ['resolved', 'incoming']) {
+    const error = await toolError(client, 'fixture_content', { mode });
+    assert.match(error, /configured Swfte credential/);
+    assert.equal(outbound, 0);
+  }
+  noSecrets(wire, credential, bearer);
+  const result = await client.callTool({ name: 'fixture_content', arguments: { mode: 'public' } });
+  assert.notEqual(result.isError, true);
+  assert.equal(outbound, 1);
+  assert.deepEqual(JSON.parse((result.content[0] as { text: string }).text), { id: 'safe-upload', content: 'ordinary public source' });
 });

@@ -22,6 +22,7 @@ import { buildServer } from './server.js';
 import { SwfteClient } from './client.js';
 import { detectCredentialKind, loadConfig, type ServerConfig } from './config.js';
 import { createOAuthEndpoints, loadOAuthOptions, type AuthenticateResult, type OAuthEndpoints } from './oauth.js';
+import { fatalLine, redactSecrets, withErrorSecrets } from './fsguard.js';
 
 export interface HttpHandlerOptions {
   /**
@@ -188,7 +189,7 @@ export function createHostedHandler(opts: HostedHandlerOptions = {}): HostedHand
       if (oauthResponse) return oauthResponse;
 
       const { pathname } = new URL(req.url);
-      if (pathname === mcpPath) return mcp(req);
+      if (pathname === mcpPath) return await mcp(req);
 
       return new Response(JSON.stringify({ error: 'not_found', mcp_endpoint: mcpPath }), {
         status: 404,
@@ -198,8 +199,10 @@ export function createHostedHandler(opts: HostedHandlerOptions = {}): HostedHand
       // An unhandled throw here reaches the client as the platform's own error page, with
       // nothing an OAuth client can parse and nothing in the logs tying it to a request.
       // Answer in the shape the caller expects and put the reason where it can be read.
-      const message = err instanceof Error ? err.message : String(err);
-      console.error('[swfte-mcp] unhandled error:', err);
+      const bearer = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
+      const secrets = [bearer, env.SWFTE_PAT, env.SWFTE_API_KEY];
+      const message = redactSecrets(err instanceof Error ? err.message : String(err), secrets);
+      console.error(withErrorSecrets(secrets, () => fatalLine('swfte-mcp', err, {})));
       return new Response(JSON.stringify({ error: 'server_error', error_description: message }), {
         status: 500,
         headers: { 'content-type': 'application/json' },

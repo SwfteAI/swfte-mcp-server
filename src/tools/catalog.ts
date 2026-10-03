@@ -228,7 +228,7 @@ async function traceDependencies(
           n.evidenceLevel = d.evidence?.level;
           detailDeps = (d.dependencies ?? []).map((x) => ({ from: r.ref, to: x.catalogRef, relation: x.relation, source: 'catalog' as const }));
         } catch (err) {
-          errors.push(`${r.ref}: ${err instanceof Error ? err.message : String(err)}`);
+          errors.push(client.redactError(`${r.ref}: ${err instanceof Error ? err.message : String(err)}`));
         }
         const live = await liveReferences(client, r);
         const seen = new Set(detailDeps.map((e) => e.to));
@@ -295,7 +295,7 @@ async function traceDependencies(
       const hit = (d.dependencies ?? []).find((x) => x.catalogRef === root.ref);
       if (hit) dependents.push({ catalogRef: ref, name: d.name, relation: hit.relation, evidenceLevel: d.evidence?.level });
     } catch (err) {
-      errors.push(`${ref}: ${err instanceof Error ? err.message : String(err)}`);
+      errors.push(client.redactError(`${ref}: ${err instanceof Error ? err.message : String(err)}`));
     }
   }
   return {

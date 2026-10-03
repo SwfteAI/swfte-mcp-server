@@ -2,7 +2,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 
 import { buildServer } from './server.js';
 import { loadConfig } from './config.js';
-import { fatalLine } from './fsguard.js';
+import { fatalLine, redactSecrets } from './fsguard.js';
 
 async function main() {
   let config;
@@ -10,7 +10,7 @@ async function main() {
     config = loadConfig();
   } catch (err) {
     process.stderr.write(
-      `[swfte-mcp] ${err instanceof Error ? err.message : String(err)}\n` +
+      redactSecrets(`[swfte-mcp] ${err instanceof Error ? err.message : String(err)}\n`, [process.env.SWFTE_PAT, process.env.SWFTE_API_KEY]) +
         '[swfte-mcp] See https://www.swfte.com/developers for setup instructions.\n'
     );
     process.exit(1);
@@ -21,7 +21,7 @@ async function main() {
   await server.connect(transport);
 
   process.stderr.write(
-    `[swfte-mcp] Connected. base=${config.baseUrl} workspace=${config.workspaceId ?? '(per-tool)'} \n`
+    redactSecrets(`[swfte-mcp] Connected. base=${config.baseUrl} workspace=${config.workspaceId ?? '(per-tool)'} \n`, [config.credential])
   );
 }
 

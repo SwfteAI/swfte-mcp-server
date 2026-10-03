@@ -36,7 +36,7 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const cfg = (env: Record<string, string> = {}) => loadConfig({ SWFTE_PAT: 'pat_TESTPAT123456', SWFTE_TELEMETRY: '0', ...env } as never);
+const cfg = (env: Record<string, string> = {}) => loadConfig({ SWFTE_PAT: 'pat_TESTPAT123456', SWFTE_WORKSPACE_ID: 'ws1', SWFTE_TELEMETRY: '0', ...env } as never);
 const tool = (n: string) => allTools.find((t) => t.name === n)!;
 const call = async (n: string, input: unknown, env: Record<string, string> = {}) => {
   const { SwfteClient } = await import('../src/client.js');
@@ -106,6 +106,43 @@ describe('embed_widget shows third-party markup before it lands (R6)', () => {
     routes.push([/contract$/, widget(html)], [/\/v2\/catalog\/widget\/wd_1$/, entry({ scope: 'public', workspaceId: 'other', evidence: { level: 'unmeasured' } })]);
     await assert.rejects(call('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: 'w.html', confirm: true }), /not verified/);
     assert.deepEqual(readdirSync(root), []);
+  });
+
+  test('widgetMissingOrUnknownScopeIsRefusedBeforeMarkupOrWrites', async () => {
+    for (const scope of [undefined, '', 'private', 'PUBLIC', 'unknown']) {
+      assert.throws(() => assertWidgetProvenance({ scope, workspaceId: 'ws1', evidence: { level: 'verified' } }, 'ws1'), /scope is missing or unknown/);
+      routes = [[/contract$/, widget(html)], [/\/v2\/catalog\/widget\/wd_1$/, entry({ scope, evidence: { level: 'verified' } })]];
+      await assert.rejects(call('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: 'w.html', confirm: true }), /scope is missing or unknown/);
+      assert.deepEqual(readdirSync(root), []);
+    }
+  });
+
+  test('widgetMissingPrivateWorkspaceIdentityIsRefusedBeforeMarkupOrWrites', async () => {
+    for (const workspaceId of [undefined, null, '', '   ']) {
+      assert.throws(() => assertWidgetProvenance({ scope: 'workspace', workspaceId }, 'ws1'), /workspace identities are required/);
+      routes = [[/contract$/, widget(html)], [/\/v2\/catalog\/widget\/wd_1$/, entry({ workspaceId })]];
+      await assert.rejects(call('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: 'w.html', confirm: true }), /workspace identities are required/);
+      assert.deepEqual(readdirSync(root), []);
+    }
+    for (const caller of [undefined, '', '   ']) assert.throws(() => assertWidgetProvenance(entry(), caller), /workspace identities are required/);
+    assert.throws(() => assertWidgetProvenance({ scope: 'workspace' }), /workspace identities are required/);
+    routes = [[/contract$/, widget(html)], [/\/v2\/catalog\/widget\/wd_1$/, entry()]];
+    await assert.rejects(call('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: 'w.html', confirm: true }, { SWFTE_WORKSPACE_ID: '' }), /workspace identities are required/);
+    routes = [[/contract$/, widget(html)], [/\/v2\/catalog\/widget\/wd_1$/, entry({ workspaceId: undefined })]];
+    await assert.rejects(call('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: 'w.html', confirm: true }, { SWFTE_WORKSPACE_ID: '' }), /workspace identities are required/);
+    assert.deepEqual(readdirSync(root), []);
+  });
+
+  test('widgetVerifiedPublicAndExactOwnedIdentitiesKeepSupportedMarkup', async () => {
+    assert.doesNotThrow(() => assertWidgetProvenance({ scope: 'public', evidence: { level: 'verified' } }));
+    assert.doesNotThrow(() => assertWidgetProvenance({ scope: 'workspace', workspaceId: 'ws1' }, 'ws1'));
+    for (const metadata of [entry(), entry({ scope: 'public', workspaceId: null, evidence: { level: 'verified' } })]) {
+      routes = [[/contract$/, widget(html)], [/\/v2\/catalog\/widget\/wd_1$/, metadata]];
+      const result = await call('swfte_embed_widget', { catalogRef: 'widget:wd_1' });
+      assert.equal(result.requiresConfirmation, true);
+      assert.match(result.html, /cdn\.swfte\.com\/w\.js/);
+      assert.deepEqual(result.written, []);
+    }
   });
 });
 

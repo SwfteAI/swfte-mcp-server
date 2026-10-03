@@ -17,7 +17,7 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 
 import { SwfteApiError, SwfteClient } from './client.js';
 import { loadConfig, type ServerConfig } from './config.js';
-import { redactSecrets } from './fsguard.js';
+import { redactErrorValue, redactSecrets, withErrorSecrets } from './fsguard.js';
 import { UnsupportedKindError, UnsupportedVerbError } from './kinds/index.js';
 import { allTools } from './tools/index.js';
 import type { ToolDefinition } from './tools/_types.js';
@@ -60,26 +60,12 @@ export function selectTools(tools: ToolDefinition[], config: ServerConfig): Tool
 function redactProtocolMessage(
   message: string, config: ServerConfig, authInfo: AuthInfo | undefined, client: SwfteClient | undefined
 ): string {
-  let safe = client ? client.redactError(message) : redactSecrets(message);
   // Opaque OAuth tokens need not match a known secret shape or length. These
-  // literals also cover failures before a resolver has returned a client.
-  const secrets = [config.credential, authInfo?.token].filter((s): s is string => !!s).sort((a, b) => b.length - a.length);
-  for (const secret of secrets) safe = safe.split(secret).join('[redacted]');
-  return safe;
-}
-
-/** Error envelopes can nest strings in both keys and values. Never mutate them. */
-function redactErrorValue(value: unknown, redact: (message: string) => string, ancestors = new WeakSet<object>()): unknown {
-  if (typeof value === 'string') return redact(value);
-  if (value === null || typeof value !== 'object') return value;
-  if (ancestors.has(value)) return '[circular]';
-  ancestors.add(value);
-  try {
-    if (Array.isArray(value)) return value.map((item) => redactErrorValue(item, redact, ancestors));
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [redact(key), redactErrorValue(item, redact, ancestors)]));
-  } finally {
-    ancestors.delete(value);
-  }
+  // literals also cover failures before a resolver has returned a client. Use
+  // one complete set: sequential markers could reintroduce an earlier literal.
+  return client
+    ? client.withErrorSecrets([config.credential, authInfo?.token], () => client.redactError(message))
+    : redactSecrets(message, [config.credential, authInfo?.token]);
 }
 
 export function buildServer(opts: BuildServerOptions = {}): Server {
@@ -139,7 +125,8 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
       }
 
       client = await resolveClient(extra?.authInfo);
-      const result = await tool.execute(parsed.data, { client, config, localFilesystem: opts.localFilesystem ?? true });
+      const result = await client.withErrorSecrets([config.credential, extra?.authInfo?.token], () =>
+        tool.execute(parsed.data, { client: client!, config, localFilesystem: opts.localFilesystem ?? true }));
       return {
         content: [
           {
@@ -177,11 +164,11 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
       return resolved;
     });
     try {
-      const content = await readResource(req.params.uri, {
+      const content = await withErrorSecrets([config.credential, extra?.authInfo?.token], () => readResource(req.params.uri, {
         client: getClient,
         config,
         tools,
-      });
+      }));
       return { contents: [content] };
     } catch (err) {
       if (err instanceof ResourceNotFoundError) throw new McpError(ErrorCode.InvalidParams, redact(err.message));
@@ -204,13 +191,13 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({
     prompts: PROMPTS.map((p) => ({ name: p.name, title: p.title, description: p.description, arguments: p.arguments })),
   }));
-  server.setRequestHandler(GetPromptRequestSchema, async (req) => {
+  server.setRequestHandler(GetPromptRequestSchema, async (req, extra) => {
     try {
       return getPrompt(req.params.name, (req.params.arguments ?? {}) as Record<string, string>);
     } catch (err) {
       // Unknown prompt or a missing required argument: the caller's request is at fault.
-      if (err instanceof Error) throw new McpError(ErrorCode.InvalidParams, err.message);
-      throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      throw new McpError(ErrorCode.InvalidParams, redactProtocolMessage(message, config, extra?.authInfo, sharedClient ?? undefined));
     }
   });
 

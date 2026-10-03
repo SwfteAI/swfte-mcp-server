@@ -77,6 +77,11 @@ const tool = (name: string) => {
 };
 const ctx = () => ({ client: new SwfteClient(config()), config: config() });
 const run = (name: string, input: unknown) => tool(name).execute(input as never, ctx()) as Promise<any>;
+// Private-widget embeds now require the caller's workspace identity (the fixtures' entries belong to ws1).
+const runInWorkspace = (name: string, input: unknown) => {
+  const cfg = loadConfig({ SWFTE_PAT: CREDENTIAL, SWFTE_TELEMETRY: '0', SWFTE_WORKSPACE_ID: 'ws1' } as never);
+  return tool(name).execute(input as never, { client: new SwfteClient(cfg), config: cfg }) as Promise<any>;
+};
 
 /* ── fixtures ────────────────────────────────────────────────────────────── */
 
@@ -603,7 +608,7 @@ describe('swfte_embed_widget', () => {
   test('writes the embed markup into a confined file', async () => {
     widgetEntry();
     route('GET', /^\/v2\/catalog\/widget\/wd_1\/contract$/, { body: widgetContract('<script src="https://cdn.swfte.com/w.js" data-widget="wd_1"></script>') });
-    const res = await run('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: 'public/support.html', confirm: true });
+    const res = await runInWorkspace('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: 'public/support.html', confirm: true });
     assert.equal(res.embeddable, true);
     assert.equal(res.written[0].path, 'public/support.html');
     assert.match(readFileSync(join(tmp, 'public/support.html'), 'utf8'), /data-widget="wd_1"/);
@@ -613,9 +618,9 @@ describe('swfte_embed_widget', () => {
     widgetEntry();
     route('GET', /^\/v2\/catalog\/widget\/wd_1\/contract$/, { body: widgetContract('<div id="w"></div>') });
     writeFileSync(join(tmp, 'index.html'), '<html>mine</html>');
-    await assert.rejects(run('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: 'index.html', confirm: true }), /Refusing to overwrite/);
+    await assert.rejects(runInWorkspace('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: 'index.html', confirm: true }), /Refusing to overwrite/);
     assert.equal(readFileSync(join(tmp, 'index.html'), 'utf8'), '<html>mine</html>');
-    await assert.rejects(run('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: '../outside.html', confirm: true }), /outside the working directory/);
+    await assert.rejects(runInWorkspace('swfte_embed_widget', { catalogRef: 'widget:wd_1', targetFile: '../outside.html', confirm: true }), /outside the working directory/);
   });
 
   test('no embed is reported; a secret in markup is refused', async () => {
@@ -623,7 +628,7 @@ describe('swfte_embed_widget', () => {
     assert.equal((await run('swfte_embed_widget', { catalogRef: 'workflow:wf_9' })).embeddable, false);
     routes = [];
     route('GET', /^\/v2\/catalog\/widget\/wd_1\/contract$/, { body: widgetContract('<script data-key="sk-swfte-LEAKEDLEAKED123"></script>') });
-    await assert.rejects(run('swfte_embed_widget', { catalogRef: 'widget:wd_1' }), /secret-shaped/);
+    await assert.rejects(runInWorkspace('swfte_embed_widget', { catalogRef: 'widget:wd_1' }), /secret-shaped/);
   });
 });
 

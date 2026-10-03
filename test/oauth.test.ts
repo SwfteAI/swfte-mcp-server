@@ -27,6 +27,7 @@ interface ExchangeCall {
   url: string;
   body: unknown;
   authorization?: string;
+  redirect?: RequestRedirect;
 }
 
 function endpoints(overrides: Partial<OAuthOptions> = {}): {
@@ -50,6 +51,7 @@ function endpoints(overrides: Partial<OAuthOptions> = {}): {
         url: String(url),
         body: JSON.parse(String(init?.body ?? '{}')),
         authorization: headers.get('authorization') ?? undefined,
+        redirect: init?.redirect,
       });
       return new Response(JSON.stringify(exchangeReply.body), {
         status: exchangeReply.status,
@@ -240,13 +242,13 @@ describe('authorization redirect', () => {
 
 describe('callback and token exchange', () => {
   /** Walk the flow to the point where the client holds an authorization code. */
-  async function codeInHand(api: OAuthEndpoints) {
+  async function codeInHand(api: OAuthEndpoints, upstreamCode = 'upstream-one-time-code') {
     const { body: client } = await register(api);
     const authorize = await api.handle(new Request(authorizeUrl(client.client_id)));
     const state = new URL(authorize!.headers.get('location')!).searchParams.get('state')!;
 
     const callback = await api.handle(
-      new Request(`${ISSUER}/callback?code=upstream-one-time-code&state=${encodeURIComponent(state)}`)
+      new Request(`${ISSUER}/callback?code=${encodeURIComponent(upstreamCode)}&state=${encodeURIComponent(state)}`)
     );
     assert.ok(callback);
     assert.equal(callback.status, 302);
@@ -296,6 +298,143 @@ describe('callback and token exchange', () => {
     assert.equal(exchanges.length, 1);
     assert.equal(exchanges[0]!.url, EXCHANGE_URL);
     assert.deepEqual(exchanges[0]!.body, { code: 'upstream-one-time-code' });
+    assert.equal(exchanges[0]!.redirect, 'manual');
+  });
+
+  async function redeem(api: OAuthEndpoints, upstreamCode: string) {
+    const { client, back } = await codeInHand(api, upstreamCode);
+    const response = await api.handle(new Request(`${ISSUER}/token`, { method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({
+        grant_type: 'authorization_code', client_id: client.client_id, code: back.searchParams.get('code')!,
+        code_verifier: VERIFIER, redirect_uri: CLIENT_REDIRECT,
+      }) }));
+    assert.ok(response);
+    return { status: response.status, body: await response.json() as any };
+  }
+
+  test('exchangeRedirectNeverReplaysCodeOrServiceToken', async () => {
+    const token = 'opaque-exchange-token-fixture', code = 'opaque-upstream-code-fixture';
+    const calls: Array<{ url: string; mode?: RequestRedirect }> = [];
+    let secondReceiver = 0, redirectCancelled = 0;
+    const { api } = endpoints({ exchangeToken: token, fetchImpl: (async (url, init) => {
+      calls.push({ url: String(url), mode: init?.redirect });
+      assert.equal(new Headers(init?.headers).get('authorization'), `Bearer ${token}`);
+      assert.deepEqual(JSON.parse(String(init?.body)), { code });
+      if (init?.redirect !== 'manual') {
+        // Model fetch's automatic307 replay to a second receiver. An absent
+        // policy is observable as leakage, not just an options assertion.
+        secondReceiver++;
+        return new Response(JSON.stringify({ access_token: 'pat_wrong_receiver' }), { status: 200 });
+      }
+      const body = new ReadableStream<Uint8Array>({ cancel() { redirectCancelled++; } }, { highWaterMark: 0 });
+      return new Response(body, { status: 307, headers: { location: 'https://second.test/exchange' } });
+    }) as typeof fetch });
+    const result = await redeem(api, code);
+    assert.equal(secondReceiver, 0);
+    assert.equal(redirectCancelled, 1, 'a refused redirect body must be cancelled rather than read or retained');
+    assert.deepEqual(calls, [{ url: EXCHANGE_URL, mode: 'manual' }]);
+    assert.equal(result.status, 500);
+    assert.equal(result.body.error, 'server_error');
+    assert.match(result.body.error_description, /redirected/);
+    for (const secret of [token, code]) assert.equal(JSON.stringify(result.body).includes(secret), false);
+  });
+
+  test('exchangeFailureScrubsKnownLiteralsBeforeTruncation', async () => {
+    const token = 'opaque-exchange-token-fixture', code = 'opaque-upstream-code-fixture';
+    for (const status of [400, 503]) {
+      const { api } = endpoints({ exchangeToken: token, fetchImpl: (async () => new Response(
+        `${'x'.repeat(285)}${token} ${code} safe trailing detail`, { status })) as typeof fetch });
+      const result = await redeem(api, code);
+      assert.equal(result.status, status === 400 ? 400 : 500);
+      assert.equal(result.body.error, status === 400 ? 'invalid_grant' : 'server_error');
+      assert.match(result.body.error_description, /\[redacted\]/);
+      for (const secret of [token, code, token.slice(0, 15)]) assert.equal(result.body.error_description.includes(secret), false,
+        'scrubbing must precede truncation, which otherwise leaks a token prefix');
+    }
+    const { api } = endpoints({ exchangeToken: token, fetchImpl: (async () => { throw new Error(`connect failed ${token} ${code}`); }) as typeof fetch });
+    const result = await redeem(api, code);
+    assert.equal(result.status, 500);
+    assert.match(result.body.error_description, /connect failed/);
+    for (const secret of [token, code]) assert.equal(result.body.error_description.includes(secret), false);
+  });
+
+  test('exchangeBodyReadFailureScrubsKnownLiterals', async () => {
+    const token = 'opaque-exchange-token-fixture', code = 'opaque-upstream-code-fixture';
+    let cancelled = 0;
+    const { api } = endpoints({ exchangeToken: token, fetchImpl: (async () => {
+      const body = new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new Error(`body interrupted ${token} ${code}`)); } }, { highWaterMark: 0 });
+      const getReader = body.getReader.bind(body);
+      body.getReader = (() => {
+        const reader = getReader(), cancel = reader.cancel.bind(reader);
+        reader.cancel = (reason) => { cancelled++; return cancel(reason); };
+        return reader;
+      }) as typeof body.getReader;
+      const response = new Response(body, { status: 200 });
+      return response;
+    }) as typeof fetch });
+    const result = await redeem(api, code);
+    assert.equal(result.status, 500);
+    assert.equal(result.body.error, 'server_error');
+    assert.match(result.body.error_description, /body interrupted/);
+    assert.equal(cancelled, 1, 'read failure must attempt reader cancellation');
+    for (const secret of [token, code]) assert.equal(result.body.error_description.includes(secret), false);
+  });
+
+  test('exchangeDeclaredOversizeCancelsWithoutReadingBody', async () => {
+    let cancelled = 0, readers = 0;
+    const { api } = endpoints({ fetchImpl: (async () => {
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) { controller.enqueue(new TextEncoder().encode('{"access_token":"pat_declared_fixture"}')); controller.close(); },
+        cancel() { cancelled++; },
+      }, { highWaterMark: 0 });
+      const getReader = body.getReader.bind(body);
+      body.getReader = (() => { readers++; return getReader(); }) as typeof body.getReader;
+      return new Response(body, { status: 200, headers: { 'content-length': '16385' } });
+    }) as typeof fetch });
+    const result = await redeem(api, 'bounded-upstream-fixture');
+    assert.equal(result.status, 500);
+    assert.equal(result.body.error, 'server_error');
+    assert.match(result.body.error_description, /byte limit/);
+    assert.equal(readers, 0);
+    assert.equal(cancelled, 1);
+  });
+
+  test('exchangeUnknownLengthOverflowCancelsBeforeCompleteBody', async () => {
+    let cancelled = 0, pulls = 0;
+    const payload = new TextEncoder().encode(JSON.stringify({ access_token: 'pat_bounded_token', padding: 'x'.repeat(24 * 1024) }));
+    const { api } = endpoints({ fetchImpl: (async () => {
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) { const start = pulls++ * (12 * 1024); if (start < payload.length) controller.enqueue(payload.slice(start, start + 12 * 1024)); else controller.close(); },
+        cancel() { cancelled++; },
+      }, { highWaterMark: 0 });
+      return new Response(body, { status: 200 });
+    }) as typeof fetch });
+    const result = await redeem(api, 'bounded-upstream-fixture');
+    assert.equal(result.status, 500);
+    assert.equal(result.body.error, 'server_error');
+    assert.match(result.body.error_description, /byte limit/);
+    assert.equal(pulls, 2, 'stop once cumulative bytes exceed the cap');
+    assert.equal(cancelled, 1);
+  });
+
+  test('exchangeSmallStreamedTokenIsUnchangedWithDeclaredAndUnknownLength', async () => {
+    const issuedToken = 'pat_small_streamed_fixture';
+    const payload = new TextEncoder().encode(JSON.stringify({ access_token: issuedToken, expires_in: 120 }));
+    for (const declared of [false, true]) {
+      let cancelled = 0, offset = 0;
+      const { api } = endpoints({ fetchImpl: (async () => {
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) { if (offset < payload.length) { controller.enqueue(payload.slice(offset, offset + 7)); offset += 7; } else controller.close(); },
+          cancel() { cancelled++; },
+        }, { highWaterMark: 0 });
+        return new Response(body, { status: 200, headers: declared ? { 'content-length': String(payload.length) } : {} });
+      }) as typeof fetch });
+      const result = await redeem(api, 'bounded-upstream-fixture');
+      assert.equal(result.status, 200);
+      assert.equal(result.body.access_token, issuedToken);
+      assert.equal(result.body.expires_in, 120);
+      assert.equal(cancelled, 0);
+    }
   });
 
   test('the redemption is authenticated when a shared secret is configured', async () => {
@@ -386,6 +525,23 @@ describe('callback and token exchange', () => {
     assert.equal(back.searchParams.get('state'), 'client-state-abc');
   });
 
+  test('callbackErrorDescriptionScrubsKnownExchangeCredentialAndKeepsBrowserRedirect', async () => {
+    const token = 'opaque-callback-exchange-fixture';
+    const { api } = endpoints({ exchangeToken: token });
+    const { body: client } = await register(api);
+    const authorize = await api.handle(new Request(authorizeUrl(client.client_id)));
+    const state = new URL(authorize!.headers.get('location')!).searchParams.get('state')!;
+    const response = await api.handle(new Request(`${ISSUER}/callback?error=access_denied&error_description=${encodeURIComponent(`declined ${token}`)}&state=${encodeURIComponent(state)}`));
+    assert.ok(response);
+    assert.equal(response.status, 302);
+    const back = new URL(response.headers.get('location')!);
+    assert.equal(back.origin + back.pathname, CLIENT_REDIRECT);
+    assert.equal(back.searchParams.get('state'), 'client-state-abc');
+    assert.equal(back.searchParams.get('error'), 'access_denied');
+    assert.equal(back.searchParams.get('error_description'), 'declined [redacted]');
+    assert.equal(back.href.includes(token), false);
+  });
+
   test('a callback with a forged state is answered in place, never redirected', async () => {
     const { api } = endpoints();
     // Redirecting somewhere named in an unverified query would make this an open
@@ -425,6 +581,22 @@ describe('bearer authentication', () => {
       method: 'POST',
       headers: authorization ? { authorization } : {},
     });
+
+  test('verificationFailureScrubsIncomingBearer', async () => {
+    const token = 'pat_opaque_verification_fixture';
+    let calls = 0;
+    globalThis.fetch = (async () => { calls++; throw new Error(`identity transport failed ${token}`); }) as typeof fetch;
+    const { api } = endpoints();
+    const result = await api.authenticate(mcpRequest(`Bearer ${token}`));
+    assert.ok('response' in result);
+    assert.equal(result.response.status, 500);
+    const body: any = await result.response.json();
+    assert.equal(body.error, 'server_error');
+    assert.match(body.error_description, /identity transport failed/);
+    assert.equal(JSON.stringify(body).includes(token), false);
+    assert.equal((result.response.headers.get('www-authenticate') ?? '').includes(token), false);
+    assert.equal(calls, 2, 'the existing single retry budget is preserved');
+  });
 
   test('no Authorization header is a 401 that says where to log in', async () => {
     const { api } = endpoints();

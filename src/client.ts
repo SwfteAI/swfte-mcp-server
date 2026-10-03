@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ServerConfig } from './config.js';
-import { redactSecrets } from './fsguard.js';
+import { redactErrorValue, redactSecrets, withErrorSecrets } from './fsguard.js';
 
 export interface RequestOptions {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -157,8 +157,16 @@ export class SwfteClient {
 
   /** Scrub this call's actual credential without exposing it to protocol handlers. */
   redactError(message: string): string {
-    const credential = this.config.credential;
-    return redactSecrets(credential ? message.split(credential).join('[redacted]') : message);
+    return redactSecrets(message, [this.config.credential]);
+  }
+
+  redactErrorValue<T>(value: T): T {
+    return redactErrorValue(value, (message) => this.redactError(message)) as T;
+  }
+
+  /** Include the resolved identity in request-local diagnostic and outbound-content guards. */
+  withErrorSecrets<T>(secrets: Array<string | undefined>, action: () => T): T {
+    return withErrorSecrets([this.config.credential, ...secrets], action);
   }
 
   async request<T = unknown>(opts: RequestOptions): Promise<T> {
@@ -201,7 +209,7 @@ export class SwfteClient {
     }
 
     if (this.config.debug) {
-      process.stderr.write(`[swfte-mcp] → ${opts.method} ${url}\n`);
+      process.stderr.write(this.redactError(`[swfte-mcp] → ${opts.method} ${url}\n`));
     }
 
     const controller = new AbortController();
@@ -217,7 +225,7 @@ export class SwfteClient {
     }
 
     if (this.config.debug) {
-      process.stderr.write(`[swfte-mcp] ← ${res.status} ${opts.method} ${opts.path}\n`);
+      process.stderr.write(this.redactError(`[swfte-mcp] ← ${res.status} ${opts.method} ${opts.path}\n`));
     }
 
     const ok = (res.ok || (opts.expectStatuses?.includes(res.status) ?? false)) && !isRedirect(res.status);
@@ -268,7 +276,8 @@ export class SwfteClient {
     } catch {
       // Non-JSON body. Most often an HTML error page from an edge/proxy hop —
       // truncate hard so a page of markup doesn't land in the model's context.
-      if (text) envelope = { body: text.length > 500 ? `${text.slice(0, 500)}…` : text };
+      const safeText = this.redactError(text);
+      if (safeText) envelope = { body: safeText.length > 500 ? `${safeText.slice(0, 500)}…` : safeText };
     }
 
     // Backends disagree on where the code lives; check every spelling we've seen.
@@ -284,12 +293,12 @@ export class SwfteClient {
 
     return new SwfteApiError({
       status: res.status,
-      code,
-      message,
-      reason: typeof envelope.reason === 'string' ? envelope.reason : undefined,
-      envelope,
+      code: this.redactError(code),
+      message: this.redactError(message),
+      reason: typeof envelope.reason === 'string' ? this.redactError(envelope.reason) : undefined,
+      envelope: this.redactErrorValue(envelope),
       method: opts.method,
-      path: opts.path,
+      path: this.redactError(opts.path),
       suggestedAction: SUGGESTED_ACTIONS[code],
     });
   }
@@ -514,7 +523,7 @@ export class SwfteClient {
         // the deadline; `request` has already burned its own retry budget.
         if (this.config.debug) {
           process.stderr.write(
-            `[swfte-mcp] poll error (continuing): ${err instanceof Error ? err.message : String(err)}\n`
+            this.redactError(`[swfte-mcp] poll error (continuing): ${err instanceof Error ? err.message : String(err)}\n`)
           );
         }
       }

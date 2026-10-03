@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { assertLocalFilesystem, assertSafeName, confineReadableFile } from '../fsguard.js';
+import { assertLocalFilesystem, assertNoSecrets, assertSafeName, confineReadableFile } from '../fsguard.js';
 import { z } from 'zod';
 import type { ToolDefinition } from './_types.js';
 
@@ -22,7 +22,7 @@ export const fileTools: ToolDefinition[] = [
         .optional()
         .describe('Content type of the part. Defaults to application/octet-stream.'),
     }),
-    execute: async (input, { client, localFilesystem }) => {
+    execute: async (input, { client, config, localFilesystem }) => {
       assertLocalFilesystem(
         localFilesystem,
         'swfte_files_upload',
@@ -33,6 +33,8 @@ export const fileTools: ToolDefinition[] = [
       // Copy into a tight Uint8Array: readFileSync hands back a Buffer that may
       // sit in a larger pooled ArrayBuffer, and Blob would upload the slack.
       const bytes = new Uint8Array(readFileSync(file));
+      assertNoSecrets('to upload file content', Buffer.from(bytes).toString('utf8'), [config.credential]);
+      assertNoSecrets('to upload file bytes', Buffer.from(bytes).toString('latin1'), [config.credential]);
 
       const form = new FormData();
       form.append(

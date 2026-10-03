@@ -1,17 +1,17 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
-import { assertLocalFilesystem, ConfinedWriter, confineDirectory, confinementRoot, confinePath, denyReason, OverwriteRefusedError, PathConfinementError } from '../fsguard.js';
+import { assertLocalFilesystem, assertNoSecrets, ConfinedWriter, confineDirectory, confinementRoot, confinePath, denyReason, OverwriteRefusedError, PathConfinementError } from '../fsguard.js';
 import { z } from 'zod';
 import { unzipSync, zipSync, type Unzipped } from 'fflate';
 import type { ToolDefinition } from './_types.js';
-import { SwfteApiError } from '../client.js';
+import { SwfteApiError, type SwfteClient } from '../client.js';
 
 const TRANSLATION_NEXT_STEP = 'Keep this workflow hosted and invoke it through its contract, or simplify the listed nodes before exporting source.';
 
-function translationRefusal(error: unknown): Record<string, unknown> | null {
+function translationRefusal(error: unknown, client: SwfteClient): Record<string, unknown> | null {
   if (!(error instanceof SwfteApiError) || error.status !== 422 || !Array.isArray(error.envelope.refusals)) return null;
-  return { refused: true, code: 'TRANSLATION_REFUSED', refusals: error.envelope.refusals,
-    warnings: error.envelope.warnings ?? [], nextStep: TRANSLATION_NEXT_STEP };
+  return { refused: true, code: 'TRANSLATION_REFUSED', refusals: client.redactErrorValue(error.envelope.refusals),
+    warnings: client.redactErrorValue(error.envelope.warnings ?? []), nextStep: TRANSLATION_NEXT_STEP };
 }
 
 const EXEC = '/v2/workflows/execution';
@@ -137,7 +137,8 @@ export const codeTools: ToolDefinition[] = [
     title: 'Download the generated code workspace',
     group: 'workflows',
     description:
-      'Download an execution workflow, or an exactly translatable canvas workflow, as a real, editable Cargo workspace and unzip it locally: ' +
+      'Download an execution workflow, or an exactly translatable canvas workflow, as an editable Tier2 Rust source overlay and unzip it locally. ' +
+      'Compilation requires merging this overlay with the real Tier1 BuildX Rust service scaffold, including its SDK and build reconciliation; the ZIP alone is not a standalone Cargo workspace. ' +
       'Cargo.toml, build.rs, src/graph.rs, src/steps/*.rs, swfte-blueprint.json, docker-compose.yml. ' +
       'Each step file carries blueprint-step-id / blueprint-step-type headers and marked user regions ' +
       'that survive re-emit — edit inside those, then push back with swfte_sync_src. Returns the file ' +
@@ -174,7 +175,7 @@ export const codeTools: ToolDefinition[] = [
           }
         }
       } catch (error) {
-        const refusal = translationRefusal(error);
+        const refusal = translationRefusal(error, client);
         if (refusal) return refusal;
         throw error;
       }
@@ -250,7 +251,9 @@ export const codeTools: ToolDefinition[] = [
       const report = await client.request<Record<string, unknown>>({ method: 'POST',
         path: `/v2/workflows/${encodeURIComponent(input.workflowId)}/translate-to-execution`,
         query: { dryRun: true }, retries: 0 });
-      return report.translatable === false ? { ...report, nextStep: TRANSLATION_NEXT_STEP } : report;
+      return report.translatable === false ? { ...report,
+        refusals: client.redactErrorValue(report.refusals ?? []), warnings: client.redactErrorValue(report.warnings ?? []),
+        nextStep: TRANSLATION_NEXT_STEP } : report;
     },
   },
 
@@ -269,7 +272,7 @@ export const codeTools: ToolDefinition[] = [
       srcDir: z.string().describe('The workspace directory previously produced by swfte_export_src, inside the project directory. Local (stdio) server only.'),
       apply: z.boolean().optional().describe('Actually commit the change. Default false (dry run).'),
     }),
-    execute: async (input, { client, localFilesystem }) => {
+    execute: async (input, { client, config, localFilesystem }) => {
       assertLocalFilesystem(localFilesystem, 'swfte_sync_src');
       const root = confineDirectory(input.srcDir);
       const blueprint = join(root, 'swfte-blueprint.json');
@@ -284,7 +287,10 @@ export const codeTools: ToolDefinition[] = [
       const entries: Record<string, Uint8Array> = {};
       for (const name of names) {
         // Zip entries must use forward slashes regardless of host platform.
-        entries[name.split(sep).join('/')] = new Uint8Array(readFileSync(join(root, name)));
+        const bytes = new Uint8Array(readFileSync(join(root, name)));
+        assertNoSecrets('to sync source content', Buffer.from(bytes).toString('utf8'), [config.credential]);
+        assertNoSecrets('to sync source bytes', Buffer.from(bytes).toString('latin1'), [config.credential]);
+        entries[name.split(sep).join('/')] = bytes;
       }
       const zipped = zipSync(entries);
 
