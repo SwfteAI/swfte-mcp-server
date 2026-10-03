@@ -1,3 +1,4 @@
+import { releaseKeyAnalysis } from './keys.js';
 import type { DetectContext, DetectResult, DetectedSite, Detector, SourceFile } from '../../types.js';
 import { managedSites } from './managed.js';
 import { rawHttpSites } from './rawHttp.js';
@@ -15,6 +16,15 @@ type Run = (f: SourceFile, c: DetectContext) => DetectResult;
 
 /** The four detectors of one file run back to back; each analysis runs once per file, not once per detector. */
 const memo = new WeakMap<Run, { file: SourceFile; ctx: DetectContext; result: DetectResult }>();
+
+/** The detector functions are process-lifetime keys; their source-bearing values are file-scoped. */
+export function releaseAnalysis(): void {
+  releaseKeyAnalysis();
+  memo.delete(managedSites);
+  memo.delete(rawHttpSites);
+  memo.delete(widgetSites);
+}
+
 function cached(run: Run, file: SourceFile, ctx: DetectContext): DetectResult {
   const hit = memo.get(run);
   if (hit && hit.file === file && hit.ctx === ctx) return hit.result;

@@ -257,11 +257,19 @@ export class SwfteClient {
   }
 
   private buildHeaders(opts: RequestOptions): Record<string, string> {
+    const extraHeaders: Record<string, string> = {};
+    for (const [name, value] of Object.entries(opts.headers ?? {})) {
+      if (['authorization', 'x-api-key', 'x-workspace-id'].includes(name.toLowerCase())) {
+        throw new SwfteApiError({ status: 403, code: 'AUTH_HEADER_OVERRIDE',
+          message: 'Request headers cannot replace the configured identity.', method: opts.method, path: opts.path });
+      }
+      extraHeaders[name] = value;
+    }
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.config.credential}`,
       'User-Agent': this.config.userAgent,
       Accept: 'application/json',
-      ...opts.headers,
+      ...extraHeaders,
     };
 
     if (this.config.credentialKind === 'api-key') {
@@ -269,7 +277,11 @@ export class SwfteClient {
       // for compatibility with either resolution order.
       headers['X-API-Key'] = this.config.credential;
 
-      const workspaceId = opts.workspaceId ?? this.config.workspaceId;
+      if (opts.workspaceId && this.config.workspaceId && opts.workspaceId !== this.config.workspaceId) {
+        throw new SwfteApiError({ status: 403, code: 'WORKSPACE_OVERRIDE',
+          message: 'Request workspace differs from the configured identity.', method: opts.method, path: opts.path });
+      }
+      const workspaceId = this.config.workspaceId ?? opts.workspaceId;
       if (workspaceId) headers['X-Workspace-ID'] = workspaceId;
     }
     // PAT path: deliberately no X-API-Key (that would copy the secret into a
@@ -319,14 +331,23 @@ export class SwfteClient {
     init: RequestInit & { headers: Record<string, string> },
     controller: AbortController
   ): Promise<Response> {
+    const target = new URL(url);
+    const base = new URL(this.config.baseUrl);
+    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(target.hostname.toLowerCase());
+    if (target.origin !== base.origin || target.username || target.password
+      || (target.protocol !== 'https:' && !(target.protocol === 'http:' && loopback))) {
+      throw new SwfteApiError({ status: 403, code: 'UNSAFE_TRANSPORT',
+        message: 'Authenticated requests require HTTPS or exact loopback HTTP on the configured origin.',
+        method: init.method ?? 'GET', path: target.pathname });
+    }
     const call = currentCall();
-    if (!call) return fetch(url, { ...init, signal: controller.signal });
+    if (!call) return fetch(url, { ...init, redirect: 'error', signal: controller.signal });
 
     call.requests += 1;
     const startedAt = Date.now();
     let res: Response;
     try {
-      res = await fetch(url, { ...init, signal: controller.signal });
+      res = await fetch(url, { ...init, redirect: 'error', signal: controller.signal });
     } catch (err) {
       // Our own abort is a timeout: the request may well have reached the backend, so it is not
       // UNREACHED. Anything else (refused, reset, DNS) never produced an answer.

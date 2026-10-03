@@ -10,9 +10,10 @@ import { join } from 'node:path';
 
 import { PathConfinementError } from '../src/fsguard.js';
 import { serializeManifest } from '../src/codemap/manifest.js';
-import { dequeue, drainQueue, enqueue, listQueue, QUEUE_DIR, uploadOrQueue } from '../src/codemap/queue.js';
+import { dequeue, drainQueue, enqueue as enqueueRaw, listQueue, QUEUE_DIR, uploadOrQueue } from '../src/codemap/queue.js';
 import { CodemapApiError, type UploadConfig, type uploadManifest } from '../src/codemap/upload.js';
 import type { Manifest } from '../src/codemap/types.js';
+import { bindManifest, digest } from '../src/codemap/binding.js';
 
 const REPO = 'r_0123456789abcdef0123456789abcdef';
 const sha = (c: string) => c.repeat(40);
@@ -33,7 +34,21 @@ function manifest(commitSha: string, scannedAt = '2026-09-27T12:00:00Z'): Manife
   };
 }
 
-const cfg = (fetchFn: typeof fetch): UploadConfig => ({ baseUrl: 'https://api.swfte.com/agents', credential: 'pat_test_credential', credentialKind: 'pat', env: {}, fetch: fetchFn });
+const workspace = { keyId: 'wk_fixture', key: new Uint8Array(Buffer.alloc(32, 7)) };
+const consent = { repoId: REPO, pathHashing: false, attribution: false };
+const cfg = (fetchFn: typeof fetch): UploadConfig => ({ baseUrl: 'https://api.swfte.com/agents', credential: 'pat_test_credential', credentialKind: 'pat', env: {},
+  fetch: (async (url, init) => {
+    if (init?.method === 'GET' && String(url).endsWith('/key')) return Response.json({ keyId: workspace.keyId, key: Buffer.from(workspace.key).toString('base64') });
+    if (init?.method === 'GET' && String(url).endsWith('/repos')) return Response.json({ repos: [consent] });
+    return fetchFn(url, init);
+  }) as typeof fetch });
+function options(config: UploadConfig, m: Manifest) {
+  return { binding: bindManifest(config, workspace, consent, m, digest('fixture-source'), digest('fixture-policy')), workspace, consent };
+}
+function enqueue(root: string, m: Manifest): string {
+  const config = cfg(fetch);
+  return enqueueRaw(root, m, options(config, m).binding, { cfg: config, workspace, consent });
+}
 
 /** An upload stub: answers per commit from `answers`, counting calls. */
 function stubUpload(answers: Record<string, 'stored' | 'duplicate' | 'offline' | 'refused'>) {
@@ -107,15 +122,16 @@ describe('enqueue and list', () => {
 });
 
 describe('drain', () => {
-  test('stored and duplicate both remove the entry; each entry is uploaded exactly once', async () => {
+  test('stored removes its entry while an unconfirmed duplicate stays queued; each is tried once', async () => {
     enqueue(root, manifest(sha('a'), '2026-09-27T10:00:00Z'));
     enqueue(root, manifest(sha('b'), '2026-09-27T11:00:00Z'));
     const up = stubUpload({ [sha('a')]: 'stored', [sha('b')]: 'duplicate' });
     const r = await drainQueue(root, cfg(fetch), { upload: up.fn });
     assert.deepEqual(up.calls, [sha('a'), sha('b')]);
-    assert.deepEqual(r.uploaded.map((u) => [u.commitSha, u.status]), [[sha('a'), 'stored'], [sha('b'), 'duplicate']]);
-    assert.deepEqual(r.remaining, []);
-    assert.deepEqual(queued(), []);
+    assert.deepEqual(r.uploaded.map((u) => [u.commitSha, u.status]), [[sha('a'), 'stored']]);
+    assert.deepEqual(r.failed, [{ commitSha: sha('b'), code: 'UNCONFIRMED_MANIFEST_DUPLICATE' }]);
+    assert.deepEqual(r.remaining, [sha('b')]);
+    assert.deepEqual(queued(), [`${sha('b')}.json`]);
   });
 
   test('offline stops the drain and keeps that entry and every later one, untried', async () => {
@@ -145,7 +161,7 @@ describe('drain', () => {
     const down = (async () => {
       throw new TypeError('fetch failed');
     }) as typeof fetch;
-    const r1 = await uploadOrQueue(root, cfg(down), REPO, manifest(sha('a')));
+    const r1 = await uploadOrQueue(root, cfg(down), REPO, manifest(sha('a')), options(cfg(down), manifest(sha('a'))));
     assert.equal(r1.status, 'queued-offline');
     assert.deepEqual(queued(), [`${sha('a')}.json`]);
 

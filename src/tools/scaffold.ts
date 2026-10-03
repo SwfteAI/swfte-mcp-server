@@ -22,6 +22,7 @@ import { scanInline, scanProject, unavailableScan } from '../compliance.js';
 import { FRAMEWORKS } from '../stack.js';
 import { emitTelemetry } from '../telemetry.js';
 import type { ToolDefinition } from './_types.js';
+import { recordNativeMcpWrittenFiles } from '../codemap/provenance.js';
 
 export { LOCK_FILE } from '../lock.js';
 export { CLIENT_ENV } from '../bake.js';
@@ -54,48 +55,51 @@ export const scaffoldTools: ToolDefinition[] = [
       complianceScan: z.boolean().optional().describe('Scan the written code with POST /v2/compliance/scan (advisory). Default true.'),
     }),
     execute: async (input, { client, config, localFilesystem }) => {
-      const writer = new ConfinedWriter({ forbidden: [config.credential], inline: localFilesystem === false });
-      const r = parseCatalogRef(input.catalogRef);
-      const res = await bakeArtifact({ client, config, writer }, {
-        catalogRef: r.ref,
-        framework: input.framework,
-        language: input.language,
-        outDir: input.targetDir,
-        alias: input.alias,
-        force: input.force,
-        pin: input.pin,
-      });
-      // Counts only: this codebase is now bound to the hosted artifact. No path, framework or code.
-      emitTelemetry({ client, config }, { event: 'scaffold', catalogRef: r.ref });
-      // Scan what was just written (code only), like `swfte add`. Advisory: a
-      // finding or a scan that could not run never undoes the write.
-      const code = res.files.filter((f) => f.action !== 'unchanged' && f.path !== 'swfte.json' && !isEnvironmentFile(f.path, config.environmentFiles));
-      let complianceScan = null;
-      if (input.complianceScan !== false && code.length) {
-        try {
-          complianceScan = writer.inline
-            ? await scanInline(client, code.map((f) => ({ path: f.path, content: f.content ?? '' })), environmentSecretGlobs(config.environmentFiles))
-            : await scanProject(client, writer.root, code.map((f) => f.path), environmentSecretGlobs(config.environmentFiles));
-        } catch (err) {
-          complianceScan = unavailableScan(err instanceof Error ? err.message : String(err));
+      const writer = new ConfinedWriter({ native: true, forbidden: [config.credential], inline: localFilesystem === false });
+      try {
+        const r = parseCatalogRef(input.catalogRef);
+        const res = await bakeArtifact({ client, config, writer }, {
+          catalogRef: r.ref,
+          framework: input.framework,
+          language: input.language,
+          outDir: input.targetDir,
+          alias: input.alias,
+          force: input.force,
+          pin: input.pin,
+        });
+        recordNativeMcpWrittenFiles(writer, res.files);
+        // Counts only: this codebase is now bound to the hosted artifact. No path, framework or code.
+        emitTelemetry({ client, config }, { event: 'scaffold', catalogRef: r.ref });
+        // Scan what was just written (code only), like `swfte add`. Advisory: a
+        // finding or a scan that could not run never undoes the write.
+        const code = res.files.filter((f) => f.action !== 'unchanged' && f.path !== 'swfte.json' && !isEnvironmentFile(f.path, config.environmentFiles));
+        let complianceScan = null;
+        if (input.complianceScan !== false && code.length) {
+          try {
+            complianceScan = writer.inline
+              ? await scanInline(client, code.map((f) => ({ path: f.path, content: f.content ?? '' })), environmentSecretGlobs(config.environmentFiles))
+              : await scanProject(client, writer.root, code.map((f) => f.path), environmentSecretGlobs(config.environmentFiles));
+          } catch (err) {
+            complianceScan = unavailableScan(err instanceof Error ? err.message : String(err));
+          }
         }
-      }
-      return {
-        ...res,
-        ...(writer.inline ? { inline: true, note: INLINE_NOTE } : {}),
-        complianceScan,
-        nextSteps: [
-          'Set SWFTE_API_KEY in your real (uncommitted) env — .env.example only names it.',
-          ...(res.framework === 'nextjs' || res.framework === 'express' || res.framework === 'fastapi'
-            ? ['Wire authorize() in the adapter to your auth: it answers 401 to everyone until you do (anyone who can reach the route would spend your credits).']
-            : []),
-          'Commit swfte.json with the generated files; add `npx -p @swfte/mcp-server swfte verify` to CI so contract drift fails the build.',
-          'Mint an API key scoped to this artifact in Studio if the code only needs to call it.',
-          ...(res.lock.legacySources.length ? [`Delete the old lock file(s) now folded into swfte.json: ${res.lock.legacySources.join(', ')}.`] : []),
-          ...(r.kind === 'application' ? ['Wire analytics / payments: swfte_wire_analytics, swfte_wire_payments.'] : []),
-          ...(r.kind === 'workflow' ? ['Published workflows run via /invoke; publish a version first if the call returns PUBLISHED_SNAPSHOT_UNAVAILABLE.'] : []),
-        ],
-      };
+        return {
+          ...res,
+          ...(writer.inline ? { inline: true, note: INLINE_NOTE } : {}),
+          complianceScan,
+          nextSteps: [
+            'Set SWFTE_API_KEY in your real (uncommitted) env — .env.example only names it.',
+            ...(res.framework === 'nextjs' || res.framework === 'express' || res.framework === 'fastapi'
+              ? ['Wire authorize() in the adapter to your auth: it answers 401 to everyone until you do (anyone who can reach the route would spend your credits).']
+              : []),
+            'Commit swfte.json with the generated files; add `npx -p @swfte/mcp-server swfte verify` to CI so contract drift fails the build.',
+            'Mint an API key scoped to this artifact in Studio if the code only needs to call it.',
+            ...(res.lock.legacySources.length ? [`Delete the old lock file(s) now folded into swfte.json: ${res.lock.legacySources.join(', ')}.`] : []),
+            ...(r.kind === 'application' ? ['Wire analytics / payments: swfte_wire_analytics, swfte_wire_payments.'] : []),
+            ...(r.kind === 'workflow' ? ['Published workflows run via /invoke; publish a version first if the call returns PUBLISHED_SNAPSHOT_UNAVAILABLE.'] : []),
+          ],
+        };
+      } finally { writer.close(); }
     },
   },
   {
@@ -116,17 +120,21 @@ export const scaffoldTools: ToolDefinition[] = [
     }),
     execute: async (input, { client, config, localFilesystem }) => {
       assertLocalFilesystem(localFilesystem, 'swfte_sync', LOCAL_ONLY);
-      const writer = new ConfinedWriter({ forbidden: [config.credential] });
-      return syncProject(
-        { client, config, writer },
-        {
-          aliases: input.aliases,
-          dryRun: input.dryRun,
-          allowBreaking: input.upgrade,
-          acceptCapabilityChanges: input.acceptCapabilityChanges,
-          force: input.force,
-        }
-      );
+      const writer = new ConfinedWriter({ native: true, forbidden: [config.credential] });
+      try {
+        const result = await syncProject(
+          { client, config, writer },
+          {
+            aliases: input.aliases,
+            dryRun: input.dryRun,
+            allowBreaking: input.upgrade,
+            acceptCapabilityChanges: input.acceptCapabilityChanges,
+            force: input.force,
+          }
+        );
+        recordNativeMcpWrittenFiles(writer, result.files);
+        return result;
+      } finally { writer.close(); }
     },
   },
   {
@@ -169,58 +177,62 @@ export const scaffoldTools: ToolDefinition[] = [
         .describe('Agents without embedKey: issue a new embed key limited to these exact origins (e.g. ["https://www.example.com"]).'),
     }),
     execute: async (input, { client, config, localFilesystem }) => {
-      const writer = new ConfinedWriter({ forbidden: [config.credential], inline: localFilesystem === false });
-      const target = input.targetFile ? writer.resolve(input.targetFile) : null;
-      const r = parseCatalogRef(input.catalogRef);
-      const write = (content: string, extra: Record<string, unknown>) => {
-        writer.assertNoSecrets('embed markup', content);
-        if (!target) return { catalogRef: r.ref, embeddable: true, html: content, written: [], ...extra };
-        writer.create(target, content, input.force);
-        return { catalogRef: r.ref, embeddable: true, html: content, written: writer.commit(), ...extra };
-      };
-
-      if (r.kind === 'agent') {
-        if (input.embedKey !== undefined && !EMBED_KEY_PATTERN.test(input.embedKey)) {
-          // Never echo what was passed: it may be a secret key pasted by mistake.
-          throw new Error('embedKey must be a publishable swfte_pk_ key. A workspace API key or PAT must never be put in a web page.');
-        }
-        let key = input.embedKey ?? null;
-        let issued: { keyPrefix: string | null; allowedOrigins: string[] } | null = null;
-        if (!key) {
-          if (!input.allowedOrigins?.length) {
-            return {
-              catalogRef: r.ref,
-              embeddable: true,
-              needsEmbedKey: true,
-              endpoint: publicAgentChatPath(r.id),
-              message:
-                'Agents embed through the public chat with a publishable key. Pass allowedOrigins (the exact site origins, ' +
-                'e.g. ["https://www.example.com"]) to issue one, or embedKey if you already have one (Studio → agent → Embed).',
-            };
-          }
-          const k = await issueEmbedKey(client, r.id, input.allowedOrigins);
-          key = k.key;
-          issued = { keyPrefix: k.keyPrefix, allowedOrigins: k.allowedOrigins };
-        }
-        const entry = await getEntry(client, r).catch(() => null);
-        const html = agentEmbedHtml({ agentId: r.id, name: entry?.name || r.id, baseUrl: config.baseUrl, embedKey: key, catalogRef: r.ref });
-        return write(html, {
-          endpoint: publicAgentChatPath(r.id),
-          ...(issued ? { issuedKey: issued, note: 'A new embed key was issued; it is shown only in this markup. Revoke it in Studio (agent → Embed) if unused.' } : {}),
-        });
-      }
-
-      const contract = await getContract(client, r);
-      const html = contract?.embed?.html;
-      if (!html) {
-        return {
-          catalogRef: r.ref,
-          embeddable: false,
-          message: `${r.ref} publishes no embed markup. Use swfte_scaffold_client to call it from code instead.`,
+      const writer = new ConfinedWriter({ native: true, forbidden: [config.credential], inline: localFilesystem === false });
+      try {
+        const target = input.targetFile ? writer.resolve(input.targetFile) : null;
+        const r = parseCatalogRef(input.catalogRef);
+        const write = (content: string, extra: Record<string, unknown>) => {
+          writer.assertNoSecrets('embed markup', content);
+          if (!target) return { catalogRef: r.ref, embeddable: true, html: content, written: [], ...extra };
+          writer.create(target, content, input.force);
+          const written = writer.commit();
+          recordNativeMcpWrittenFiles(writer, written);
+          return { catalogRef: r.ref, embeddable: true, html: content, written, ...extra };
         };
-      }
-      writer.assertNoSecrets('embed markup', html);
-      return write(`<!-- Swfte embed: ${r.ref.replace(/--/g, '-')} (contract ${contractHash(contract)}) -->\n${html.trim()}\n`, {});
+
+        if (r.kind === 'agent') {
+          if (input.embedKey !== undefined && !EMBED_KEY_PATTERN.test(input.embedKey)) {
+            // Never echo what was passed: it may be a secret key pasted by mistake.
+            throw new Error('embedKey must be a publishable swfte_pk_ key. A workspace API key or PAT must never be put in a web page.');
+          }
+          let key = input.embedKey ?? null;
+          let issued: { keyPrefix: string | null; allowedOrigins: string[] } | null = null;
+          if (!key) {
+            if (!input.allowedOrigins?.length) {
+              return {
+                catalogRef: r.ref,
+                embeddable: true,
+                needsEmbedKey: true,
+                endpoint: publicAgentChatPath(r.id),
+                message:
+                  'Agents embed through the public chat with a publishable key. Pass allowedOrigins (the exact site origins, ' +
+                  'e.g. ["https://www.example.com"]) to issue one, or embedKey if you already have one (Studio → agent → Embed).',
+              };
+            }
+            const k = await issueEmbedKey(client, r.id, input.allowedOrigins);
+            key = k.key;
+            issued = { keyPrefix: k.keyPrefix, allowedOrigins: k.allowedOrigins };
+          }
+          const entry = await getEntry(client, r).catch(() => null);
+          const html = agentEmbedHtml({ agentId: r.id, name: entry?.name || r.id, baseUrl: config.baseUrl, embedKey: key, catalogRef: r.ref });
+          return write(html, {
+            endpoint: publicAgentChatPath(r.id),
+            ...(issued ? { issuedKey: issued, note: 'A new embed key was issued; it is shown only in this markup. Revoke it in Studio (agent → Embed) if unused.' } : {}),
+          });
+        }
+
+        const contract = await getContract(client, r);
+        const html = contract?.embed?.html;
+        if (!html) {
+          return {
+            catalogRef: r.ref,
+            embeddable: false,
+            message: `${r.ref} publishes no embed markup. Use swfte_scaffold_client to call it from code instead.`,
+          };
+        }
+        writer.assertNoSecrets('embed markup', html);
+        return write(`<!-- Swfte embed: ${r.ref.replace(/--/g, '-')} (contract ${contractHash(contract)}) -->\n${html.trim()}\n`, {});
+      } finally { writer.close(); }
     },
   },
 ];

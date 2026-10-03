@@ -24,20 +24,39 @@ export let grammarGeneration = 0;
  * (Re)load the Java grammar. Returns false, leaving no parser, when the WASM cannot be read or loaded:
  * detectors then report nothing and the scan goes on (edge case E9).
  */
-export async function initJavaParser(wasmPath: string = DEFAULT_WASM): Promise<boolean> {
-  try {
-    await initRuntime();
-    const language = await Language.load(fs.readFileSync(wasmPath));
-    const p = new Parser();
-    p.setLanguage(language);
-    parser = p;
+// A per-language queue makes publication follow invocation order, not asynchronous load order.
+let reloadTail: Promise<void> = Promise.resolve();
+
+export function initJavaParser(wasmPath: string = DEFAULT_WASM): Promise<boolean> {
+  const attempt = reloadTail.then(async () => {
+    let candidate: Parser | null = null;
+    let loaded = false;
+    try {
+      await initRuntime();
+      const language = await Language.load(fs.readFileSync(wasmPath));
+      candidate = new Parser();
+      candidate.setLanguage(language);
+      loaded = true;
+    } catch {
+      // Setup failure preserves E9: completing this attempt makes the grammar unavailable.
+    }
+    const previous = parser;
+    parser = loaded ? candidate : null;
     grammarGeneration++;
-    return true;
-  } catch {
-    parser = null;
-    grammarGeneration++;
-    return false;
-  }
+    // Detach ownership before disposal. Even an unexpected native deletion failure cannot cause
+    // a later attempt to delete the same resource again or skip disposal of another owned parser.
+    const retired = loaded ? [previous] : [candidate, previous];
+    const errors: unknown[] = [];
+    for (const resource of new Set(retired)) {
+      if (!resource) continue;
+      try { resource.delete(); } catch (error) { errors.push(error); }
+    }
+    if (errors.length) throw errors[0];
+    return loaded;
+  });
+  // A visible disposal error rejects its caller, but cannot poison subsequent queued attempts.
+  reloadTail = attempt.then(() => undefined, () => undefined);
+  return attempt;
 }
 
 await initJavaParser();
@@ -53,7 +72,14 @@ export function withTree<T>(text: string, fn: (root: JNode) => T): T | null {
   } catch {
     return null;
   } finally {
-    tree?.delete();
+    if (tree) {
+      // Cached Nodes reference this Tree and its source callback. Their lifetime ends here.
+      NAMED_CHILDREN_CACHE.delete(tree);
+      SEMANTIC_CHILDREN_CACHE.delete(tree);
+      SCOPE_INDEX.delete(tree);
+      FIELD_INDEX.delete(tree);
+      tree.delete();
+    }
   }
 }
 
@@ -82,7 +108,7 @@ export function isForeignGenerated(text: string): boolean {
 
 /** A file that uses Mockito or Spring's mock beans is a test even when it sits in a main tree. */
 export function usesMocks(root: JNode): boolean {
-  return children(root).some((n) => n.type === 'import_declaration' && /\borg\.mockito\b|\borg\.springframework\.boot\.test\b|\borg\.junit\b/.test(n.text));
+  return childrenView(root).some((n) => n.type === 'import_declaration' && /\borg\.mockito\b|\borg\.springframework\.boot\.test\b|\borg\.junit\b/.test(n.text));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -97,22 +123,52 @@ export function isBroken(n: JNode): boolean {
 
 export const lineOf = (n: JNode): number => n.startPosition.row + 1;
 
-export function children(n: JNode): JNode[] {
+const EMPTY_NAMED_CHILDREN: readonly JNode[] = Object.freeze([] as JNode[]);
+const NAMED_CHILDREN_CACHE = new WeakMap<Tree, Map<number, readonly JNode[]>>();
+
+/** Native getters create fresh wrappers; detector passes share immutable vectors inside one tree. */
+function namedChildren(n: JNode): readonly JNode[] {
+  let nodes = NAMED_CHILDREN_CACHE.get(n.tree);
+  const cached = nodes?.get(n.id);
+  if (cached) return cached;
+  const count = n.namedChildCount;
+  if (count === 0) return EMPTY_NAMED_CHILDREN;
   const out: JNode[] = [];
-  for (let i = 0; i < n.namedChildCount; i++) {
+  for (let i = 0; i < count; i++) {
     const c = n.namedChild(i);
-    if (c && c.type !== 'line_comment' && c.type !== 'block_comment') out.push(c);
+    if (c) out.push(c);
   }
-  return out;
+  if (!nodes) { nodes = new Map(); NAMED_CHILDREN_CACHE.set(n.tree, nodes); }
+  const vector = Object.freeze(out);
+  nodes.set(n.id, vector);
+  return vector;
+}
+
+const SEMANTIC_CHILDREN_CACHE = new WeakMap<Tree, Map<number, readonly JNode[]>>();
+
+/** Internal read-only semantic view excludes comments; walk continues using all named children. */
+function childrenView(n: JNode): readonly JNode[] {
+  let nodes = SEMANTIC_CHILDREN_CACHE.get(n.tree);
+  const cached = nodes?.get(n.id);
+  if (cached) return cached;
+  const named = namedChildren(n);
+  if (!named.length) return EMPTY_NAMED_CHILDREN;
+  const filtered = named.filter(child => child.type !== 'line_comment' && child.type !== 'block_comment');
+  if (!filtered.length) return EMPTY_NAMED_CHILDREN;
+  const vector = Object.freeze(filtered);
+  if (!nodes) { nodes = new Map(); SEMANTIC_CHILDREN_CACHE.set(n.tree, nodes); }
+  nodes.set(n.id, vector);
+  return vector;
+}
+
+export function children(n: JNode): JNode[] {
+  return [...childrenView(n)];
 }
 
 /** Depth-first walk over named nodes; `visit` returning false prunes the subtree. */
 export function walk(n: JNode, visit: (n: JNode) => boolean | void): void {
   if (visit(n) === false) return;
-  for (let i = 0; i < n.namedChildCount; i++) {
-    const c = n.namedChild(i);
-    if (c) walk(c, visit);
-  }
+  for (const child of namedChildren(n)) walk(child, visit);
 }
 
 export const argsOf = (call: JNode): JNode[] => {
@@ -132,7 +188,7 @@ function methodsNamed(typeDecl: JNode, name: string, ctor: boolean): number {
   const body = typeDecl.childForFieldName('body');
   if (!body) return 0;
   let n = 0;
-  for (const c of children(body)) {
+  for (const c of childrenView(body)) {
     if (c.type === (ctor ? 'constructor_declaration' : 'method_declaration') && c.childForFieldName('name')?.text === name) n++;
   }
   return n;
@@ -140,7 +196,7 @@ function methodsNamed(typeDecl: JNode, name: string, ctor: boolean): number {
 
 function arityOf(m: JNode): number {
   const params = m.childForFieldName('parameters');
-  return params ? children(params).length : 0;
+  return params ? childrenView(params).length : 0;
 }
 
 /**
@@ -293,7 +349,7 @@ export function valueAnnotationEnv(annotations: JNode[]): string | null {
   for (const a of annotations) {
     if (a.type !== 'annotation' || a.childForFieldName('name')?.text !== 'Value') continue;
     const arg = a.childForFieldName('arguments');
-    const lit = arg ? children(arg).find((c) => c.type === 'string_literal') : undefined;
+    const lit = arg ? childrenView(arg).find((c) => c.type === 'string_literal') : undefined;
     const s = lit ? plainString(lit) : null;
     const m = s ? /^\$\{([A-Za-z0-9_.-]+)(?::[^}]*)?\}$/.exec(s) : null;
     if (m && ENV_STYLE.test(m[1]!)) return m[1]!;
@@ -303,7 +359,7 @@ export function valueAnnotationEnv(annotations: JNode[]): string | null {
 
 const annotationsOf = (n: JNode): JNode[] => {
   const mods = n.children.find((c) => c && c.type === 'modifiers');
-  return mods ? children(mods).filter((c) => c.type === 'annotation' || c.type === 'marker_annotation') : [];
+  return mods ? childrenView(mods).filter((c) => c.type === 'annotation' || c.type === 'marker_annotation') : [];
 };
 
 const MAX_DEPTH = 8;
@@ -339,7 +395,7 @@ export function evalPieces(n: JNode, depth = 0): Piece[] {
     case 'string_literal':
       return stringPieces(n);
     case 'parenthesized_expression': {
-      const inner = children(n)[0];
+      const inner = childrenView(n)[0];
       return inner ? evalPieces(inner, depth + 1) : [{ k: 'dyn' }];
     }
     case 'cast_expression': {
@@ -411,40 +467,75 @@ function patternNames(n: JNode | null): Set<string> {
 }
 
 function paramBindings(scope: JNode, name: string): Bindings | null {
-  if (scope.type === 'lambda_expression') {
-    const p = scope.childForFieldName('parameters');
-    if (p && patternNames(p).has(name)) return { values: [], opaque: true, env: null };
-    return null;
-  }
-  const params = scope.childForFieldName('parameters');
-  if (!params) return null;
-  for (const c of children(params)) {
-    if ((c.type === 'formal_parameter' || c.type === 'spread_parameter') && paramName(c) === name) return { values: [], opaque: true, env: valueAnnotationEnv(annotationsOf(c)) };
-  }
-  return null;
+  return scopeIndex(scope).parameters.get(name)?.binding ?? null;
 }
 
 function paramName(p: JNode): string {
-  if (p.type === 'spread_parameter') return children(p).find((c) => c.type === 'variable_declarator')?.childForFieldName('name')?.text ?? '';
+  if (p.type === 'spread_parameter') return childrenView(p).find((c) => c.type === 'variable_declarator')?.childForFieldName('name')?.text ?? '';
   return p.childForFieldName('name')?.text ?? '';
 }
 
-function localBindings(scope: JNode, name: string): Bindings {
-  const b: Bindings = { values: [], opaque: false, env: null };
+interface ScopeIndex {
+  locals: Map<string, Bindings>;
+  types: Map<string, string | null>;
+  parameters: Map<string, { binding: Bindings; type: string | null }>;
+}
+
+// Native wrappers are recreated while walking; tree + stable node id names one lexical scope.
+// Index all names once, including missing lookups, rather than walking once for each new name.
+const SCOPE_INDEX = new WeakMap<Tree, Map<number, ScopeIndex>>();
+
+function scopeIndex(scope: JNode): ScopeIndex {
+  let scopes = SCOPE_INDEX.get(scope.tree);
+  if (!scopes) { scopes = new Map(); SCOPE_INDEX.set(scope.tree, scopes); }
+  const cached = scopes.get(scope.id);
+  if (cached) return cached;
+  const index: ScopeIndex = { locals: new Map(), types: new Map(), parameters: new Map() };
+  const params = scope.childForFieldName('parameters');
+  if (scope.type === 'lambda_expression' && params) {
+    for (const name of patternNames(params)) index.parameters.set(name, {
+      binding: { values: [], opaque: true, env: null }, type: null,
+    });
+  }
+  for (const parameter of params ? childrenView(params) : []) {
+    if (parameter.type !== 'formal_parameter' && parameter.type !== 'spread_parameter') continue;
+    index.parameters.set(paramName(parameter), {
+      binding: { values: [], opaque: true, env: scope.type === 'lambda_expression' ? null : valueAnnotationEnv(annotationsOf(parameter)) },
+      type: parameter.childForFieldName('type')?.text ?? null,
+    });
+  }
+  const binding = (name: string): Bindings => {
+    let value = index.locals.get(name);
+    if (!value) { value = { values: [], opaque: false, env: null }; index.locals.set(name, value); }
+    return value;
+  };
+  const opaquePattern = (node: JNode) => {
+    for (const name of patternNames(node)) binding(name).opaque = true;
+  };
   const body = scope.childForFieldName('body') ?? scope;
   walk(body, (n) => {
     // a nested type or lambda has its own scope, which lookupName visits itself
     if (n.id !== body.id && (isTypeDecl(n) || n.type === 'lambda_expression' || n.type === 'class_body')) return false;
     switch (n.type) {
       case 'variable_declarator': {
-        if (n.childForFieldName('name')?.text !== name) break;
+        const name = n.childForFieldName('name')?.text;
+        if (!name) break;
         const v = n.childForFieldName('value');
-        if (v) b.values.push(v);
+        if (v) binding(name).values.push(v);
+        break;
+      }
+      case 'local_variable_declaration': {
+        const type = n.childForFieldName('type')?.text ?? null;
+        for (const declaration of n.childrenForFieldName('declarator')) {
+          const name = declaration?.childForFieldName('name')?.text;
+          if (name) index.types.set(name, type);
+        }
         break;
       }
       case 'assignment_expression': {
         const left = n.childForFieldName('left');
-        if (left?.type === 'identifier' && left.text === name) {
+        if (left?.type === 'identifier') {
+          const b = binding(left.text);
           if (n.childForFieldName('operator')?.text === '=') {
             const r = n.childForFieldName('right');
             if (r) b.values.push(r);
@@ -452,24 +543,31 @@ function localBindings(scope: JNode, name: string): Bindings {
         }
         break;
       }
-      case 'enhanced_for_statement':
-        if (n.childForFieldName('name')?.text === name) b.opaque = true;
+      case 'enhanced_for_statement': {
+        const name = n.childForFieldName('name')?.text;
+        if (name) binding(name).opaque = true;
         break;
+      }
       case 'catch_formal_parameter':
       case 'resource':
       case 'pattern':
       case 'type_pattern':
-        if (patternNames(n).has(name)) b.opaque = true;
+        opaquePattern(n);
         break;
       case 'update_expression':
-        if (patternNames(n).has(name)) b.opaque = true;
+        opaquePattern(n);
         break;
       default:
         break;
     }
     return undefined;
   });
-  return b;
+  scopes.set(scope.id, index);
+  return index;
+}
+
+function localBindings(scope: JNode, name: string): Bindings {
+  return scopeIndex(scope).locals.get(name) ?? { values: [], opaque: false, env: null };
 }
 
 function pick(b: Bindings): Bound {
@@ -482,42 +580,71 @@ function pick(b: Bindings): Bound {
   return null;
 }
 
-/** Fields of the class (and outer classes) named `name`: initializer values, @Value env names, assignments. */
-function fieldBindings(type: JNode, name: string): Bindings | null {
+interface FieldIndex {
+  bindings: Map<string, Bindings>;
+  types: Map<string, string | null>;
+}
+const FIELD_INDEX = new WeakMap<Tree, Map<number, FieldIndex>>();
+
+function fieldIndex(type: JNode): FieldIndex {
+  let types = FIELD_INDEX.get(type.tree);
+  if (!types) { types = new Map(); FIELD_INDEX.set(type.tree, types); }
+  const cached = types.get(type.id);
+  if (cached) return cached;
+  const index: FieldIndex = { bindings: new Map(), types: new Map() };
   const body = type.childForFieldName('body');
-  if (!body) return null;
-  let declared = false;
-  const b: Bindings = { values: [], opaque: false, env: null };
-  let isFinal = false;
-  for (const m of children(body)) {
+  const finals = new Set<string>();
+  for (const m of body ? childrenView(body) : []) {
     if (m.type !== 'field_declaration') continue;
     for (const d of m.childrenForFieldName('declarator')) {
-      if (!d || d.childForFieldName('name')?.text !== name) continue;
-      declared = true;
+      const name = d?.childForFieldName('name')?.text;
+      if (!d || !name) continue;
+      let b = index.bindings.get(name);
+      if (!b) { b = { values: [], opaque: false, env: null }; index.bindings.set(name, b); }
       const mods = m.children.find((c) => c && c.type === 'modifiers')?.text ?? '';
-      isFinal = /\bfinal\b/.test(mods);
+      if (/\bfinal\b/.test(mods)) finals.add(name);
       const envName = valueAnnotationEnv(annotationsOf(m));
       const v = d.childForFieldName('value');
       if (envName) b.env = envName;
       if (v) b.values.push(v);
+      index.types.set(name, m.childForFieldName('type')?.text ?? null);
     }
   }
-  if (!declared) return null;
-  if (b.env) return { values: [], opaque: true, env: b.env };
   // assignments elsewhere in the class (constructors: `this.x = ...`)
-  walk(body, (n) => {
-    if (n.type !== 'assignment_expression' || n.childForFieldName('operator')?.text !== '=') return undefined;
+  if (body) walk(body, (n) => {
+    if (n.type === 'update_expression') {
+      for (const name of patternNames(n)) {
+        const b = index.bindings.get(name);
+        if (b) b.opaque = true;
+      }
+      return undefined;
+    }
+    if (n.type !== 'assignment_expression') return undefined;
     const left = n.childForFieldName('left');
     const target = left?.type === 'field_access' && left.childForFieldName('object')?.type === 'this' ? left.childForFieldName('field')?.text : left?.type === 'identifier' ? left.text : null;
-    if (target === name) {
+    const b = target ? index.bindings.get(target) : undefined;
+    if (b) {
+      if (n.childForFieldName('operator')?.text !== '=') { b.opaque = true; return undefined; }
       const r = n.childForFieldName('right');
       // a bare constructor parameter of the same name means the value arrives from outside
       if (r) b.values.push(r);
     }
     return undefined;
   });
-  if (!isFinal && b.values.length !== 1) b.opaque = true;
-  return b;
+  for (const [name, b] of index.bindings) {
+    if (b.env) { b.values = []; b.opaque = true; }
+    else if (!finals.has(name) && b.values.length !== 1) b.opaque = true;
+  }
+  for (const parameter of type.childForFieldName('parameters') ? childrenView(type.childForFieldName('parameters')!) : []) {
+    if (parameter.type === 'formal_parameter') index.types.set(paramName(parameter), parameter.childForFieldName('type')?.text ?? null);
+  }
+  types.set(type.id, index);
+  return index;
+}
+
+/** Fields of the class (and outer classes) named `name`: initializer values, @Value env names, assignments. */
+function fieldBindings(type: JNode, name: string): Bindings | null {
+  return fieldIndex(type).bindings.get(name) ?? null;
 }
 
 /**
@@ -545,24 +672,16 @@ export function lookupName(name: string, at: JNode): Bound {
 /** The declared type text of the parameter, local or field `name` as seen from `at`, or null when unknown. */
 export function declaredType(name: string, at: JNode): string | null {
   for (let s = enclosingMethod(at); s; s = enclosingMethod(s.parent)) {
-    const params = s.childForFieldName('parameters');
-    for (const c of params && s.type !== 'lambda_expression' ? children(params) : []) {
-      if ((c.type === 'formal_parameter' || c.type === 'spread_parameter') && paramName(c) === name) return c.childForFieldName('type')?.text ?? null;
-    }
-    let found: string | null = null;
-    walk(s.childForFieldName('body') ?? s, (n) => {
-      if (n.type === 'local_variable_declaration') for (const d of n.childrenForFieldName('declarator')) if (d?.childForFieldName('name')?.text === name) found = n.childForFieldName('type')?.text ?? null;
-      return undefined;
-    });
-    if (found) return found;
+    const index = scopeIndex(s);
+    const parameter = index.parameters.get(name);
+    if (parameter) return parameter.type;
+    if (index.types.has(name)) return index.types.get(name) ?? null;
+    const local = index.locals.get(name);
+    if (local && (local.opaque || local.values.length > 0)) return null;
   }
   for (let t = enclosingType(at); t; t = enclosingType(t.parent)) {
-    const body = t.childForFieldName('body');
-    for (const m of body ? children(body) : []) {
-      if (m.type === 'field_declaration') for (const d of m.childrenForFieldName('declarator')) if (d?.childForFieldName('name')?.text === name) return m.childForFieldName('type')?.text ?? null;
-    }
-    const params = t.childForFieldName('parameters'); // record components
-    for (const c of params ? children(params) : []) if (c.type === 'formal_parameter' && paramName(c) === name) return c.childForFieldName('type')?.text ?? null;
+    const fields = fieldIndex(t);
+    if (fields.types.has(name)) return fields.types.get(name) ?? null;
   }
   return null;
 }
@@ -571,7 +690,7 @@ export function declaredType(name: string, at: JNode): string | null {
 export function fieldValues(name: string, at: JNode): JNode[] {
   for (let t = enclosingType(at); t; t = enclosingType(t.parent)) {
     const fb = fieldBindings(t, name);
-    if (fb) return fb.values;
+    if (fb) return [...fb.values];
   }
   return [];
 }

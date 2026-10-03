@@ -36,16 +36,39 @@ function objectKeys(o: ts.ObjectLiteralExpression): string[] | null {
   return keys.every((k) => KEY_PATTERN.test(k)) ? keys : null;
 }
 
-/** True when a `const name` is assigned nowhere else in its scope (the binding really is the literal). */
-function neverReassigned(name: string, scope: ts.Node): boolean {
-  let ok = true;
+interface ScopeReferences {
+  refs: Map<string, ts.Identifier[]>;
+  assigned: Set<string>;
+}
+let referenceScopes = new WeakMap<ts.Node, ScopeReferences>();
+
+/** End detector dispatch without keeping source-bearing index values reachable. */
+export function releaseKeyAnalysis(): void {
+  referenceScopes = new WeakMap();
+}
+
+/** Preserve the original full recursive scope walk, but index all names on that walk once. */
+function scopeReferences(scope: ts.Node): ScopeReferences {
+  const hit = referenceScopes.get(scope);
+  if (hit) return hit;
+  const index: ScopeReferences = { refs: new Map(), assigned: new Set() };
   const visit = (n: ts.Node): void => {
-    if (!ok) return;
-    if (ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment && ts.isIdentifier(n.left) && n.left.text === name) ok = false;
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment && ts.isIdentifier(n.left)) index.assigned.add(n.left.text);
+    if (ts.isIdentifier(n) && isReference(n)) {
+      const refs = index.refs.get(n.text);
+      if (refs) refs.push(n);
+      else index.refs.set(n.text, [n]);
+    }
     ts.forEachChild(n, visit);
   };
   visit(scope);
-  return ok;
+  referenceScopes.set(scope, index);
+  return index;
+}
+
+/** Original assignment predicate includes nested scopes; do not change binding authority here. */
+function neverReassigned(name: string, scope: ts.Node): boolean {
+  return !scopeReferences(scope).assigned.has(name);
 }
 
 /** Top-level keys of an input object expression; `["*"]` when they cannot all be named. */
@@ -71,17 +94,13 @@ export function inputKeysOf(arg: ts.Expression | undefined): string[] {
 
 /** The identifier references of `name` inside `scope` that resolve to `decl`'s binding. */
 function referencesOf(name: string, scope: ts.Node, declNode: ts.Node): ts.Identifier[] {
-  const refs: ts.Identifier[] = [];
-  const visit = (n: ts.Node): void => {
-    if (ts.isIdentifier(n) && n.text === name && n !== declNode && isReference(n)) {
-      const b = findBinding(name, n);
-      const home = findBinding(name, declNode);
-      if (b && home && b.scope === home.scope) refs.push(n);
-    }
-    ts.forEachChild(n, visit);
-  };
-  visit(scope);
-  return refs;
+  const home = findBinding(name, declNode);
+  if (!home) return [];
+  return (scopeReferences(scope).refs.get(name) ?? []).filter(n => {
+    if (n === declNode) return false;
+    const binding = findBinding(name, n);
+    return !!binding && binding.scope === home.scope;
+  });
 }
 
 function isReference(id: ts.Identifier): boolean {

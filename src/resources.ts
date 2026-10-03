@@ -20,6 +20,7 @@ import {
 import type { ToolDefinition } from './tools/_types.js';
 import { fetchRecipe, fetchRecipePage, LearningBookNotFoundError, requireLearning } from './tools/recipes.js';
 import type { LearningKind } from './learning-contract.js';
+import { CODEMAP_LENS_TEMPLATE, lensEnabled, parseLensUri, readCodeMapLens } from './codemap/lens.js';
 
 export const CAPABILITIES_URI = 'swfte://capabilities';
 export const CATALOG_TEMPLATE = 'swfte://catalog/{kind}/{id}';
@@ -43,6 +44,8 @@ export const RESOURCE_TEMPLATES = [
       `${CATALOG_KINDS.join(', ')}.`,
     mimeType: 'application/json',
   },
+  ...(lensEnabled() ? [{ uriTemplate: CODEMAP_LENS_TEMPLATE, name: 'Private code-map lens',
+    description: 'Read-only authenticated call-site metadata for a file or keyed path hash; no source text.', mimeType: 'application/json' }] : []),
 ];
 
 export class ResourceNotFoundError extends Error {}
@@ -136,6 +139,12 @@ export async function readResource(
       const entry = await fetchRecipe(await ctx.client(),ctx.config,decodeURIComponent(learningUri[2]!),kind);
       return {uri,mimeType:'application/json',text:JSON.stringify({dataOnly:true,entry},null,2)};
     } catch { throw new ResourceNotFoundError('Not found'); }
+  }
+  if (lensEnabled() && uri.startsWith('swfte://codemap/')) {
+    const query = parseLensUri(uri);
+    if (!query) throw new ResourceNotFoundError('Invalid code-map lens URI.');
+    const body = await readCodeMapLens(await ctx.client(), query);
+    return { uri, mimeType: 'application/json', text: JSON.stringify(body, null, 2) };
   }
   const ref = catalogRefFromUri(uri);
   if (!ref) throw new ResourceNotFoundError(`Unknown resource ${uri}. Known: ${CAPABILITIES_URI}, ${CATALOG_TEMPLATE}.`);

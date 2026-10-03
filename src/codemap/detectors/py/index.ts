@@ -1,3 +1,4 @@
+import { releaseKeyAnalysis } from './keys.js';
 import type { DetectContext, DetectResult, DetectedSite, Detector, Implementation, SourceFile } from '../../types.js';
 import { detectManaged, type PySite } from './managed.js';
 import { envNameOf, grammarGeneration, isForeignGenerated, isIgnoredPath, swfteImports, usesMocks, walk, withTree } from './parse.js';
@@ -12,6 +13,12 @@ interface Analysis {
 
 const EMPTY: Analysis = { sites: [], implementations: [], envVarNames: [] };
 let last: { relPath: string; text: string; ctx: DetectContext; generation: number; result: Analysis } | null = null;
+
+/** End the file dispatch without retaining its customer source text or analysis. */
+export function releaseAnalysis(): void {
+  releaseKeyAnalysis();
+  last = null;
+}
 
 /** One parse per file, shared by the four detectors (they run back to back on the same file). */
 function analyze(file: SourceFile, ctx: DetectContext): Analysis {

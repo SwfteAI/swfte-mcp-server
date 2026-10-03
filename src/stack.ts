@@ -1,3 +1,4 @@
+import type { ConfinedWriter } from './fsguard.js';
 /**
  * Local stack detection (CONTRACT rev 4): which framework a project uses, read
  * from its manifests only. Pure and synchronous over a directory — nothing
@@ -106,7 +107,8 @@ const NOTABLE_PY: Record<string, string> = {
   supabase: 'supabase',
 };
 
-function readText(path: string): string | null {
+function readText(path: string, writer?: ConfinedWriter): string | null {
+  if (writer?.native) return writer.readText(path, 1024 * 1024)?.replace(/^\uFEFF/, '') ?? null;
   try {
     // Strip a UTF-8 BOM: editors on Windows write one, and JSON.parse rejects it (BT-N11).
     return statSync(path).isFile() ? readFileSync(path, 'utf8').replace(/^\uFEFF/, '') : null;
@@ -180,7 +182,7 @@ export function pyDependencyArrays(toml: string): string[] {
   return out;
 }
 
-export function pythonDependencies(root: string): { deps: Set<string>; files: string[] } {
+export function pythonDependencies(root: string, writer?: ConfinedWriter): { deps: Set<string>; files: string[] } {
   const deps = new Set<string>();
   const files: string[] = [];
   const addReq = (line: string) => {
@@ -197,12 +199,12 @@ export function pythonDependencies(root: string): { deps: Set<string>; files: st
   }
   for (const name of names.sort()) {
     if (!/^requirements.*\.(txt|in)$/i.test(name)) continue;
-    const text = readText(join(root, name));
+    const text = readText(join(root, name), writer);
     if (text === null) continue;
     files.push(name);
     for (const line of text.split(/\r?\n/)) addReq(line);
   }
-  const pyproject = readText(join(root, 'pyproject.toml'));
+  const pyproject = readText(join(root, 'pyproject.toml'), writer);
   if (pyproject !== null) {
     files.push('pyproject.toml');
     // Quoted requirement strings inside dependency arrays only (PEP 621 `dependencies = [...]`,
@@ -224,7 +226,7 @@ export function pythonDependencies(root: string): { deps: Set<string>; files: st
       if (key && key[1]!.toLowerCase() !== 'python') deps.add(pyName(key[1]!));
     }
   }
-  const pipfile = readText(join(root, 'Pipfile'));
+  const pipfile = readText(join(root, 'Pipfile'), writer);
   if (pipfile !== null) {
     files.push('Pipfile');
     let inPkgs = false;
@@ -241,8 +243,8 @@ export function pythonDependencies(root: string): { deps: Set<string>; files: st
   return { deps, files };
 }
 
-function nodeDependencies(root: string): { deps: Set<string> | null; unreadable: boolean; esm: boolean; workspaces: string[] } {
-  const text = readText(join(root, 'package.json'));
+function nodeDependencies(root: string, writer?: ConfinedWriter): { deps: Set<string> | null; unreadable: boolean; esm: boolean; workspaces: string[] } {
+  const text = readText(join(root, 'package.json'), writer);
   if (text === null) return { deps: null, unreadable: false, esm: false, workspaces: [] };
   try {
     const pkg = JSON.parse(text) as Record<string, unknown>;
@@ -260,21 +262,23 @@ function nodeDependencies(root: string): { deps: Set<string> | null; unreadable:
   }
 }
 
-export function detectStack(root: string = process.cwd()): StackDetection {
+export function detectStack(root: string = process.cwd(), writer?: ConfinedWriter): StackDetection {
   const signals: string[] = [];
-  const node = nodeDependencies(root);
-  const py = pythonDependencies(root);
-  const hasTsconfig = existsSync(join(root, 'tsconfig.json'));
+  const node = nodeDependencies(root, writer);
+  const py = pythonDependencies(root, writer);
+  // Directory layout probes below remain pathname hints: the native producer has no list/probe API.
+  const fileExists = (path: string) => writer?.native ? writer.existsFile(path) : existsSync(path);
+  const hasTsconfig = fileExists(join(root, 'tsconfig.json'));
   const hasSrcDir = isDir(join(root, 'src'));
   const appDir = isDir(join(root, 'src', 'app')) ? 'src/app' : isDir(join(root, 'app')) ? 'app' : null;
   const pagesDir = isDir(join(root, 'src', 'pages')) || isDir(join(root, 'pages'));
-  const pythonPackage = ['app', 'src', 'api', 'backend'].find((d) => existsSync(join(root, d, '__init__.py')) || existsSync(join(root, d, 'main.py'))) ?? null;
+  const pythonPackage = ['app', 'src', 'api', 'backend'].find((d) => fileExists(join(root, d, '__init__.py')) || fileExists(join(root, d, 'main.py'))) ?? null;
 
   if (node.unreadable) signals.push('package.json exists but does not parse; ignoring its dependencies');
   // A monorepo root is rarely where the app lives: say so, and how to point at the app (BT-N11).
-  const pnpmWs = readText(join(root, 'pnpm-workspace.yaml'));
+  const pnpmWs = readText(join(root, 'pnpm-workspace.yaml'), writer);
   const wsGlobs = [...node.workspaces, ...(pnpmWs ? [...pnpmWs.matchAll(/^\s*-\s*["']?([^"'\s#]+)/gm)].map((m) => m[1]!) : [])];
-  if (wsGlobs.length || pnpmWs !== null || existsSync(join(root, 'turbo.json')) || existsSync(join(root, 'nx.json'))) {
+  if (wsGlobs.length || pnpmWs !== null || fileExists(join(root, 'turbo.json')) || fileExists(join(root, 'nx.json'))) {
     signals.push(
       `monorepo root (workspaces: ${[...new Set(wsGlobs)].join(', ') || 'see pnpm-workspace.yaml / turbo.json / nx.json'}); run swfte in the app's package instead, e.g. \`swfte add <ref> --cwd apps/web\`, or pass --framework`
     );

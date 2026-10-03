@@ -1,0 +1,151 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { readVerdict, assertProvingDestination, parseRun, readPendingRun } from '../src/prove/verdict.js';
+import type { ProvingRunResult } from '../src/prove/types.js';
+
+const hash = 'a'.repeat(64);
+const positive = (): ProvingRunResult => ({ schema: 'nexus.proof.v1', run_id: `pr_${hash}`, run_key: hash, level: 'diff',
+  status: 'COMPLETE', verdict: 'PASS', checks: [{ name: 'scan', ok: true, detail: 'fixture measurement', evidence_ref: 'scan_fixture' }],
+  findings: [], dependency_gaps: [], behavior_trace: [{ category: 'proof_admission', record_id: null, content_hash: hash }, { category: 'scan', record_id: 'scan_fixture', content_hash: hash },
+    { category: 'run_ledger', record_id: `pr_${hash}_a_${'b'.repeat(32)}:0`, content_hash: hash }], explained: [],
+  evidence_record_id: 'cer_fixture' });
+const verification = () => ({ recordId: 'cer_fixture', signatureValid: true, status: 'VALID', fresh: true,
+  recordedContentHash: hash, currentContentHash: hash });
+
+test('gate fixture needs native attempt seal plus authoritative verdict and evidence freshness reads', async () => {
+  const paths: string[] = [];
+  const result = await readVerdict({ baseUrl: 'https://api.example.invalid', request: async <T>(options: { path: string }) => {
+    paths.push(options.path); return (options.path.endsWith('/verify') ? verification() : positive()) as T;
+  } }, hash, 'diff');
+  assert.equal(result.token, 'PROOF_PASS'); assert.equal(result.exitCode, 0); assert.equal(paths.length, 2);
+});
+test('unsealed PASS and wrong or duplicate native attempt seals cannot reach gate PASS', async () => {
+  for (const traces of [positive().behavior_trace.filter(trace => trace.category !== 'run_ledger'),
+    [...positive().behavior_trace, positive().behavior_trace[2]!],
+    positive().behavior_trace.map(trace => trace.category === 'run_ledger' ? { ...trace, record_id: `pr_${'c'.repeat(64)}_a_${'b'.repeat(32)}:0` } : trace)]) {
+    const calls: string[] = [];
+    const result = await readVerdict({ baseUrl: 'https://api.example.invalid', request: async <T>({ path }: { path: string }) => {
+      calls.push(path); return { ...positive(), behavior_trace: traces } as T;
+    } }, hash, 'diff');
+    assert.equal(result.token, 'PROOF_UNPROVEN'); assert.deepEqual(calls, ['/v2/proving/runs/verdict']);
+  }
+});
+test('forged local PROOF_PASS is ignored; server fail remains fail and unreachable remains unproven', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'prove-forge-'));
+  try {
+    await writeFile(join(root, 'verdict.json'), JSON.stringify({ verdict: 'PASS', token: 'PROOF_PASS', run_key: hash }));
+    let reads = 0;
+    const server = { baseUrl: 'https://api.example.invalid', request: async <T>() => { reads++; return { ...positive(), verdict: 'FAIL' } as T; } };
+    assert.equal((await readVerdict(server, hash, 'diff')).token, 'PROOF_FAIL'); assert.equal(reads, 1);
+    assert.equal((await readVerdict({ baseUrl: server.baseUrl, request: async () => { throw new Error('offline'); } }, hash, 'diff')).token, 'PROOF_UNPROVEN');
+    assert.equal((await readVerdict(undefined, hash, 'diff')).token, 'PROOF_UNPROVEN');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+test('raw PASS, missing record, mandatory unknown and stale tree never pass', async () => {
+  const variants: unknown[] = [{ verdict: 'PASS' }, { ...positive(), evidence_record_id: undefined },
+    { ...positive(), checks: [{ name: 'build', ok: null, detail: 'not run' }] },
+    { ...positive(), run_key: 'b'.repeat(64) }, { ...positive(), dependency_gaps: ['07_INTAKE'] },
+    { ...positive(), behavior_trace: [] }];
+  for (const variant of variants) {
+    const result = await readVerdict({ baseUrl: 'https://api.example.invalid', request: async <T>() => variant as T }, hash, 'diff');
+    assert.equal(result.token, 'PROOF_UNPROVEN'); assert.equal(result.exitCode, 1);
+  }
+  assert.throws(() => parseRun(positive(), 'b'.repeat(64), 'diff'), /STALE_CONTENT/);
+});
+test('invalid signature, stale or wrong hash verification never satisfies gate', async () => {
+  for (const record of [{ ...verification(), signatureValid: false }, { ...verification(), fresh: null },
+    { ...verification(), status: 'REVOKED' }, { ...verification(), recordedContentHash: 'b'.repeat(64) }]) {
+    const result = await readVerdict({ baseUrl: 'https://api.example.invalid', request: async <T>(options: { path: string }) =>
+      (options.path.endsWith('/verify') ? record : positive()) as T }, hash, 'diff');
+    assert.equal(result.token, 'PROOF_UNPROVEN');
+  }
+});
+test('pending remains pending; HTTP off-machine and credentials in URL are refused', async () => {
+  assert.equal((await readVerdict({ baseUrl: 'http://127.0.0.1:1234', request: async <T>() => ({ ...positive(), status: 'PENDING' }) as T }, hash, 'diff')).token, 'PROOF_PENDING');
+  assert.throws(() => assertProvingDestination('http://api.example.invalid'));
+  assert.throws(() => assertProvingDestination('https://person:password@example.invalid'));
+  assert.doesNotThrow(() => assertProvingDestination('http://127.0.0.1:1234'));
+});
+
+test('executable verdict mutants are killed by assertions after clean positive and negative controls', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'prove-verdict-mutants-'));
+  const original = await readFile(new URL('../src/prove/verdict.ts', import.meta.url), 'utf8');
+  const zodUrl = pathToFileURL(createRequire(import.meta.url).resolve('zod')).href;
+  // Temporary mutant still imports the actual shared decoder, rather than failing module loading.
+  const receiptUrl = new URL('../src/prove/receipt.ts', import.meta.url).href;
+  const portable = original.replace("from 'zod'", `from '${zodUrl}'`).replace("from './receipt.js'", `from '${receiptUrl}'`);
+  const offline = { baseUrl: 'https://api.example.invalid', request: async () => { throw new Error('offline'); } };
+  const failed = { baseUrl: offline.baseUrl, request: async <T>() => ({ ...positive(), verdict: 'FAIL' }) as T };
+  const degradationOracle = async (read: typeof readVerdict): Promise<void> => {
+    assert.equal((await read(offline, hash, 'diff')).token, 'PROOF_UNPROVEN');
+  };
+  const forgeryOracle = async (read: typeof readVerdict): Promise<void> => {
+    assert.equal((await read(failed, hash, 'diff')).token, 'PROOF_FAIL');
+  };
+  try {
+    await degradationOracle(readVerdict); await forgeryOracle(readVerdict);
+    const mutants = [
+      { name: 'degradation', source: portable.replace("return { token: 'PROOF_UNPROVEN', exitCode: 1, reason: 'server verdict or signed evidence unavailable' };", "return { token: 'PROOF_PASS', exitCode: 0 };") , oracle: degradationOracle },
+      { name: 'server-reread', source: portable.replace('  try {\n    assertProvingDestination(client.baseUrl);', "  return { token: 'PROOF_PASS', exitCode: 0 };\n  try {\n    assertProvingDestination(client.baseUrl);"), oracle: forgeryOracle },
+    ];
+    for (const mutant of mutants) {
+      assert.notEqual(mutant.source, portable, 'mutation must actually change source');
+      const file = join(root, `${mutant.name}.ts`); await writeFile(file, mutant.source);
+      const loaded = await import(pathToFileURL(file).href) as { readVerdict: typeof readVerdict };
+      assert.equal(typeof loaded.readVerdict, 'function', 'mutant must load successfully before assertion');
+      await assert.rejects(mutant.oracle(loaded.readVerdict), assert.AssertionError);
+    }
+    assert.equal(await readFile(new URL('../src/prove/verdict.ts', import.meta.url), 'utf8'), original, 'original source remains byte-identical');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('backend sealed admission null and omitted identity parse without inventing evidence', () => {
+  for (const trace of [{ category: 'proof_admission', record_id: null, content_hash: hash },
+    { category: 'proof_admission', content_hash: hash }]) {
+    const serialized = JSON.parse(JSON.stringify({ ...positive(), behavior_trace: [trace, positive().behavior_trace[1]] }));
+    const parsed = parseRun(serialized, hash, 'diff', hash);
+    assert.equal(parsed.behavior_trace[0]!.record_id, 'record_id' in trace ? null : undefined);
+    assert.equal(Object.hasOwn(parsed.behavior_trace[0]!, 'record_id'), Object.hasOwn(trace, 'record_id'));
+    assert.equal(parsed.behavior_trace[0]!.content_hash, hash);
+  }
+  const admission = { category: 'proof_admission', record_id: null, content_hash: hash };
+  for (const traces of [[], [admission, admission], [{ ...admission, content_hash: 'b'.repeat(64) }],
+    [{ ...admission, content_hash: 'invalid' }], [admission, { category: 'run_ledger', record_id: null, content_hash: hash }],
+    [admission, { category: 'scan', content_hash: hash }], [admission, { category: 'bundle_deleted', record_id: '', content_hash: hash }]]) {
+    assert.throws(() => parseRun({ ...positive(), behavior_trace: traces }, hash, 'diff', hash));
+  }
+});
+test('dot evidence reference is refused before verification transport', async () => {
+  for (const id of ['.', '..']) {
+    const paths: string[] = [];
+    const verdict = await readVerdict({ baseUrl: 'https://api.example.invalid', request: async <T>(options: { path: string }) => {
+      paths.push(options.path); return { ...positive(), evidence_record_id: id } as T;
+    } }, hash, 'diff');
+    assert.equal(verdict.token, 'PROOF_UNPROVEN'); assert.deepEqual(paths, ['/v2/proving/runs/verdict']);
+  }
+});
+test('pending reader uses exact owned run id and rejects substituted identity', async () => {
+  const paths: string[] = [];
+  const client = { baseUrl: 'https://api.example.invalid', request: async <T>(options: { path: string }) => {
+    paths.push(options.path); return positive() as T;
+  } };
+  assert.equal((await readPendingRun(client, `pr_${hash}`, hash, 'diff')).status, 'COMPLETE');
+  assert.deepEqual(paths, [`/v2/proving/runs/pr_${hash}`]);
+  await assert.rejects(readPendingRun(client, '.', hash, 'diff')); assert.equal(paths.length, 1);
+  await assert.rejects(readPendingRun(client, `pr_${'b'.repeat(64)}`, hash, 'diff'), /STALE_CONTENT/);
+});
+
+test('unmeasured backend terminal unavailable remains readable but cannot satisfy a gate', async () => {
+  const unavailable = { ...positive(), status: 'COMPLETE', verdict: 'UNAVAILABLE',
+    checks: [{ name: 'scan', ok: null, detail: 'Not run: capacity', evidence_ref: null }],
+    dependency_gaps: ['PROVING_CAPACITY_UNAVAILABLE'], behavior_trace: [], evidence_record_id: undefined };
+  assert.equal(parseRun(unavailable, hash, 'diff').status, 'COMPLETE');
+  assert.equal((await readVerdict({ baseUrl: 'https://api.example.invalid', request: async <T>() => unavailable as T }, hash, 'diff')).token, 'PROOF_UNPROVEN');
+  assert.throws(() => parseRun({ ...unavailable, verdict: 'PASS' }, hash, 'diff'));
+  assert.throws(() => parseRun({ ...unavailable, checks: positive().checks }, hash, 'diff'));
+});

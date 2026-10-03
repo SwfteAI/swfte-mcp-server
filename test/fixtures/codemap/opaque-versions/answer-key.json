@@ -1,0 +1,14 @@
+{
+  "fixture":"opaque-versions",
+  "sites":[
+    {"path":"src/caller.ts","line":3,"language":"typescript","category":"managed","sdk":"node","op":"run","managed":"typed-client","artifact":{"kind":"workflow","id":"wf_opaque_ts","unresolved":false,"pinnedVersion":"v3"},"inputKeys":["amount"],"outputKeys":[]},
+    {"path":"src/caller.ts","line":4,"language":"typescript","category":"managed","sdk":"node","op":"run","managed":"typed-client","artifact":{"kind":"workflow","id":"wf_opaque_wait_ts","unresolved":false,"pinnedVersion":"custom@v3:release"},"inputKeys":["amount"],"outputKeys":[]},
+    {"path":"src/caller.ts","line":5,"language":"typescript","category":"raw-http","sdk":"http","op":"run","managed":"raw-http","artifact":{"kind":"workflow","id":"wf_opaque_raw_ts","unresolved":false,"pinnedVersion":"custom@v3:release"},"inputKeys":[],"outputKeys":[]},
+    {"path":"src/caller.py","line":4,"language":"python","category":"managed","sdk":"python","op":"run","managed":"typed-client","artifact":{"kind":"workflow","id":"wf_opaque_py","unresolved":false,"pinnedVersion":"v3"},"inputKeys":["amount"],"outputKeys":[]},
+    {"path":"src/caller.py","line":5,"language":"python","category":"managed","sdk":"python","op":"run","managed":"typed-client","artifact":{"kind":"workflow","id":"wf_opaque_wait_py","unresolved":false,"pinnedVersion":"custom@v3:release"},"inputKeys":["amount"],"outputKeys":[]},
+    {"path":"src/caller.py","line":6,"language":"python","category":"raw-http","sdk":"http","op":"run","managed":"raw-http","artifact":{"kind":"workflow","id":"wf_opaque_raw_py","unresolved":false,"pinnedVersion":"custom@v3:release"},"inputKeys":[],"outputKeys":[]},
+    {"path":"src/Caller.java","line":4,"language":"java","category":"managed","sdk":"java","op":"run","managed":"typed-client","artifact":{"kind":"workflow","id":"wf_opaque_java","unresolved":false,"pinnedVersion":"v3"},"inputKeys":["amount"],"outputKeys":[]},
+    {"path":"src/Caller.java","line":5,"language":"java","category":"managed","sdk":"java","op":"run","managed":"typed-client","artifact":{"kind":"workflow","id":"wf_opaque_wait_java","unresolved":false,"pinnedVersion":"custom@v3:release"},"inputKeys":["amount"],"outputKeys":[]},
+    {"path":"src/Caller.java","line":6,"language":"java","category":"raw-http","sdk":"http","op":"run","managed":"raw-http","artifact":{"kind":"workflow","id":"wf_opaque_raw_java","unresolved":false,"pinnedVersion":"custom@v3:release"},"inputKeys":[],"outputKeys":[]}
+  ]
+}

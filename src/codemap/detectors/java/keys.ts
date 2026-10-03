@@ -30,25 +30,65 @@ function newMap(n: JNode): { ok: boolean; copy: JNode | null } {
 }
 
 /** The references to local `name` in the method after `after`, stopping at a reassignment. */
-function referencesAfter(method: JNode, name: string, after: number): JNode[] {
-  const refs: JNode[] = [];
-  let cutoff = Number.POSITIVE_INFINITY;
-  walk(method, (n) => {
-    if (n.type === 'assignment_expression' && n.childForFieldName('left')?.type === 'identifier' && n.childForFieldName('left')!.text === name && n.startIndex > after) cutoff = Math.min(cutoff, n.startIndex);
-    return undefined;
-  });
-  walk(method, (n) => {
-    if (n.type !== 'identifier' || n.text !== name || n.startIndex <= after || n.startIndex >= cutoff) return undefined;
+interface ScopeReferences {
+  refs: Map<string, JNode[]>;
+  assignments: Map<string, number[]>;
+}
+let referenceTrees = new WeakMap<JNode['tree'], Map<number, ScopeReferences>>();
+
+/** Private Nodes are dispatch-scoped, never part of a detector result or public cache. */
+export function releaseKeyAnalysis(): void {
+  referenceTrees = new WeakMap();
+}
+
+function add<T>(map: Map<string, T[]>, name: string, value: T): void {
+  const values = map.get(name);
+  if (values) values.push(value);
+  else map.set(name, [value]);
+}
+
+/** Keep the legacy recursive walk extent, reference inclusion and source order exactly. */
+function scopeReferences(scope: JNode): ScopeReferences {
+  let scopes = referenceTrees.get(scope.tree);
+  if (!scopes) { scopes = new Map(); referenceTrees.set(scope.tree, scopes); }
+  const hit = scopes.get(scope.id);
+  if (hit) return hit;
+  const index: ScopeReferences = { refs: new Map(), assignments: new Map() };
+  walk(scope, n => {
+    if (n.type === 'assignment_expression') {
+      const left = n.childForFieldName('left');
+      if (left?.type === 'identifier') add(index.assignments, left.text, n.startIndex);
+    }
+    if (n.type !== 'identifier') return undefined;
     const p = n.parent;
     if (!p) return undefined;
     if (p.type === 'method_invocation' && p.childForFieldName('name')?.id === n.id) return undefined;
     if (p.type === 'field_access' && p.childForFieldName('field')?.id === n.id) return undefined;
     if (p.type === 'variable_declarator' && p.childForFieldName('name')?.id === n.id) return undefined;
     if (p.type === 'formal_parameter' || p.type === 'method_reference') return undefined;
-    refs.push(n);
+    add(index.refs, n.text, n);
     return undefined;
   });
-  return refs;
+  // Assignment positions are sorted independently; references retain original traversal order.
+  for (const positions of index.assignments.values()) positions.sort((a,b) => a-b);
+  scopes.set(scope.id, index);
+  return index;
+}
+
+function firstAfter(positions: readonly number[], after: number): number {
+  let low = 0, high = positions.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (positions[middle]! <= after) low = middle + 1;
+    else high = middle;
+  }
+  return positions[low] ?? Number.POSITIVE_INFINITY;
+}
+
+function referencesAfter(method: JNode, name: string, after: number): JNode[] {
+  const index = scopeReferences(method);
+  const cutoff = firstAfter(index.assignments.get(name) ?? [], after);
+  return (index.refs.get(name) ?? []).filter(n => n.startIndex > after && n.startIndex < cutoff);
 }
 
 /**

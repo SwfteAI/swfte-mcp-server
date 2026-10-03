@@ -4,6 +4,7 @@
  * generated client's own HTTP call as an Implementation (never a site).
  */
 import { posix } from 'node:path';
+import { numericVersion, literalRevision } from '../../revisions.js';
 import type { DetectedSite, DetectContext, Implementation, LockBinding, Op } from '../../types.js';
 import { inputKeys, outputKeys } from './keys.js';
 import { children, evalPieces, isBroken, lineOf, literalOf, symbolOf, walk, type PyNode, type Piece } from './parse.js';
@@ -49,6 +50,7 @@ interface SdkMethod {
   idKw: string[];
   inputPos: number | null;
   inputKw: string[];
+  versioned?: boolean;
 }
 
 const WF_ID = ['workflow_id', 'id'];
@@ -56,6 +58,8 @@ const SDK_METHODS: Record<string, Record<string, SdkMethod>> = {
   workflows: {
     invoke: { kind: 'workflow', op: 'run', idKw: WF_ID, inputPos: 1, inputKw: ['inputs', 'input_data', 'data', 'input'] },
     invoke_and_wait: { kind: 'workflow', op: 'run', idKw: WF_ID, inputPos: 1, inputKw: ['inputs', 'input_data', 'data', 'input'] },
+    invoke_version: { kind: 'workflow', op: 'run', idKw: WF_ID, inputPos: 2, inputKw: ['inputs'], versioned: true },
+    invoke_version_and_wait: { kind: 'workflow', op: 'run', idKw: WF_ID, inputPos: 2, inputKw: ['inputs'], versioned: true },
     invoke_async: { kind: 'workflow', op: 'run', idKw: WF_ID, inputPos: 1, inputKw: ['inputs', 'input_data', 'data', 'input'] },
     execute: { kind: 'workflow', op: 'run', idKw: WF_ID, inputPos: 1, inputKw: ['inputs', 'input_data', 'data', 'input'] },
     stream: { kind: 'workflow', op: 'stream', idKw: WF_ID, inputPos: 1, inputKw: ['inputs', 'input_data', 'data', 'input'] },
@@ -70,6 +74,7 @@ const SDK_METHODS: Record<string, Record<string, SdkMethod>> = {
   },
   chatflows: {
     start_session: { kind: 'chatflow', op: 'chat', idKw: ['chatflow_id', 'chat_flow_id', 'id'], inputPos: 2, inputKw: ['context'] },
+    test: { kind: 'chatflow', op: 'chat', idKw: ['chatflow_id', 'id'], inputPos: 1, inputKw: ['input'] },
   },
 };
 
@@ -235,6 +240,10 @@ export function detectManaged(root: PyNode, relPath: string, ctx: DetectContext,
     const idExpr = pos[0] ?? m.idKw.map((k) => kw.get(k)).find(Boolean) ?? null;
     if (!idExpr) return undefined;
     const info = idFromPieces(evalPieces(idExpr));
+    const version = pos[1] ?? kw.get('version');
+    const numeric = version?.type === 'integer' && /^[1-9][0-9]*$/.test(version.text) ? Number(version.text) : NaN;
+    const pin = m.versioned ? numericVersion(numeric) ?? (version ? literalRevision(literalOf(evalPieces(version))) : null) : null;
+    const unresolved = info.unresolved || Boolean(m.versioned && pin === null);
     let inKeys: string[] = [];
     if (m.inputPos !== null || m.inputKw.length) {
       const inputExpr = (m.inputPos !== null ? pos[m.inputPos] : undefined) ?? m.inputKw.map((k) => kw.get(k)).find(Boolean) ?? null;
@@ -242,11 +251,11 @@ export function detectManaged(root: PyNode, relPath: string, ctx: DetectContext,
     }
     sites.push(
       mkSite(call, {
-        category: info.unresolved ? 'dynamic' : 'managed',
+        category: unresolved ? 'dynamic' : 'managed',
         sdk: 'python',
         op: m.op,
         managed: 'typed-client',
-        artifact: { kind: m.kind, id: info.id, unresolved: info.unresolved, ...(info.envVarName ? { envVarName: info.envVarName } : {}), pinnedVersion: null, alias: null },
+        artifact: { kind: m.kind, id: unresolved ? null : info.id, unresolved, ...(info.envVarName ? { envVarName: info.envVarName } : {}), pinnedVersion: pin, alias: null },
         contractHash: null,
         inputKeys: inKeys,
         outputKeys: m.op === 'read-output' ? [] : outputKeys(call),

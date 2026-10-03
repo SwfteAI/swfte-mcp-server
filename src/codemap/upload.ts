@@ -77,6 +77,70 @@ export interface WorkspaceKey {
   readonly key: Uint8Array;
 }
 
+export interface RepositoryOptIn {
+  repoId: string;
+  pathHashing: boolean;
+  attribution: boolean;
+}
+
+/** Explicit opt-in carries repository metadata only, never source or a workspace override. */
+export async function optInRepository(cfg: UploadConfig, repo: Manifest['repo'], pathHashing: boolean, attribution: boolean): Promise<RepositoryOptIn> {
+  if (!REPO_ID_PATTERN.test(repo.id) || typeof pathHashing !== 'boolean' || typeof attribution !== 'boolean') {
+    throw new CodemapApiError(0, 'INVALID_REPO_ID', 'Invalid repository opt-in.');
+  }
+  const body = JSON.stringify({ repoId: repo.id, provider: repo.provider, defaultBranch: repo.defaultBranch,
+    ...(repo.displayName ? { displayName: repo.displayName } : {}), pathHashing, attribution });
+  const answer = await call(cfg, 'POST', CODEMAP_BASE + '/repos', { bytes: Buffer.from(body), gzip: false });
+  if (answer.kind === 'offline') throw new CodemapOfflineError('Repository consent cannot be recorded while offline.');
+  if (answer.status !== 200) throw apiError('POST', CODEMAP_BASE + '/repos', answer.status, answer.body);
+  const b = answer.body;
+  if (!isObj(b) || b.repoId !== repo.id || b.pathHashing !== pathHashing || b.attribution !== attribution) {
+    throw new CodemapApiError(200, 'UNEXPECTED_ANSWER', 'Repository opt-in receipt did not match the request.');
+  }
+  return { repoId: repo.id, pathHashing, attribution };
+}
+
+export async function repositoryOptIns(cfg: UploadConfig): Promise<RepositoryOptIn[]> {
+  const answer = await call(cfg, 'GET', CODEMAP_BASE + '/repos');
+  if (answer.kind === 'offline') throw new CodemapOfflineError('Repository consent could not be checked.');
+  if (answer.status !== 200) throw apiError('GET', CODEMAP_BASE + '/repos', answer.status, answer.body);
+  if (!isObj(answer.body) || !Array.isArray(answer.body.repos)) {
+    throw new CodemapApiError(200, 'UNEXPECTED_ANSWER', 'Repository list receipt is invalid.');
+  }
+  return answer.body.repos.map((r: unknown) => {
+    if (!isObj(r) || typeof r.repoId !== 'string' || !REPO_ID_PATTERN.test(r.repoId)
+      || typeof r.pathHashing !== 'boolean' || typeof r.attribution !== 'boolean') {
+      throw new CodemapApiError(200, 'UNEXPECTED_ANSWER', 'Repository opt-in is invalid.');
+    }
+    return { repoId: r.repoId, pathHashing: r.pathHashing, attribution: r.attribution };
+  });
+}
+
+export interface VerifyResultReport {
+  repoId: string; commitSha: string; artifactRef: string; alias: string | null;
+  status: 'pass' | 'fail' | 'unchecked'; drift: string[];
+}
+
+/** Closed, metadata-only CI report. Free-form diagnostic text never crosses this boundary. */
+export async function postVerifyResult(cfg: UploadConfig, report: VerifyResultReport): Promise<void> {
+  if (!REPO_ID_PATTERN.test(report.repoId) || !/^[0-9a-f]{40}$/.test(report.commitSha)
+    || !/^[a-z][a-z0-9_-]{0,31}:[A-Za-z0-9_.@:-]{1,128}$/.test(report.artifactRef)
+    || (report.alias !== null && !/^[A-Za-z0-9_.@+-]{1,64}$/.test(report.alias))
+    || !['pass', 'fail', 'unchecked'].includes(report.status) || report.drift.length > 64
+    || report.drift.some(d => !/^[A-Za-z0-9_$.<>#:*-]{1,128}$/.test(d))) {
+    throw new CodemapApiError(0, 'ALLOWLIST_VIOLATION', 'CI report contains non-metadata fields.');
+  }
+  const body = JSON.stringify({ repoId: report.repoId, commitSha: report.commitSha,
+    artifactRef: report.artifactRef, alias: report.alias, status: report.status, drift: [...report.drift] });
+  const path = CODEMAP_BASE + '/verify-results';
+  const answer = await call(cfg, 'POST', path, { bytes: Buffer.from(body), gzip: false });
+  if (answer.kind === 'offline') throw new CodemapOfflineError('CI outcome could not be recorded.');
+  if (answer.status !== 200) throw apiError('POST', path, answer.status, answer.body);
+  if (!isObj(answer.body) || answer.body.stored !== true) {
+    throw new CodemapApiError(200, 'UNEXPECTED_ANSWER', 'CI outcome has no stored receipt.');
+  }
+}
+
 const UNAVAILABLE = new Set([408, 429, 500, 502, 503, 504]);
 
 /** The base URL the credential may go to, or a thrown UntrustedHostError. */
@@ -91,6 +155,9 @@ export function credentialTarget(cfg: UploadConfig): string {
   }
   if (u.username || u.password) {
     throw new UntrustedHostError('Refusing to send the Swfte credential: the base URL contains credentials (user:password@host).');
+  }
+  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname.toLowerCase()))) {
+    throw new UntrustedHostError('Authenticated code-map requests require HTTPS or exact loopback HTTP.');
   }
   return assertLockBaseUrl(base, env, env.SWFTE_BASE_URL?.trim() || undefined).replace(/\/+$/, '');
 }
@@ -176,6 +243,7 @@ export async function uploadManifest(cfg: UploadConfig, repoId: string, manifest
   if (!REPO_ID_PATTERN.test(repoId)) throw new CodemapApiError(0, 'INVALID_REPO_ID', 'The repo id must be r_ + 32 hex.');
   const checked = checkManifest(manifest); // the allowlist, every time (a queued manifest included)
   const body = serializeManifest(checked);
+  const expectedCallSites = checked.callSites.length;
   if (checked.repo.id !== repoId) throw new CodemapApiError(0, 'REPO_MISMATCH', 'The manifest names a different repo than the upload path.');
   const raw = Buffer.from(body, 'utf8');
   const gzip = Boolean(opts.gzip);
@@ -187,9 +255,11 @@ export async function uploadManifest(cfg: UploadConfig, repoId: string, manifest
   }
   if (answer.status !== 200) throw apiError('POST', path, answer.status, answer.body);
   const b = answer.body;
-  if (!isObj(b) || (b.status !== 'stored' && b.status !== 'duplicate') || b.commitSha !== checked.commitSha || typeof b.callSites !== 'number' || !Number.isInteger(b.callSites) || b.callSites < 0) {
+  if (!isObj(b) || (b.status !== 'stored' && b.status !== 'duplicate') || b.commitSha !== checked.commitSha || typeof b.callSites !== 'number' || !Number.isInteger(b.callSites) || b.callSites < 0
+    || (b.status === 'stored' && b.callSites !== expectedCallSites)) {
     throw new CodemapApiError(200, 'UNEXPECTED_ANSWER', `POST ${path} answered 200 without a stored/duplicate receipt for this commit; nothing is reported as uploaded.`);
   }
+  // A stored receipt must agree with the manifest sent. A legacy duplicate never confirms its body.
   return { status: b.status, commitSha: checked.commitSha, callSites: b.callSites };
 }
 

@@ -4,6 +4,7 @@
  * variable NAME, or a dynamic hole. Output names the artifact only when the path spells the id out.
  */
 import type { Op } from '../../types.js';
+import { pathVersion } from '../../revisions.js';
 
 export type Piece = { k: 'lit'; v: string } | { k: 'env'; name: string } | { k: 'dyn' };
 
@@ -87,7 +88,25 @@ function opFor(kind: string, seg: string[]): { op: Op; version: string | null } 
  * URL is Swfte's, so the URL itself must start at the route.
  */
 export function parseSwfteRoute(ps: Piece[], relative = false): SwfteRoute | null {
-  const { text, holes } = flatten(mergePieces(ps));
+  const folded = flatten(mergePieces(ps));
+  const envBase = !relative && folded.text.startsWith(HOLE)
+    && folded.holes[0]?.k === 'env' && folded.holes[0].name === 'SWFTE_BASE_URL';
+  if (!relative && !envBase && !/^https?:\/\/api\.swfte\.com(?::443)?(?=[/?#]|$)/i.test(folded.text)) return null;
+  let stem = '~swfte-hole-';
+  while (folded.text.includes(stem)) stem += '_';
+  let nextHole = 0;
+  const templates: string[] = [];
+  const symbolic = folded.text.replace(/\u0000/g, () => `${stem}${nextHole++}~`)
+    .replace(/\{[A-Za-z_][A-Za-z0-9_]*\}/g, value => { templates.push(value); return `${stem}template${templates.length - 1}~`; });
+  const source = envBase ? `https://api.swfte.com${symbolic.slice(`${stem}0~`.length)}` : symbolic;
+  let parsed: URL;
+  try { parsed = new URL(source, relative ? 'https://api.swfte.com' : undefined); } catch { return null; }
+  if (!BASE_OK.test(parsed.origin)) return null;
+  const holes: Piece[] = envBase ? [folded.holes[0]!] : [];
+  const path = parsed.pathname.replace(new RegExp(`${stem}(\\d+)~`, 'g'), (_marker, index: string) => {
+    holes.push(folded.holes[Number(index)]!); return HOLE;
+  }).replace(new RegExp(`${stem}template(\\d+)~`, 'g'), (_marker, index: string) => templates[Number(index)]!);
+  const text = (relative ? '' : envBase ? HOLE : parsed.origin) + path;
   let best: { idx: number; prefix: string; kind: string } | null = null;
   for (const p of PREFIXES) {
     const idx = text.indexOf(p.prefix);
@@ -130,6 +149,10 @@ export function parseSwfteRoute(ps: Piece[], relative = false): SwfteRoute | nul
     return null;
   }
   const version = shape.version;
-  const pinned = version && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(version) ? version : null;
+  const pinned = pathVersion(version);
+  // Preserve a literal artifact ID when only its runtime version is dynamic.
+  // No pin is certified, and raw HTTP impact remains cannot-check.
+  const dynamicVersion = version?.includes(HOLE) || /^\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(version ?? '');
+  if (seg[1] === 'versions' && pinned === null && !dynamicVersion) { id = null; unresolved = true; envVarName = undefined; }
   return { kind: best.kind, op: shape.op, id, unresolved, ...(envVarName ? { envVarName } : {}), placeholder, pinnedVersion: pinned };
 }

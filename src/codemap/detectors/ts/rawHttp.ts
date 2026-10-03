@@ -6,6 +6,7 @@
  * inside the one file.
  */
 import ts from 'typescript';
+import { pathVersion } from '../../revisions.js';
 import type { DetectContext, DetectedSite, DetectResult, Op, SourceFile } from '../../types.js';
 import { ENV_NAME_PATTERN, ID_PATTERN, evalParts, findBinding, isTestPath, lineOf, mocksSwfte, unwrap, type Part } from './common.js';
 import { isGeneratedByOtherTool } from '../../walk.js';
@@ -41,7 +42,7 @@ function fold(parts: Part[]): Folded {
   for (const p of parts) {
     if (p.k === 'lit') text += p.v;
     else {
-      if (p.k === 'env' && /SWFTE_BASE_URL$/.test(p.name) && text === '') hostKnown = true;
+      if (p.k === 'env' && p.name === 'SWFTE_BASE_URL' && text === '') hostKnown = true;
       text += PLACE;
       places.push(p.k === 'env' ? p.name : null);
     }
@@ -61,8 +62,22 @@ interface Route {
 
 /** The artifact a folded URL addresses, or null when it is not a Swfte artifact route. */
 function routeOf(f: Folded): Route | null {
-  const q = f.text.search(/[?#]/);
-  const path = q >= 0 ? f.text.slice(0, q) : f.text;
+  // Normalize the actual path before identifying a collection. Keep every surviving
+  // dynamic hole's original identity even when a preceding segment was removed.
+  let stem = '~swfte-hole-';
+  while (f.text.includes(stem)) stem += '_';
+  let nextHole = 0;
+  const symbolic = f.text.replace(/\u0000/g, () => `${stem}${nextHole++}~`);
+  const envBase = f.text.startsWith(PLACE);
+  const source = envBase ? `https://api.swfte.com${symbolic.slice(`${stem}0~`.length)}`
+    : symbolic.startsWith('//') ? `https:${symbolic}` : symbolic;
+  let normalized: string;
+  try { normalized = new URL(source).pathname; } catch { return null; }
+  const places: Array<string | null> = envBase ? [f.places[0] ?? null] : [];
+  const path = (envBase ? PLACE : '') + normalized.replace(new RegExp(`${stem}(\\d+)~`, 'g'), (_marker, index: string) => {
+    places.push(f.places[Number(index)] ?? null);
+    return PLACE;
+  });
   const segs = path.split('/');
   // the collection segment, not the host: look for /<v1|v2>/<collection>/<id>
   let placeIdx = 0;
@@ -85,12 +100,18 @@ function routeOf(f: Folded): Route | null {
     let envVarName: string | undefined;
     if (idSeg.includes(PLACE)) {
       const only = idSeg === PLACE;
-      const env = only ? f.places[placeIdx] ?? null : null;
+      const env = only ? places[placeIdx] ?? null : null;
       if (env && ENV_NAME_PATTERN.test(env)) envVarName = env;
     } else if (ID_PATTERN.test(idSeg)) id = idSeg;
     const tail = segs.slice(i + 2);
     let pinned: string | null = null;
-    if (tail[0] === 'versions' && tail[1] && /^[0-9]+$/.test(tail[1])) pinned = tail[1];
+    if (tail[0] === 'versions') {
+      const version = tail[1];
+      pinned = pathVersion(version);
+      // A dynamic version does not make a literal artifact ID dynamic. Its pin is
+      // unverified; raw HTTP callers remain cannot-check in impact evaluation.
+      if (pinned === null && !version?.includes(PLACE)) { id = null; envVarName = undefined; }
+    }
     const rest = tail.join('/');
     let op: Op = kind === 'agent' || kind === 'chatflow' ? 'chat' : 'run';
     if (/(^|\/)(executions|history|status|output|runs)(\/|$)/.test(rest) && !/invoke|execute$/.test(rest)) op = 'read-output';

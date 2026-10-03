@@ -29,6 +29,10 @@ import { loadLock, LockError } from './lock.js';
 import { FRAMEWORKS, type Framework } from './stack.js';
 import { PACKAGE_NAME, PACKAGE_VERSION } from './version.js';
 import { environmentSecretGlobs, isEnvironmentFile, resolveEnvironmentFiles, type EnvironmentFiles } from './env-files.js';
+import { scanRepository } from './codemap/scan.js';
+import { reportVerification, verifyProjectWithSnapshot } from './codemap/report.js';
+import { recordNativeWrittenFiles } from './codemap/provenance.js';
+import { handleProveCommand } from './prove/cli.js';
 
 export interface CliIO {
   out: (line: string) => void;
@@ -39,6 +43,8 @@ export interface CliIO {
   environmentFiles?: Partial<EnvironmentFiles>;
   /** `swfte dev` runs until this resolves (default: SIGINT/SIGTERM). Tests pass their own. */
   waitForExit?: () => Promise<void>;
+  /** Caller-controlled cancellation for an explicitly started proof watch. */
+  signal?: AbortSignal;
 }
 
 function waitForSignal(): Promise<void> {
@@ -69,6 +75,10 @@ Usage:
   swfte sync [--alias <name>]... [--dry-run] [--force]
   swfte verify [--offline] [--json] [--compliance [--paths <p,…>]]
   swfte upgrade <alias> [--accept-capability-changes] [--force] [--dry-run]
+  swfte scan [--opt-in] [--hash-paths] [--attribution] [--tag] [--offline] [--ci] [--pr <n>] [--json]
+  swfte verify --report [--json]
+  swfte prove <path> [--level local|manifest|diff|tree]
+  swfte prove verdict|init-gate|watch [<path>]
 
   <catalogRef>   "<kind>:<id>", e.g. workflow:wf_123 (from swfte_find_existing or Studio)
   --framework    ${FRAMEWORKS.join(' | ')} (default: detected from package.json / pyproject.toml / requirements*.txt)
@@ -98,8 +108,8 @@ interface Parsed {
   flags: Map<string, string[]>;
 }
 
-const BOOLEAN = new Set(['force', 'dry-run', 'offline', 'json', 'accept-capability-changes', 'help', 'version', 'compliance', 'strict', 'no-pin', 'record']);
-const VALUED = new Set(['framework', 'out', 'alias', 'language', 'cwd', 'paths', 'port', 'base-url', 'workspace']);
+const BOOLEAN = new Set(['force', 'dry-run', 'offline', 'json', 'accept-capability-changes', 'help', 'version', 'compliance', 'strict', 'no-pin', 'record', 'no-compliance', 'opt-in', 'hash-paths', 'attribution', 'tag', 'ci', 'report']);
+const VALUED = new Set(['framework', 'out', 'alias', 'language', 'cwd', 'paths', 'port', 'base-url', 'workspace', 'pr']);
 /** Credentials come from the environment only: a flag would land in shell history and CI logs. */
 const CREDENTIAL_FLAGS = new Set(['token', 'api-key', 'apikey', 'pat', 'key', 'secret', 'password']);
 const SHORT: Record<string, string> = { f: 'force', h: 'help', v: 'version', C: 'cwd' };
@@ -178,7 +188,16 @@ function projectRoot(io: CliIO, p: Parsed): string {
 }
 
 /** swfte.json's baseUrl, read before credentials so a repo pinned to a non-default API needs no extra env. */
-function peekBaseUrl(root: string): string | undefined {
+function peekBaseUrl(root: string, owner?: ConfinedWriter): string | undefined {
+  if (owner?.native) {
+    try {
+      const loaded = loadLock(owner, { baseUrl: '' });
+      return loaded.exists && loaded.lock.baseUrl ? loaded.lock.baseUrl : undefined;
+    } catch (error) {
+      if (error instanceof LockError) return undefined;
+      throw error; // Native admission/confinement errors must never become the default base URL.
+    }
+  }
   try {
     const loaded = loadLock(new ConfinedWriter({ root }), { baseUrl: '' });
     return loaded.exists && loaded.lock.baseUrl ? loaded.lock.baseUrl : undefined;
@@ -219,6 +238,16 @@ function printVerify(io: CliIO, r: VerifyReport): void {
 
 /** Runs one CLI invocation; returns the process exit code. Never calls process.exit, so tests can drive it. */
 export async function runCli(argv: string[], io: CliIO): Promise<number> {
+  if (argv[0] === 'prove') {
+    try {
+      let provingClient: SwfteClient | undefined;
+      try { provingClient = new SwfteClient(cliConfig(io.env)); } catch (err) { if (!(err instanceof ConfigError)) throw err; }
+      return await handleProveCommand(argv.slice(1), { cwd: io.cwd, client: provingClient, output: io.out, signal: io.signal });
+    } catch (err) {
+      io.err(redactSecrets(err instanceof Error ? err.message : String(err), [io.env.SWFTE_API_KEY, io.env.SWFTE_PAT]));
+      return 2;
+    }
+  }
   let p: Parsed;
   try {
     p = parseArgs(argv);
@@ -239,16 +268,19 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
   // Everything credential-valued this run knows about; error text is scrubbed of all of it (BT-N8).
   const secrets = [io.env.SWFTE_API_KEY, io.env.SWFTE_PAT].map((v) => v?.trim()).filter((v): v is string => Boolean(v));
 
+  let ownedWriter: ConfinedWriter | undefined;
   try {
     const root = projectRoot(io, p);
     const environmentFiles = resolveEnvironmentFiles(io.environmentFiles);
     const additionalSecretGlobs = environmentSecretGlobs(environmentFiles);
+    const selectedNative = ['add', 'sync', 'upgrade'].includes(p.command);
+    const writer = ownedWriter = new ConfinedWriter({ root, forbidden: secrets, native: selectedNative });
     const needsNetwork =
-      p.command === 'add' || p.command === 'sync' || p.command === 'upgrade' || (p.command === 'verify' && !flag(p, 'offline')) || (p.command === 'dev' && flag(p, 'record'));
+      p.command === 'add' || p.command === 'sync' || p.command === 'upgrade' || (p.command === 'scan' && !flag(p, 'offline')) || (p.command === 'verify' && !flag(p, 'offline')) || (p.command === 'dev' && flag(p, 'record'));
     let config: ServerConfig | null = null;
     if (needsNetwork) {
       try {
-        config = { ...cliConfig(io.env, peekBaseUrl(root)), environmentFiles };
+        config = { ...cliConfig(io.env, peekBaseUrl(root, writer)), environmentFiles };
       } catch (err) {
         if (!(err instanceof ConfigError)) throw err;
         if (p.command !== 'verify') throw err;
@@ -256,7 +288,6 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       }
     }
     if (config) secrets.push(config.credential);
-    const writer = new ConfinedWriter({ root, forbidden: config ? [config.credential] : [] });
     const client = config ? new SwfteClient(config) : null;
     const env = io.env;
 
@@ -265,6 +296,19 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
     const budget = timeoutBudget(io.env, p.command);
     const exec = async (): Promise<number> => {
     switch (p.command) {
+      case 'scan': {
+        if (p.positionals.length) throw new UsageError('swfte scan takes no positional arguments; use --cwd.');
+        const prValue = value(p, 'pr');
+        if (prValue !== undefined && !/^[1-9][0-9]{0,8}$/.test(prValue)) throw new UsageError('--pr needs a positive bounded integer.');
+        const result = await scanRepository(root, config ? { ...config, env: io.env } : null, {
+          offline: flag(p, 'offline'), optIn: flag(p, 'opt-in'), tag: flag(p, 'tag'),
+          hashPaths: flag(p, 'hash-paths') ? true : undefined, attribution: flag(p, 'attribution') ? true : undefined,
+          scanner: flag(p, 'ci') ? 'ci' : 'cli', pr: prValue ? Number(prValue) : undefined });
+        const token = result.status === 'queued-offline' ? `SWFTE_SCAN_QUEUED ${result.queuedAt}`
+          : result.status === 'duplicate' ? 'SWFTE_SCAN_DUPLICATE' : `SWFTE_SCAN_UPLOADED ${result.manifest.callSites.length} call site(s)`;
+        if (json) emit({ ...result, token }); else io.out(token);
+        return 0;
+      }
       case 'add': {
         const ref = p.positionals[0];
         if (!ref || p.positionals.length > 1) throw new UsageError('swfte add takes exactly one <catalogRef>.');
@@ -272,14 +316,17 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         if (framework && !(FRAMEWORKS as readonly string[]).includes(framework)) throw new UsageError(`--framework must be one of ${FRAMEWORKS.join(', ')}.`);
         const language = value(p, 'language');
         if (language && language !== 'typescript' && language !== 'python') throw new UsageError('--language must be typescript or python.');
+        if (flag(p, 'no-compliance') && flag(p, 'strict')) throw new UsageError('--strict requires the compliance scan.');
         const res = await bakeArtifact(
           { client: client!, config: config!, writer, env },
           { catalogRef: ref, framework: framework as Framework | undefined, language: language as 'typescript' | 'python' | undefined, outDir: value(p, 'out'), alias: value(p, 'alias'), force: flag(p, 'force'), pin: !flag(p, 'no-pin') }
         );
         // Scan what was just written (code only: the lock and env examples are not code).
         const written = res.files.filter((f) => f.action !== 'unchanged' && f.path !== 'swfte.json' && !isEnvironmentFile(f.path, environmentFiles)).map((f) => f.path);
-        const compliance = written.length ? await scanProject(client, root, written, additionalSecretGlobs) : null;
+        recordNativeWrittenFiles(writer, res.files, 'human', 'cli');
+        const compliance = written.length && !flag(p, 'no-compliance') ? await scanProject(client, root, written, additionalSecretGlobs) : null;
         const strict = flag(p, 'strict');
+        writer.close();
         if (json) emit({ ...res, compliance });
         else {
           io.out(`Added ${res.catalogRef} as "${res.alias}" (${res.framework}${res.detection ? `, detected: ${res.detection.signals[0] ?? res.detection.detected}` : ''}).`);
@@ -301,6 +348,8 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       case 'sync': {
         if (p.positionals.length) throw new UsageError('swfte sync takes no positional arguments (use --alias).');
         const res = await syncProject({ client: client!, config: config!, writer, env }, { aliases: p.flags.get('alias'), dryRun: flag(p, 'dry-run'), force: flag(p, 'force') });
+        recordNativeWrittenFiles(writer, res.files, 'human', 'cli');
+        writer.close();
         if (json) emit(res);
         else printSync(io, res);
         // Held because the change could not be vetted (BT-N4) is "could not check": non-zero, distinct from an error.
@@ -315,6 +364,8 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
           pin: !flag(p, 'no-pin'),
           dryRun: flag(p, 'dry-run'),
         });
+        recordNativeWrittenFiles(writer, res.files, 'human', 'cli');
+        writer.close();
         if (json) emit(res);
         else printSync(io, res);
         return res.entries.some((e) => e.status === 'error' || e.status.startsWith('blocked')) ? 1 : 0;
@@ -322,9 +373,16 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       case 'verify': {
         if (p.positionals.length) throw new UsageError('swfte verify takes no positional arguments.');
         const withCompliance = flag(p, 'compliance');
+        if (flag(p, 'report') && flag(p, 'offline')) throw new UsageError('--report needs the authenticated CI report endpoint.');
         if (withCompliance && flag(p, 'offline')) throw new UsageError('--compliance sends code to the scan endpoint; it cannot run with --offline.');
         if (p.flags.has('paths') && !withCompliance) throw new UsageError('--paths only applies with --compliance.');
-        const report = await verifyProject({ client, config: config ?? undefined, writer }, { offline: flag(p, 'offline') });
+        const context = { client, config: config ?? undefined, writer };
+        const options = { offline: flag(p, 'offline') };
+        let report: VerifyReport;
+        if (flag(p, 'report')) {
+          if (!config) throw new ConfigError('CI reporting needs a credential.');
+          report = await verifyProjectWithSnapshot(context, { ...config, env: io.env }, options);
+        } else report = await verifyProject(context, options);
         let compliance: ScanReport | null = null;
         if (withCompliance) {
           let generated: string[] = [];
@@ -341,9 +399,15 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         // A real failure (1) outranks "could not check" (2): both need attention, the failure more.
         const exitCode = report.exitCode === 1 || scanCode === 1 ? 1 : Math.max(report.exitCode, scanCode);
         const verdict = exitCode === 0 ? 'SWFTE_VERIFY_OK' : exitCode === 2 ? 'SWFTE_VERIFY_UNCHECKED' : 'SWFTE_VERIFY_FAILED';
-        if (json) emit({ ...report, ok: exitCode === 0, exitCode, verdict, ...(compliance ? { compliance } : {}) });
+        let reported = 0;
+        if (flag(p, 'report')) {
+          if (!config) throw new ConfigError('CI reporting needs a credential.');
+          reported = await reportVerification(root, { ...config, env: io.env }, report, exitCode);
+        }
+        if (json) emit({ ...report, ok: exitCode === 0, exitCode, verdict, ...(flag(p, 'report') ? { reported } : {}), ...(compliance ? { compliance } : {}) });
         else {
           printVerify(io, report);
+          if (flag(p, 'report')) io.out(`SWFTE_VERIFY_REPORTED ${reported} outcome(s)`);
           if (compliance) {
             for (const l of formatScan(compliance)) (compliance.verdict === 'PASS' ? io.out : io.err)(l);
             if (scanCode === 1) io.out('SWFTE_VERIFY_FAILED — compliance scan found critical/high issues (exit 1).');
@@ -395,7 +459,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       return await client.withDeadline(Date.now() + budget, exec);
     } catch (err) {
       if (err instanceof OperationDeadlineError) {
-        io.err(`Gave up after ${Math.round(budget / 1000)} s without an answer from Swfte (SWFTE_TIMEOUT_MS). Nothing further was written.`);
+        io.err(`Gave up after ${Math.round(budget / 1000)} s without an answer from Swfte (SWFTE_TIMEOUT_MS). Any completed local writes remain; no rollback was attempted.`);
         return 2;
       }
       throw err;
@@ -424,16 +488,27 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
     }
     io.err(redact(err instanceof Error ? err.message : String(err)));
     return 1;
+  } finally {
+    ownedWriter?.close();
   }
 }
 
 /** Process entry: `swfte …`, or `swfte-mcp-server swfte …` via src/index.ts. */
 export async function main(argv = process.argv.slice(2)): Promise<void> {
-  const code = await runCli(argv, {
-    out: (l) => process.stdout.write(`${l}\n`),
-    err: (l) => process.stderr.write(`${l}\n`),
-    env: process.env,
-    cwd: process.cwd(),
-  });
-  process.exitCode = code;
+  const watching = argv[0] === 'prove' && (argv[1] === 'watch' || argv.includes('--watch'));
+  const abort = new AbortController();
+  const cancel = () => abort.abort();
+  if (watching) { process.on('SIGINT', cancel); process.on('SIGTERM', cancel); }
+  try {
+    const code = await runCli(argv, {
+      out: (l) => process.stdout.write(`${l}\n`),
+      err: (l) => process.stderr.write(`${l}\n`),
+      env: process.env,
+      cwd: process.cwd(),
+      signal: watching ? abort.signal : undefined,
+    });
+    process.exitCode = code;
+  } finally {
+    if (watching) { process.off('SIGINT', cancel); process.off('SIGTERM', cancel); }
+  }
 }

@@ -1,3 +1,4 @@
+import { NativeFilesystemError } from './native-filesystem.js';
 /**
  * Bake-in (CONTRACT rev 4): the one implementation behind both the MCP tools
  * (swfte_scaffold_client, swfte_sync, swfte_check_upgrades) and the `swfte`
@@ -9,7 +10,6 @@
  * framework adapter (owned by the developer, never rewritten), and a row in
  * swfte.json pinning the contract hash it was generated against.
  */
-import { existsSync, readFileSync } from 'node:fs';
 import { posix } from 'node:path';
 import {
   effectiveContractHash,
@@ -54,6 +54,7 @@ import {
 } from './lock.js';
 import { fixturePath } from './devserver.js';
 import { detectStack, FRAMEWORKS, languageOf, type Framework, type Language, type StackDetection } from './stack.js';
+import { numericVersion, semanticVersion } from './codemap/revisions.js';
 
 export const CLIENT_ENV = [
   { key: 'SWFTE_API_KEY', value: '', comment: 'Swfte PAT (pat_…) or workspace API key (sk-swfte-…). Server-side only; never commit the real value.' },
@@ -140,14 +141,44 @@ async function fetchBoth(client: SwfteClient, ref: string) {
  * changes what adopters' code calls until `swfte upgrade` moves the pin.
  * Only workflows have versioned invoke; other kinds stay unpinned (null).
  */
+/** Raw literal eligibility only. The exact published-version lookup supplies authority. */
+export function isSafeVersionPin(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 128) return false;
+  if (semanticVersion(value) !== null || numericVersion(Number(value)) === value) return true;
+  // The real repository also preserves opaque legacy identities (for example v3 or release@prod:7).
+  // Never decode, trim or coerce a recorded identity into a different version.
+  return value.match(/^[A-Za-z0-9_.:@+-]+$/)?.[0] === value && /[A-Za-z0-9]/.test(value);
+}
+
+function legacyVersionTimestamp(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const timestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+  return value.match(timestamp)?.[0] === value && Number.isFinite(Date.parse(value));
+}
+
+function requirePinVersion(value: unknown): asserts value is string {
+  if (!isSafeVersionPin(value) || legacyVersionTimestamp(value)) {
+    throw new LockError('Invalid workflow version pin: use an exact literal version identity of at most 128 characters, without encoded, whitespace or path segments.');
+  }
+}
+
 export function isPinnable(ref: string, pinnedVersion: string | null | undefined): pinnedVersion is string {
-  if (!pinnedVersion || parseCatalogRef(ref).kind !== 'workflow') return false;
-  // Older locks recorded the artifact's updatedAt here for information; a timestamp is not a published version.
-  return !/^\d{4}-\d{2}-\d{2}T/.test(pinnedVersion);
+  if (pinnedVersion === null || pinnedVersion === undefined || parseCatalogRef(ref).kind !== 'workflow') return false;
+  // Genuine old updatedAt metadata stays deliberately unversioned; malformed recorded pins do not.
+  if (legacyVersionTimestamp(pinnedVersion)) return false;
+  requirePinVersion(pinnedVersion);
+  return true;
+}
+
+function assertRecordedPins(artifacts: ReadonlyArray<LockArtifact>): void {
+  for (const artifact of artifacts) isPinnable(artifact.catalogRef, artifact.pinnedVersion);
 }
 
 export function versionedInvokePath(id: string, version: string): string {
-  return `/v2/workflows/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/invoke`;
+  requirePinVersion(version);
+  const path = `/v2/workflows/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/invoke`;
+  if (new URL(path, 'https://swfte.invalid').pathname !== path) throw new LockError('Invalid workflow version invoke route.');
+  return path;
 }
 
 /** The contract a pinned client is generated from: same schemas, invoke path naming the version. */
@@ -169,11 +200,13 @@ export type PinLookup =
  */
 export async function lookupPinnedVersion(client: SwfteClient, ref: string, version: string, fallback: CatalogContract): Promise<PinLookup> {
   const r = parseCatalogRef(ref);
+  if (r.kind !== 'workflow') throw new LockError('Only workflow artifacts support version pins.');
+  const invokePath = versionedInvokePath(r.id, version);
   let body: Record<string, unknown> | undefined;
   try {
     body = await client.request<Record<string, unknown>>({
       method: 'GET',
-      path: `/v2/workflows/${encodeURIComponent(r.id)}/versions/${encodeURIComponent(version)}/schema`,
+      path: invokePath.replace(/\/invoke$/, '/schema'),
     });
   } catch (err) {
     if (err instanceof SwfteApiError && err.status === 404) {
@@ -184,20 +217,33 @@ export async function lookupPinnedVersion(client: SwfteClient, ref: string, vers
     throw err;
   }
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error(`Swfte's pinned-version schema for ${ref}@${version} was not a JSON object.`);
+  if (('workflowId' in body && body.workflowId !== r.id)
+    || ('version' in body && body.version !== version)
+    || ('published' in body && body.published !== true)) {
+    throw new Error('Swfte returned mismatched pinned-version identity or publication metadata.');
+  }
   // Never substitute the latest contract's schemas for a pinned version's: that would type the client for the wrong version.
-  if (!('inputSchema' in body) || !('outputSchema' in body)) return { state: 'unsupported', detail: `Swfte returned no schemas for ${ref}@${version}` };
-  const inv = body.invoke && typeof body.invoke === 'object' ? (body.invoke as CatalogContract['invoke']) : null;
+  const isSchema = (value: unknown) => typeof value === 'boolean' || (value !== null && typeof value === 'object' && !Array.isArray(value));
+  if (!isSchema(body.inputSchema) || !isSchema(body.outputSchema)) return { state: 'unsupported', detail: `Swfte returned no usable version schemas for ${ref}@${version}` };
+  let inv: CatalogContract['invoke'] | null = null;
+  if ('invoke' in body) {
+    if (!body.invoke || typeof body.invoke !== 'object' || Array.isArray(body.invoke)) throw new Error('Swfte returned no usable pinned-version invoke route.');
+    inv = body.invoke as CatalogContract['invoke'];
+    if (inv.path !== invokePath || (inv.method !== undefined && inv.method !== 'POST')) {
+      throw new Error('Swfte returned a mismatched pinned-version invoke route.');
+    }
+  }
   const pinned = pinContract(
     {
       ...fallback,
-      inputSchema: (body.inputSchema as CatalogContract['inputSchema']) ?? fallback.inputSchema,
-      outputSchema: (body.outputSchema as CatalogContract['outputSchema']) ?? fallback.outputSchema,
+      inputSchema: body.inputSchema as CatalogContract['inputSchema'],
+      outputSchema: body.outputSchema as CatalogContract['outputSchema'],
       contractHash: null,
     },
     r.id,
     version
   );
-  if (inv && typeof inv.path === 'string' && inv.path.includes('/versions/')) pinned.invoke = { ...pinned.invoke, ...inv };
+  if (inv) pinned.invoke = { ...pinned.invoke, ...inv };
   return { state: 'published', contract: pinned };
 }
 
@@ -240,7 +286,7 @@ export interface BakeResult {
  * alias, paths) first, so a bad path or alias fails before any request.
  */
 function planTarget(writer: ConfinedWriter, input: BakeInput, fallbackName: string | null) {
-  const detection = writer.inline ? null : detectStack(writer.root);
+  const detection = writer.inline ? null : detectStack(writer.root, writer);
   let framework: Framework = input.framework ?? detection?.framework ?? (input.language === 'python' ? 'plain-python' : 'plain-ts');
   // An explicit language that disagrees with the detected framework wins, with the plain adapter for that language.
   if (input.language && languageOf(framework) !== input.language) framework = input.language === 'python' ? 'plain-python' : 'plain-ts';
@@ -270,7 +316,7 @@ async function resolvePin(
     case 'not-published':
       return { pinnedVersion: null, contract, note: unpublished };
     case 'unsupported':
-      return { pinnedVersion: null, contract, note: `Left unpinned: ${found.detail}. The client calls /invoke.` };
+      throw new LockError(`Could not confirm the requested workflow version pin: ${found.detail}. Nothing was generated.`);
     case 'gone':
       throw new Error(`${found.detail}; nothing to pin.`);
   }
@@ -289,6 +335,7 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
   // Read the lock before the network too: a conflicted lock should stop us early.
   const legacyDirs = [...new Set([pre.outDir, 'src/swfte', 'swfte'])];
   const loaded = loadLock(writer, { baseUrl: config.baseUrl, workspaceId: config.workspaceId ?? null }, { legacyDirs });
+  assertRecordedPins(loaded.lock.artifacts);
   if (loaded.exists && loaded.lock.baseUrl) assertLockBaseUrl(loaded.lock.baseUrl, ctx.env, config.baseUrl);
 
   const { detail, contract } = await fetchBoth(client, r.ref);
@@ -316,8 +363,8 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
   const clientAbs = writer.resolve(clientRel);
   // A client this tool generated for this artifact, unedited, is ours to regenerate; anything else needs force.
   const ours = (() => {
-    if (writer.inline || !existsSync(clientAbs)) return false;
-    const info = inspectGenerated(readFileSync(clientAbs, 'utf8'));
+    if (writer.inline || !writer.existsFile(clientAbs)) return false;
+    const info = inspectGenerated(writer.readText(clientAbs)!);
     return info.generated && info.catalogRef === r.ref && info.intact === true;
   })();
   writer.create(clientAbs, render(spec, language), input.force || ours);
@@ -335,7 +382,7 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
   const adapterPaths: string[] = [];
   for (const f of adapter.files) {
     const abs = writer.resolve(f.path);
-    if (f.ifMissing && !writer.inline && existsSync(abs)) continue;
+    if (f.ifMissing && !writer.inline && writer.existsFile(abs)) continue;
     writer.create(abs, f.content, input.force);
     adapterPaths.push(normalizeRel(f.path));
   }
@@ -389,8 +436,9 @@ export async function bakeArtifact(ctx: BakeContext, input: BakeInput): Promise<
 }
 
 function safeExists(writer: ConfinedWriter, rel: string): boolean {
+  if (writer.native) return writer.existsFile(writer.resolve(rel));
   try {
-    return existsSync(writer.resolve(rel));
+    return writer.existsFile(writer.resolve(rel));
   } catch {
     return false;
   }
@@ -525,10 +573,11 @@ function clientFileOf(writer: ConfinedWriter, a: LockArtifact): ClientFileState 
     try {
       abs = writer.resolve(rel);
     } catch (err) {
+      if (writer.native) throw err;
       return { rel, exists: false, content: null, error: err instanceof Error ? err.message : String(err) };
     }
-    if (!existsSync(abs)) continue;
-    const content = readFileSync(abs, 'utf8');
+    if (!writer.existsFile(abs)) continue;
+    const content = writer.readText(abs)!;
     const info = inspectGenerated(content);
     if (info.generated && (info.catalogRef === null || info.catalogRef === a.catalogRef)) return { rel, exists: true, content };
   }
@@ -592,6 +641,7 @@ export async function verifyProject(
   let loaded;
   try {
     loaded = loadLock(ctx.writer, { baseUrl: ctx.config?.baseUrl ?? '', workspaceId: ctx.config?.workspaceId ?? null });
+    assertRecordedPins(loaded.lock.artifacts);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return { ok: false, exitCode: 1, artifacts: 0, problems: [{ kind: 'lock', alias: null, catalogRef: null, detail, fix: 'Repair swfte.json.' }], warnings, upgrades: [], remoteChecked: false };
@@ -694,7 +744,10 @@ export async function verifyProject(
               fix: `Re-publish that version, or move the pin: \`swfte upgrade ${group[0]!.alias}\`.`,
             });
           } else if (found.state === 'unsupported') {
-            warnings.push(`${a.catalogRef}: could not confirm pinned version ${a.pinnedVersion} (${found.detail}).`);
+            unreachable = true;
+            problems.push({ kind: 'unreachable', alias, catalogRef: a.catalogRef,
+              detail: `Could not confirm pinned version ${a.pinnedVersion}: ${found.detail}.`,
+              fix: 'Retry against a backend that serves this exact published version; the pin stays unchanged.' });
           }
         } catch (err) {
           unreachable = true;
@@ -772,6 +825,7 @@ export async function syncProject(ctx: BakeContext, opts: SyncOptions = {}): Pro
   const { client, config, writer } = ctx;
   const loaded = loadLock(writer, { baseUrl: config.baseUrl, workspaceId: config.workspaceId ?? null });
   if (!loaded.exists) throw new LockError(`No ${LOCK_FILE} at the project root. Run \`swfte add <catalogRef>\` first.`);
+  assertRecordedPins(loaded.lock.artifacts);
   if (loaded.lock.baseUrl) assertLockBaseUrl(loaded.lock.baseUrl, ctx.env, config.baseUrl);
   let lock = loaded.lock;
   const wanted = opts.aliases?.length ? new Set(opts.aliases) : null;
@@ -810,19 +864,9 @@ export async function syncProject(ctx: BakeContext, opts: SyncOptions = {}): Pro
       // A pinned artifact keeps calling its version however far upstream moves; only `swfte upgrade` moves
       // the pin. Sync still restores or regenerates the client for the pinned version itself.
       if (pinned && (!moved || !opts.movePin)) {
-        let pinnedContract: CatalogContract;
-        if (!moved) {
-          pinnedContract = pinContract(contract, parseCatalogRef(a.catalogRef).id, pinVersion!);
-        } else {
-          const found = await lookupPinnedVersion(client, a.catalogRef, pinVersion!, contract);
-          if (found.state === 'unsupported' && current.exists && !edited) {
-            // Cannot re-derive the pinned client here; the one on disk is still the pinned version's.
-            entries.push({ ...base, status: 'unchanged', to: a.contractHash, diff: null, breakingReasons: [], capabilityChanges: [], message: `Pinned to ${pinVersion}; kept as is (${found.detail}). A newer version is published; \`swfte upgrade ${a.alias}\` moves the pin.` });
-            continue;
-          }
-          if (found.state !== 'published') throw new Error(`Pinned version ${a.pinnedVersion} of ${a.catalogRef} is unavailable (${found.detail}). Run \`swfte upgrade ${a.alias}\` to move the pin.`);
-          pinnedContract = found.contract;
-        }
+        const found = await lookupPinnedVersion(client, a.catalogRef, pinVersion!, contract);
+        if (found.state !== 'published') throw new Error(`Pinned version ${a.pinnedVersion} of ${a.catalogRef} is unavailable (${found.detail}). Run \`swfte upgrade ${a.alias}\` to move the pin.`);
+        const pinnedContract = found.contract;
         const spec = buildSpec(config, a.catalogRef, a.alias, detail, pinnedContract, a.contractHash, lock.baseUrl, ctx.env);
         const content = render(spec, a.language);
         const newer = moved ? ` A newer version${contract.version ? ` (${contract.version})` : ''} is published; \`swfte upgrade ${a.alias}\` moves the pin.` : '';
@@ -860,7 +904,7 @@ export async function syncProject(ctx: BakeContext, opts: SyncOptions = {}): Pro
         if (found?.state === 'published') {
           nextPin = v;
           clientContract = found.contract;
-        } else if (pinned) {
+        } else {
           entries.push({ ...base, status: 'blocked-unpublished', to: hashInfo.hash, diff: null, breakingReasons: [], capabilityChanges: [], message: `The latest contract of ${a.catalogRef} is not a published version${found ? ` (${found.detail})` : ''}; the pin stays at ${a.pinnedVersion}. Publish it, then rerun \`swfte upgrade ${a.alias}\`.` });
           continue;
         }
@@ -927,6 +971,7 @@ export async function syncProject(ctx: BakeContext, opts: SyncOptions = {}): Pro
                 : `Regenerated ${rel}${pinText || ' (generator output changed; contract unchanged)'}.`,
       });
     } catch (err) {
+      if (writer.native && err instanceof NativeFilesystemError) throw err;
       entries.push({ ...base, status: 'error', to: null, diff: null, breakingReasons: [], capabilityChanges: [], message: err instanceof Error ? err.message : String(err) });
     }
   }
@@ -966,6 +1011,7 @@ export async function recordFixtures(ctx: BakeContext): Promise<PlannedWrite[]> 
   const { client, config, writer } = ctx;
   const loaded = loadLock(writer, { baseUrl: config.baseUrl, workspaceId: config.workspaceId ?? null });
   if (!loaded.exists) throw new LockError(`No ${LOCK_FILE} in the project root. Run \`swfte add <catalogRef>\` first.`);
+  assertRecordedPins(loaded.lock.artifacts);
   const cache = new Map<string, Promise<CatalogContract>>();
   for (const a of loaded.lock.artifacts) {
     const key = `${a.catalogRef}@${a.pinnedVersion ?? ''}`;

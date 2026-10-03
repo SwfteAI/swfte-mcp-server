@@ -34,6 +34,11 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "default": "./dist/index.js" },
+    "./native-filesystem": { "types": "./dist/native-filesystem.d.ts", "import": "./dist/native-filesystem.js" },
+    "./*": "./*"
+  },
   "bin": {
     "swfte-mcp-server": "dist/index.js",
     "mcp-server": "dist/index.js",
@@ -46,7 +51,8 @@
     "README.md",
     "ABOUT.md",
     "LICENSE",
-    "src/preflight"
+    "src/preflight",
+    "native/confined-fs.c"
   ],
   "engines": {
     "node": ">=18.17"
@@ -66,8 +72,8 @@
     "smoke:protocol": "npm run build && node --import tsx scripts/protocol-smoke.ts",
     "test": "node --import tsx --test test/*.test.ts test/*.test.mjs",
     "probe:paths": "tsx scripts/probe-paths.ts",
-    "verify": "npm run typecheck && npm run test && npm run preflight:mutation && npm run smoke:protocol && npm run probe:paths",
-    "verify:offline": "npm run typecheck && npm test && npm run preflight:mutation && npm run build && node --import tsx scripts/protocol-smoke.ts && node scripts/package-smoke.mjs"
+    "verify": "npm run typecheck && npm run build && npm run test && npm run preflight:mutation && npm run smoke:protocol && npm run probe:paths",
+    "verify:offline": "npm run typecheck && npm run build && npm test && npm run preflight:mutation && npm run build && node --import tsx scripts/protocol-smoke.ts && node scripts/package-smoke.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.0",
