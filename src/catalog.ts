@@ -47,6 +47,9 @@ export const ACTION_CAPABILITIES = [
   'cloud.provision',
   'managed_database.read.provision',
   'confidence.upload_code',
+  'release.start',
+  'release.ramp',
+  'release.complete',
 ] as const;
 export type ActionCapability = (typeof ACTION_CAPABILITIES)[number];
 

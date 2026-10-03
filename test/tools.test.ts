@@ -244,7 +244,7 @@ describe('advertised surface', () => {
     // Nothing advertised covers either, so there was no duplicate to move to
     // `extras`; DEFAULT_GROUPS is unchanged (test/delivery.test.ts pins it).
     // Measured at 105 — core 41, the rest as above.
-    assert.ok(selected.length <= 105, `default surface is ${selected.length} tools`);
+    assert.ok(selected.length <= 108, `default surface is ${selected.length} tools`);
     assert.ok(selected.length > 40, `default surface is only ${selected.length} tools`);
   });
 
@@ -286,8 +286,46 @@ describe('advertised surface', () => {
     }
   });
 
+  test('every original review and proof operation remains core under a group filter', () => {
+    const required = ['swfte_open_review_room', 'swfte_assemble_proof_bundle', 'swfte_export_proof_bundle'];
+    for (const groups of ['voice', 'audit', 'rag,files']) {
+      const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x', SWFTE_TOOLS: groups } as never));
+      for (const name of required) {
+        const operation = selected.find((candidate) => candidate.name === name);
+        assert.ok(operation, `${name} hidden by SWFTE_TOOLS=${groups}`);
+        assert.equal(operation.group, 'core');
+        assert.equal(operation.readOnly, false, `${name} can retain server evidence`);
+      }
+    }
+  });
+
+  test('compatibility review aliases are opt-in without hiding the original operations', () => {
+    const defaults = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x' } as never));
+    const withAliases = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x', SWFTE_TOOLS: 'extras' } as never));
+    for (const name of ['swfte_review_room', 'swfte_proof_bundle']) {
+      assert.equal(defaults.some((candidate) => candidate.name === name), false, `${name} duplicates a default operation`);
+      const alias = withAliases.find((candidate) => candidate.name === name);
+      assert.ok(alias, `${name} compatibility operation was removed`);
+      assert.equal(alias.group, 'extras');
+      assert.equal(alias.readOnly, false);
+    }
+    for (const name of ['swfte_open_review_room', 'swfte_assemble_proof_bundle', 'swfte_export_proof_bundle']) {
+      assert.ok(defaults.some((candidate) => candidate.name === name));
+      assert.ok(withAliases.some((candidate) => candidate.name === name));
+    }
+  });
+
   test('destructive tools are flagged so clients can prompt', () => {
     const del = allTools.find((t) => t.name === 'swfte_agents_delete');
     assert.equal(del?.destructive, true);
   });
+});
+
+// Source-authored registry acceptance; QUEUED/UNRUN.
+test('bound consumer registry preserves total/default counts and unique names', () => {
+  const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x' } as never));
+  assert.equal(allTools.length, 249); assert.equal(selected.length, 108);
+  assert.equal(new Set(allTools.map(t => t.name)).size, allTools.length);
+  for (const name of ['swfte_open_review_room', 'swfte_assemble_proof_bundle', 'swfte_export_proof_bundle']) assert.ok(selected.some(t => t.name === name));
+  for (const name of ['swfte_review_room', 'swfte_proof_bundle']) assert.equal(selected.some(t => t.name === name), false);
 });

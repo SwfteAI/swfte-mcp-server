@@ -17,7 +17,7 @@ If you don't know what Swfte is, [start here](https://www.swfte.com). It's the u
 
 ## What this gives you
 
-- **276 MCP tools** that wrap V2 endpoints — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control, artifact setup/proof/confidence/promotion and bounded runtime command/files.
+- **249 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
 - **Stdio transport** — works out of the box with Claude Desktop and Claude Code.
 - **Workspace-scoped** — set `SWFTE_WORKSPACE_ID` once, or pass `workspaceId` per call.
 - **Zero-config security** — your API key stays on the machine running the MCP server, never in the LLM context.
@@ -51,7 +51,7 @@ widget, application, or MCP server**.
   server-side page cap, read-merge-write updates where the raw PATCH would wipe
   omitted fields, retry with load-shedding detection, and typed error envelopes
   carrying the backend's own code plus a suggested action.
-- **276 tools available, 105 advertised by default**, adjustable via `SWFTE_TOOLS`. Enable the 37 setup, proof, confidence, promotion, AWS and bounded runtime command/file tools with `SWFTE_TOOLS=core,runtime`.
+- **249 tools available, 108 advertised by default**, adjustable via `SWFTE_TOOLS`.
 - **Stdio transport**, multi-arch Docker image, and Zod-typed inputs published
   as JSON Schema over `tools/list`.
 
@@ -239,8 +239,8 @@ or `mcp-server`.
 | Agent mail | `swfte_agent_mail_*` | `agent-mail` | |
 | Simulations (validate locally, create, start, status, findings, report) | `swfte_simulation_*` | `simulations` | |
 
-Advertising all 276 tools measurably degrades a model's ability to pick the
-right one, so 105 are advertised by default. `SWFTE_TOOLS=all` widens it, and
+Advertising all 249 tools measurably degrades a model's ability to pick the
+right one, so 108 are advertised by default. `SWFTE_TOOLS=all` widens it, and
 `swfte_whoami` reports which groups are live and what is hidden — nothing
 disappears silently. The learning-loop tools (outcome reports, rule proposals
 and the recipe book) are in the opt-in `learning` group; see
@@ -521,6 +521,66 @@ More, with what each one does underneath: [`docs/RECIPES.md`](./docs/RECIPES.md)
 
 ## Development
 
+Review and release tools use the existing workspace REST APIs. The three original
+review tools are in `core`:
+
+- `swfte_open_review_room` returns bound exact-hash server room state and the
+  existing exact packet link
+  `/v2/studio/review/{kind}/{id}?action={actionId}&hash={contentHash}`. It labels that
+  link `exact-packet` and `fullReviewRoomAvailable: false`; returning a URL or data
+  does not claim a full nine-tab room or that anyone read it. It records no human view, scenario run, mark or
+  decision. A retained stale room stays stale; missing historical evidence and
+  unavailable confidence stay explicit.
+  Core and alias inputs use the existing 200 character action segment contract
+  before any HTTP read; artifact IDs are validated and encoded separately. The
+  original six currentness facts must be present and consistent with actual
+  content/plan hashes, packet presence, explained dependencies and stale reason.
+- `swfte_assemble_proof_bundle` reads current signed evidence or an exact
+  `bundleVersion` for workflow, agent, chatflow, model, application, widget and
+  Studio changes. It checks the original DSSE bytes, subject/workspace, retained
+  version (signed ledger sequence+1) and P-256 key/signature. Model output contains section presence/absence
+  summaries rather than raw signed facts. `offlinePackage: true` fetches the existing
+  confidentiality-scanned ZIP, checks its original envelope/subject/key joins and
+  returns unchanged ZIP bytes as base64. Missing immutable subject or verification
+  material remains unavailable. The printed cosign command is an offline instruction;
+  native signature checking is not an independent cosign or backend runtime gate.
+  The frozen server format is one SPKI `PUBLIC KEY` PEM. Private/encrypted-private
+  PEM and private DER behind forged public labels are rejected in both the
+  authenticated key response and offline `public.pem`, before returning any
+  verification material or ZIP bytes. Only the parsed public key is returned.
+- `swfte_export_proof_bundle` names an exact artifact hash, configured `platform`
+  and `documentId`. The server requires workspace admin authority. Its receipt
+  selects the actual retained version and must match that version's unchanged
+  envelope digest. An unknown receipt or unavailable confirmation may follow a
+  committed export and requires owner reconciliation before retrying.
+
+`swfte_review_room` and `swfte_proof_bundle` retain their existing GET response
+behavior as `extras` compatibility aliases; opt in with `SWFTE_TOOLS=...,extras`.
+All review tools have `readOnly: false` and zero automatic retries: inherited room
+and bundle GETs can archive/issue evidence. This does not grant human view or
+approval authority. No caller-supplied workspace/user/admin identity is accepted.
+Binary material uses the existing bearer client and deadline; tokens never appear
+in download links, and model-facing room summaries scrub credential fields.
+
+Release status and reports retain the server's sample counts, sequential results
+and allocation withholding. Pause and rollback use the existing controls with
+both exact content and plan hashes. `swfte_release_propose_ramp` only creates an
+inherited approval request (`release.complete` for COMPLETE, otherwise
+`release.ramp`); it cannot change traffic. Its response must match the requested
+release, hashes, stage, weight and pending human approval state. MCP provides no
+Slack installation, message, callback or decision tool. Linked Slack humans use
+the signed callback and inherited actions service; MCP cannot supply that identity.
+
+The focused contracts use actual SwfteClient with local fetch responses and an
+ephemeral P-256 fixture key. They do not establish a live Slack installation,
+vendor export, actual backend integration or independent cosign receipt. In this
+allocated session, the finite maintenance hold is released; tests/compilers still
+require the shared heavy guard and the 8 GiB floor, which is currently unmet:
+
+```bash
+node /Users/dejanmaksimovic/Projects/Swfte/.unlazy/tools/heavy.mjs -- node --import tsx --test test/review-release.test.ts test/slack-review-release.test.ts
+```
+
 ```bash
 npm install
 npm run typecheck
@@ -600,3 +660,5 @@ If you'd rather call the Swfte API directly, use one of the official SDKs:
 [MIT](LICENSE) © [Swfte, Inc.](https://www.swfte.com)
 
 — Built with ❤ in the United Kingdom and across Europe.
+
+The current 249 total / 108 default tool inventory is static source inventory; execution is UNRUN. The default ceiling is 108, preserving all original groups and the three core room/proof operations. Compatibility aliases and release experiments remain opt-in. Release evidence validates the existing wire, and an unconfirmed mutation requires authoritative reconciliation before retrying.

@@ -23,6 +23,8 @@ export interface ActionRequest {
   expiresAt?: string;
   result?: Record<string, unknown> | null;
   createdAt?: string;
+  contentHash?: string;
+  planHash?: string | null;
 }
 
 const SECRET_KEYS = /(secret|token|password|credential|private|apikey|api_key)/i;
@@ -144,6 +146,8 @@ export function presentAction(action: ActionRequest) {
     requiresApproval: action.requiresApproval,
     approvedBy: action.approvedBy ?? null,
     expiresAt: action.expiresAt ?? null,
+    contentHash: action.contentHash ?? null,
+    planHash: action.planHash ?? null,
     result: redactResult(action.result ?? null),
     instructions: approvalInstructions(action),
   };
