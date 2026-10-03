@@ -291,7 +291,28 @@ interface Bindings {
   opaque: boolean;
 }
 
+// A scope is walked once per (scope, name), not once per call that looks the name up: that walk made a
+// file with many calls quadratic. The cache lives on the parsed tree, so it dies with it.
+const BINDINGS_CACHE = new WeakMap<object, Map<string, Bindings>>();
+
 function bindingsIn(scope: PyNode, name: string): Bindings {
+  const tree = (scope as unknown as { tree?: object }).tree;
+  if (!tree) return computeBindings(scope, name);
+  let perTree = BINDINGS_CACHE.get(tree);
+  if (!perTree) {
+    perTree = new Map();
+    BINDINGS_CACHE.set(tree, perTree);
+  }
+  const key = `${scope.id}\u0000${name}`;
+  let hit = perTree.get(key);
+  if (!hit) {
+    hit = computeBindings(scope, name);
+    perTree.set(key, hit);
+  }
+  return hit;
+}
+
+function computeBindings(scope: PyNode, name: string): Bindings {
   const b: Bindings = { values: [], opaque: false };
   const visit = (n: PyNode): boolean | void => {
     if (n.id !== scope.id && (n.type === 'function_definition' || n.type === 'class_definition')) {

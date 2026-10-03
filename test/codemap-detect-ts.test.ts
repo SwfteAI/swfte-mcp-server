@@ -380,3 +380,15 @@ describe('corpus', () => {
     assert.ok(out.envVarNames.includes('SWFTE_API_KEY') && out.envVarNames.includes('NEXT_PUBLIC_SWFTE_AGENT_ID'));
   });
 });
+
+describe('raw http host is anchored to the URL authority', () => {
+  test('a Swfte host inside the path of another host is not a Swfte call', () => {
+    const r = run("export async function f() { return fetch('https://evil.io/x/api.swfte.com/v2/workflows/wf_x/invoke', { method: 'POST' }) }");
+    assert.equal(r.sites.length, 0);
+  });
+  test('the real Swfte host still counts', () => {
+    const r = run("export async function f() { return fetch('https://api.swfte.com/v2/workflows/wf_x/invoke', { method: 'POST' }) }");
+    assert.equal(r.sites.length, 1);
+    assert.equal(r.sites[0].artifact.id, 'wf_x');
+  });
+});

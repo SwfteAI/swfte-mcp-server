@@ -22,7 +22,9 @@ const BODY_VERBS = new Set(['post', 'put', 'patch']);
 
 const COLLECTIONS: Record<string, string> = { workflows: 'workflow', agents: 'agent', chatflows: 'chatflow', widgets: 'widget', applications: 'application' };
 
-const HOST_RE = /(^|[^A-Za-z0-9.-])(?:[a-z0-9-]+\.)*api\.swfte\.com(?=[/:?#\u0000]|$)/;
+// The host must sit at the URL authority: at the start of the text or right after `//`. A Swfte host
+// that merely appears inside the path of another host (https://evil.io/x/api.swfte.com/...) never counts.
+const HOST_RE = /(?:^|\/\/)(?:[a-z0-9-]+\.)*api\.swfte\.com(?=[/:?#\u0000]|$)/;
 const PLACE = '\u0000';
 
 interface Folded {
