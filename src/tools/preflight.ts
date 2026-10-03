@@ -5,7 +5,9 @@ import { z } from 'zod';
 import { gate, preflight, type PreflightManifest } from '../preflight.js';
 import { deriveFromLive, deriveFromSpec, seedsFromRegistry, type Seed } from '../preflight/derive.mjs';
 import { withClientTransport } from '../preflight.js';
-import type { SwfteClient } from '../client.js';
+import { SwfteApiError, type SwfteClient } from '../client.js';
+import { SetupArtifactSchema } from './setup.js';
+import { ownedSetupTaskEntries, unknownRequiredSetupTasks, type OwnedSetupTaskEntry } from './_setup-task.js';
 import type { ToolDefinition } from './_types.js';
 
 /**
@@ -116,15 +118,25 @@ export const preflightTools: ToolDefinition[] = [
     inputSchema: ManifestInput.extend({
       workflowId: z.string().optional().describe('Derive a manifest from this workflow when none is given.'),
       executionsPerWorkflow: z.number().int().min(0).max(10).optional().describe('How many recent runs to read per workflow. Default 3.'),
+      artifact:SetupArtifactSchema.optional().describe('Read current server setup tasks before local preflight. An explicit artifact never falls back; only an omitted artifact derived from workflowId permits older-server404 compatibility.'),
     }),
     execute: async (input, { client, localFilesystem }) => {
+      const artifact=input.artifact ?? (input.workflowId?{kind:'workflow',id:input.workflowId}:undefined);
+      let setup:OwnedSetupTaskEntry[]|null=null;
+      let setupUnavailable=false;
+      if (artifact) {
+        try { setup=ownedSetupTaskEntries(await client.request({method:'GET',path:`/v2/artifacts/${encodeURIComponent(artifact.kind)}/${encodeURIComponent(artifact.id)}/setup`,retries:0}),artifact,client.configuredWorkspaceId); }
+        catch (error) { if (input.artifact===undefined && input.workflowId && error instanceof SwfteApiError && error.status===404) setupUnavailable=true; else throw error; }
+      }
       const manifest = await resolveManifest(
         client,
         input,
         input.workflowId ? (['workflow', input.workflowId] as Seed) : undefined,
         localFilesystem
       );
-      return preflight(client, manifest, { executionsPerWorkflow: input.executionsPerWorkflow });
+      const report=await preflight(client, manifest, { executionsPerWorkflow: input.executionsPerWorkflow });
+      const unknownRequired=setup?unknownRequiredSetupTasks(setup):[];
+      return {...report,unknownRequiredTaskKeys:unknownRequired.map(entry=>entry.task.key),setupTasks:setup,setupSource:setupUnavailable?'older-server-local-fallback':setup?'server-current-content':'no-artifact-context',setupBlocksSandbox:setup?(unknownRequired.length>0||setup.some(entry=>entry.task.blocksSandbox && !['RESOLVED','AUTO_BOUND','WAIVED'].includes(entry.task.state??''))):null};
     },
   },
 

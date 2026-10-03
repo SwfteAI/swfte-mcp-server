@@ -1,6 +1,6 @@
 # Tool reference
 
-`@swfte/mcp-server` exposes **250 tools**, of which a curated **105** are
+`@swfte/mcp-server` exposes **276 tools**, of which a curated **105** are
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
 
 Tools that take a `workspaceId` only honour it for **API-key** credentials. A
@@ -79,6 +79,33 @@ does either; `swfte_compliance_assess` returns the Studio link.
 | `swfte_get_evidence_record` | GET | `/v2/compliance/evidence-records/{id}` + `/verify` + `/signing-key` (offline Ed25519 check) |
 | `swfte_compliance_export` | GET | `/v2/compliance/export?format=json\|csv` — manifest `bodySha256` / CSV hash recomputed locally |
 | `swfte_compliance_history` | GET | `/v2/compliance/controls/{controlId}/history?target=<kind>:<id>` |
+
+## Bounded runtime commands and files (`runtime`)
+
+These operate on an existing owned runtime instance. The server must establish current confinement,
+credentials and the runtime flag before execution. An uncertain result remains `UNCONFIRMED`; a signal
+acknowledgement establishes no termination. Tools accept no host, token, workspace, actor or confinement label.
+
+| Tool | Method | Path |
+|---|---|---|
+| `swfte_runtime_exec` | POST | `/v2/runtime/instances/{instanceId}/exec` |
+| `swfte_runtime_exec_status` | GET | `/v2/runtime/instances/{instanceId}/exec/{commandId}` |
+| `swfte_runtime_exec_cancel` | POST | `/v2/runtime/instances/{instanceId}/exec/{commandId}/cancel` |
+| `swfte_runtime_exec_events` | GET | `/v2/runtime/instances/{instanceId}/exec/stream?commandId=`; optional `Last-Event-ID` |
+| `swfte_runtime_files` | GET | `/v2/runtime/instances/{instanceId}/files?path=` |
+| `swfte_runtime_file_read` | GET | `/v2/runtime/instances/{instanceId}/files/content?path=` |
+| `swfte_runtime_file_write` | PUT | `/v2/runtime/instances/{instanceId}/files/content?path=`; raw UTF-8 with `Idempotency-Key` |
+| `swfte_runtime_upload` | POST | `/v2/runtime/instances/{instanceId}/upload?path=`; raw UTF-8 with `Idempotency-Key` |
+| `swfte_findings` | GET | `/v2/confidence/runs/{runId}/findings`; existing `swfte_prove_findings` alias retained |
+| `swfte_prove_submit` | POST | `/v2/confidence/runs/submissions/{commandId}`; exact persisted caller UUID/request, verified identity first |
+| `swfte_prove_submission` | POST | `/v2/confidence/runs/submissions/{commandId}/readback`; read-only exact receipt reconciliation |
+| `swfte_code_bundle_delete_once` | POST | `/v2/confidence/bundles/{bundleId}/deletions/{commandId}` after verified pure `/identity`; exact persisted UUID/hash, no retries |
+| `swfte_code_bundle_deletion` | POST | same exact command `/readback`; read-only reconciliation, no mutation fallback |
+
+Files are limited to32768 UTF-8 bytes and stay inside the server file jail. Responses are bounded;
+mutations have no automatic retry. The matching CLI accepts the same strict inputs through
+`--input <project-relative-json>`, using `runtime-exec`, `runtime-status`, `runtime-cancel`, `runtime-events`,
+`runtime-files`, `runtime-read`, `runtime-write`, `runtime-upload` and `findings`.
 
 ## Agents — `swfte_agents_*`
 
@@ -391,3 +418,6 @@ automatically by `swfte_run`), `pat_invalid`.
 
 A `degraded: true` on a run result means the backend load-shed — retry rather
 than changing the artifact.
+
+
+These opt-in runtime tools accept only bundleId, canonical commandId and snapshotHash. Their confirmed receipt covers CODE_BUNDLE_STORAGE_ROW only; independent run snapshots, backups and physical media remain outside this receipt.

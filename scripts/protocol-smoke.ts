@@ -97,6 +97,10 @@ async function main(): Promise<void> {
     'swfte_twin_push',
     'swfte_twin_status',
     'swfte_prove_verdict',
+    'swfte_setup','swfte_resolve_setup_task','swfte_proof','swfte_proof_status','swfte_resolve','swfte_resolver_status',
+    'swfte_findings',
+    'swfte_runtime_exec','swfte_runtime_exec_status','swfte_runtime_exec_cancel','swfte_runtime_exec_events',
+    'swfte_runtime_files','swfte_runtime_file_read','swfte_runtime_file_write','swfte_runtime_upload',
   ];
   const names = new Set(tools.map((t) => t.name));
   for (const r of required) if (!names.has(r)) problems.push(`missing required tool: ${r}`);
@@ -110,6 +114,16 @@ async function main(): Promise<void> {
   const badInput = await client.callTool({ name: 'swfte_build', arguments: { kind: 'not-a-kind' } });
   if (!badInput.isError) problems.push('invalid input was not rejected');
   else console.log('✓ invalid input → isError');
+
+  for(const [name,args] of [
+    ['swfte_runtime_exec',{instanceId:'owned',command:'python3',host:'untrusted.example'}],
+    ['swfte_runtime_exec_events',{instanceId:'owned',commandId:'not-a-canonical-command'}],
+    ['swfte_runtime_file_write',{instanceId:'owned',commandId:'123e4567-e89b-42d3-a456-426614174000',path:'../outside',content:'code'}],
+    ['swfte_resolver_status',{sessionId:'owned',events:true,after:-2}],
+  ] as const){
+    const rejected=await client.callTool({name,arguments:args});
+    if(!rejected.isError)problems.push(`${name}: invalid runtime authority/path/cursor accepted`);
+  }
 
   // Local guidance tools exercise calls without backend access or credentials.
   const capabilityReply = await client.callTool({ name: 'swfte_capabilities', arguments: { kind: 'agent' } });

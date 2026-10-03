@@ -53,6 +53,12 @@ import { codeMapTools } from './codemap.js';
 import { provingVerdictTools } from './proving-source.js';
 import { catalogProofTools } from './catalog-proof.js';
 import { twinTools } from './twin.js';
+import { setupTools } from './setup.js';
+import { proveTools } from './prove.js';
+import { selectedConfidenceReportTools } from './selected-confidence-report.js';
+import { cloudLinkTools } from './cloud-link.js';
+import { promotionTools } from './promotion.js';
+import { runtimeExecTools } from './runtime-exec.js';
 
 /**
  * Tag a whole module's tools with a group, so `SWFTE_TOOLS` can trim them
@@ -84,6 +90,12 @@ export const allTools: ToolDefinition[] = [
   ...tag('core', provingVerdictTools),
   ...tag('marketplace', catalogProofTools),
   ...tag('twins', twinTools),
+  ...tag('runtime', setupTools),
+  ...tag('runtime', proveTools),
+  ...tag('runtime', selectedConfidenceReportTools),
+  ...tag('runtime', cloudLinkTools),
+  ...tag('runtime', promotionTools),
+  ...tag('runtime', runtimeExecTools),
   // Learning loop (brief 08): report an outcome / propose a rule to the human review queue.
   ...tag('learning', learningTools),
   // Swfte Simulations: local spec check + /v2/simulations (no simulation logic here). Opt-in group.

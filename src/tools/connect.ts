@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import { sleep } from '../client.js';
+import { sleep, SwfteApiError } from '../client.js';
+import { SetupArtifactSchema } from './setup.js';
+import {ownedSetupTaskEntries,unknownRequiredSetupTasks} from './_setup-task.js';
 import { connectionFailure, inspectConnectionInventory, inspectConnections, normaliseProvider, openInBrowser, requiredConnections } from '../connections.js';
 import { getAdapter } from '../kinds/index.js';
 import type { ToolDefinition } from './_types.js';
@@ -244,18 +246,31 @@ export const connectTools: ToolDefinition[] = [
       'when the node executes.',
     inputSchema: z.object({
       workflowId: z.string(),
+      artifact: SetupArtifactSchema.optional().describe('Current artifact setup scope; defaults to this workflow.'),
       connect: z
         .boolean()
         .optional()
         .describe('Immediately start the OAuth flow for the first missing provider, opening a browser.'),
     }),
     execute: async (input, { client }) => {
+      const artifact=input.artifact??{kind:'workflow',id:input.workflowId};
+      try {
+        const setupTasks=ownedSetupTaskEntries(await client.request({method:'GET',path:`/v2/artifacts/${encodeURIComponent(artifact.kind)}/${encodeURIComponent(artifact.id)}/setup`,retries:0}),artifact,client.configuredWorkspaceId);
+        if(!Array.isArray(setupTasks))throw new Error('SETUP_RESPONSE_INVALID');
+        const unknownRequired=unknownRequiredSetupTasks(setupTasks);
+        const connections=setupTasks.filter(entry=>entry.task.kind==='connection');
+        const unresolved=connections.filter(entry=>entry.task.state!=='RESOLVED'&&entry.task.state!=='AUTO_BOUND');
+        return {workflowId:input.workflowId,artifact,source:'server-setup',setupTasks,requires:connections.map(entry=>({provider:entry.task.provider,taskKey:entry.task.key,connected:entry.task.state==='RESOLVED'||entry.task.state==='AUTO_BOUND',resolutionOptions:entry.task.resolutionOptions})),missing:unresolved.map(entry=>entry.task.provider),unknownRequiredTaskKeys:unknownRequired.map(entry=>entry.task.key),ok:unresolved.length===0&&unknownRequired.length===0,nextStep:unresolved.length||unknownRequired.length?'Use the current server resolution option and swfte_resolve_setup_task. OAuth still requires the user to finish provider sign-in.':undefined};
+      } catch(error) {
+        if(input.artifact!==undefined || !(error instanceof SwfteApiError)||error.status!==404)throw error;
+      }
       const workflow = client.serverConnectionsEnabled ? undefined : await getAdapter('workflow').get!(client, input.workflowId);
       const inspection = await inspectConnections(client, workflow, input.workflowId);
       const required = inspection.requirements;
       const missing = required.filter((r) => !r.connected);
 
       const base = {
+        source: 'older-server-local-fallback',
         workflowId: input.workflowId,
         ...(inspection.source === 'server' ? { source: 'server', needs: inspection.needs, bindings: inspection.bindings } : {}),
         requires: required.map((r) => ({

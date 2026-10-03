@@ -28,6 +28,10 @@ export interface RequestOptions {
   path: string;
   query?: Record<string, string | number | boolean | undefined | null>;
   body?: unknown;
+  /** Exact UTF-8 text for bounded runtime file writes; mutually exclusive with JSON body. */
+  textBody?: string;
+  /** Optional streamed response ceiling; runtime tools require it even without Content-Length. */
+  maxResponseBytes?: number;
   workspaceId?: string;
   headers?: Record<string, string>;
   /** Per-request timeout. Defaults to 60s; wizard/exec polls override it. */
@@ -209,7 +213,28 @@ export class SwfteClient {
     throw lastError;
   }
 
-  private async requestOnce<T>(opts: RequestOptions): Promise<T> {
+  /** Preserve the selected provider's JSON text; the parsed view only admits known fields. */
+  async requestSelectedConfidenceReportWire(runId: string, selection: {
+    seq: number; expectedContentHash?: string; expectedAvailableVersion?: string;
+  }): Promise<Readonly<{ parsed: unknown; text: string }>> {
+    const query: Record<string, string | number> = { seq: selection.seq };
+    if (selection.expectedContentHash !== undefined) query.expectedContentHash = selection.expectedContentHash;
+    if (selection.expectedAvailableVersion !== undefined) query.expectedAvailableVersion = selection.expectedAvailableVersion;
+    const opts: RequestOptions = { method: 'GET', path: `/v2/confidence/runs/${encodeURIComponent(runId)}/selected-report`,
+      query, retries: 0, maxResponseBytes: 1024 * 1024 };
+    const text = await this.requestOnce<string>(opts, true);
+    try {
+      return Object.freeze({ parsed: JSON.parse(text) as unknown, text });
+    } catch {
+      throw new SwfteApiError({ status: 502, code: 'SELECTED_REPORT_JSON_INVALID',
+        message: 'The selected report response is unavailable.', method: opts.method, path: opts.path });
+    }
+  }
+
+  private async requestOnce<T>(opts: RequestOptions, preserveText = false): Promise<T> {
+    if (opts.body !== undefined && opts.textBody !== undefined) throw new Error('REQUEST_BODY_AMBIGUOUS');
+    if (opts.maxResponseBytes !== undefined && (!Number.isSafeInteger(opts.maxResponseBytes)
+      || opts.maxResponseBytes < 1 || opts.maxResponseBytes > 1024 * 1024)) throw new Error('RESPONSE_LIMIT_INVALID');
     const url = this.buildUrl(opts.path, opts.query);
     const headers = this.buildHeaders(opts);
 
@@ -217,6 +242,10 @@ export class SwfteClient {
     if (opts.body !== undefined) {
       body = JSON.stringify(opts.body);
       headers['Content-Type'] = 'application/json';
+    } else if (opts.textBody !== undefined) {
+      body = opts.textBody;
+      headers['Content-Type'] = 'text/plain; charset=utf-8';
+      headers['Content-Length'] = String(Buffer.byteLength(body, 'utf8'));
     }
 
     if (this.config.debug) {
@@ -231,7 +260,9 @@ export class SwfteClient {
     let text: string;
     try {
       res = await this.send(url, { method: opts.method, headers, body }, controller);
-      text = await this.consumeBody(() => res.text(), controller, headers, startedAt);
+      text = opts.maxResponseBytes === undefined
+        ? await this.consumeBody(() => res.text(), controller, headers, startedAt)
+        : await this.consumeBody(() => this.boundedText(res, opts, controller, preserveText), controller, headers, startedAt);
     } finally {
       clearTimeout(timer);
     }
@@ -242,6 +273,8 @@ export class SwfteClient {
 
     const ok = res.ok || (opts.expectStatuses?.includes(res.status) ?? false);
     if (!ok) throw this.toApiError(res, text, opts);
+
+    if (preserveText) return text as unknown as T;
 
     // A 202 Accepted for an async provision routinely carries an EMPTY body.
     // Parsing that would throw and read to the caller as a failed deploy —
@@ -254,6 +287,38 @@ export class SwfteClient {
       // Some endpoints (export, logs) legitimately return text/plain.
       return text as unknown as T;
     }
+  }
+
+  private async boundedText(response: Response, opts: RequestOptions, controller: AbortController, preserveBom = false): Promise<string> {
+    const limit = opts.maxResponseBytes!;
+    const refuse = () => new SwfteApiError({status:502,code:'RESPONSE_LIMIT_EXCEEDED',
+      message:'Runtime response exceeded its byte bound.',method:opts.method,path:opts.path});
+    const declared = response.headers.get('Content-Length');
+    if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > limit)) {
+      controller.abort();
+      throw refuse();
+    }
+    if (!response.body) return '';
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.byteLength;
+        if (size > limit) {
+          controller.abort();
+          await reader.cancel().catch(() => undefined);
+          throw refuse();
+        }
+        chunks.push(chunk.value);
+      }
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+      return new TextDecoder('utf-8', {fatal:true, ignoreBOM:preserveBom}).decode(bytes);
+    } finally { reader.releaseLock(); }
   }
 
   private buildHeaders(opts: RequestOptions): Record<string, string> {

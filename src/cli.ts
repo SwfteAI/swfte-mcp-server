@@ -14,7 +14,7 @@
  * swfte.json lives) or --cwd <dir>. Every command is the same code the MCP
  * tools run (src/bake.ts); this file only parses arguments and prints.
  */
-import { realpathSync } from 'node:fs';
+import { realpathSync, readFileSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { bakeArtifact, syncProject, upgradeAlias, verifyProject, type SyncResult, type VerifyReport } from './bake.js';
 import { OperationDeadlineError, SwfteApiError, SwfteClient } from './client.js';
@@ -33,6 +33,13 @@ import { scanRepository } from './codemap/scan.js';
 import { reportVerification, verifyProjectWithSnapshot } from './codemap/report.js';
 import { recordNativeWrittenFiles } from './codemap/provenance.js';
 import { handleProveCommand } from './prove/cli.js';
+import { setupTools } from './tools/setup.js';
+import { proveTools } from './tools/prove.js';
+import { promotionTools } from './tools/promotion.js';
+import { cloudLinkTools } from './tools/cloud-link.js';
+import { runtimeExecTools } from './tools/runtime-exec.js';
+
+const runtimeCommands:Record<string,string>={setup:'swfte_setup',proof:'swfte_proof',resolve:'swfte_resolve',prove:'swfte_prove','prove-status':'swfte_prove_status','prove-report':'swfte_prove_report',findings:'swfte_findings',promote:'swfte_promote','promotion-preview':'swfte_promotion_preview','promotion-status':'swfte_promotion_status',rollback:'swfte_promotion_rollback','aws-link':'swfte_aws_link','aws-probe':'swfte_aws_link_probe','provision-plan':'swfte_provision_plan','provision-request':'swfte_provision_request','runtime-exec':'swfte_runtime_exec','runtime-status':'swfte_runtime_exec_status','runtime-cancel':'swfte_runtime_exec_cancel','runtime-events':'swfte_runtime_exec_events','runtime-files':'swfte_runtime_files','runtime-read':'swfte_runtime_file_read','runtime-write':'swfte_runtime_file_write','runtime-upload':'swfte_runtime_upload'};
 
 export interface CliIO {
   out: (line: string) => void;
@@ -79,6 +86,8 @@ Usage:
   swfte verify --report [--json]
   swfte prove <path> [--level local|manifest|diff|tree]
   swfte prove verdict|init-gate|watch [<path>]
+  swfte setup|proof|resolve|prove|prove-status|prove-report|findings|promote|promotion-preview|promotion-status|rollback|aws-link|aws-probe|provision-plan|provision-request --input <project-relative-json>
+  swfte runtime-exec|runtime-status|runtime-cancel|runtime-events|runtime-files|runtime-read|runtime-write|runtime-upload --input <project-relative-json>
 
   <catalogRef>   "<kind>:<id>", e.g. workflow:wf_123 (from swfte_find_existing or Studio)
   --framework    ${FRAMEWORKS.join(' | ')} (default: detected from package.json / pyproject.toml / requirements*.txt)
@@ -109,7 +118,7 @@ interface Parsed {
 }
 
 const BOOLEAN = new Set(['force', 'dry-run', 'offline', 'json', 'accept-capability-changes', 'help', 'version', 'compliance', 'strict', 'no-pin', 'record', 'no-compliance', 'opt-in', 'hash-paths', 'attribution', 'tag', 'ci', 'report']);
-const VALUED = new Set(['framework', 'out', 'alias', 'language', 'cwd', 'paths', 'port', 'base-url', 'workspace', 'pr']);
+const VALUED = new Set(['framework', 'out', 'alias', 'language', 'cwd', 'paths', 'port', 'base-url', 'workspace', 'pr', 'input']);
 /** Credentials come from the environment only: a flag would land in shell history and CI logs. */
 const CREDENTIAL_FLAGS = new Set(['token', 'api-key', 'apikey', 'pat', 'key', 'secret', 'password']);
 const SHORT: Record<string, string> = { f: 'force', h: 'help', v: 'version', C: 'cwd' };
@@ -238,7 +247,8 @@ function printVerify(io: CliIO, r: VerifyReport): void {
 
 /** Runs one CLI invocation; returns the process exit code. Never calls process.exit, so tests can drive it. */
 export async function runCli(argv: string[], io: CliIO): Promise<number> {
-  if (argv[0] === 'prove') {
+  // `swfte prove --input <json>` is the hosted prove tool (runtimeCommands); `swfte prove <path>` is the local proving CLI.
+  if (argv[0] === 'prove' && !argv.some((a) => a === '--input' || a.startsWith('--input='))) {
     try {
       let provingClient: SwfteClient | undefined;
       try { provingClient = new SwfteClient(cliConfig(io.env)); } catch (err) { if (!(err instanceof ConfigError)) throw err; }
@@ -276,7 +286,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
     const selectedNative = ['add', 'sync', 'upgrade'].includes(p.command);
     const writer = ownedWriter = new ConfinedWriter({ root, forbidden: secrets, native: selectedNative });
     const needsNetwork =
-      p.command === 'add' || p.command === 'sync' || p.command === 'upgrade' || (p.command === 'scan' && !flag(p, 'offline')) || (p.command === 'verify' && !flag(p, 'offline')) || (p.command === 'dev' && flag(p, 'record'));
+      Boolean(runtimeCommands[p.command]) || p.command === 'add' || p.command === 'sync' || p.command === 'upgrade' || (p.command === 'scan' && !flag(p, 'offline')) || (p.command === 'verify' && !flag(p, 'offline')) || (p.command === 'dev' && flag(p, 'record'));
     let config: ServerConfig | null = null;
     if (needsNetwork) {
       try {
@@ -295,6 +305,17 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
     // ends the run ("could not check", exit 2) instead of holding CI for minutes of retries.
     const budget = timeoutBudget(io.env, p.command);
     const exec = async (): Promise<number> => {
+    if (p.command && runtimeCommands[p.command]) {
+      if (!client || !config) throw new ConfigError('A configured credential is required.');
+      if (p.positionals.length || !value(p,'input')) throw new UsageError('Runtime commands require --input <project-relative-json> and no positional arguments.');
+      const file=writer.resolve(value(p,'input')!);
+      if (!statSync(file).isFile() || statSync(file).size>350000) throw new UsageError('Runtime input must be a bounded JSON file.');
+      const tool=[...setupTools,...proveTools,...promotionTools,...cloudLinkTools,...runtimeExecTools].find(candidate=>candidate.name===runtimeCommands[p.command!]);
+      if (!tool) throw new UsageError('The requested runtime command is unavailable.');
+      const input=tool.inputSchema.parse(JSON.parse(readFileSync(file,'utf8')));
+      emit(await tool.execute(input,{client,config,localFilesystem:true}));
+      return 0;
+    }
     switch (p.command) {
       case 'scan': {
         if (p.positionals.length) throw new UsageError('swfte scan takes no positional arguments; use --cwd.');
