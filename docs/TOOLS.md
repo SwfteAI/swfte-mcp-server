@@ -1,6 +1,6 @@
 # Tool reference
 
-`@swfte/mcp-server` exposes **309 tools**, of which a curated **108** are
+`@swfte/mcp-server` exposes **315 tools**, of which a curated **108** are
 advertised by default. See [ATTACH.md](ATTACH.md) for `SWFTE_TOOLS`.
 
 Tools that take a `workspaceId` only honour it for **API-key** credentials. A
@@ -64,6 +64,23 @@ proving verdict; a local label or an unavailable verifier cannot supply proof.
 requires explicit consent and the shared intake service. `marketplace` includes
 `swfte_catalog_proof`, `swfte_catalog_shelves`, `swfte_extend_proof_suite`,
 `swfte_declare_deviation` and `swfte_rerun_parent_suite`.
+
+## Review mode (`review`)
+
+`review` advertises six tools that drive a stakeholder review of one exact version, the same session Studio shows. It is
+opt-in (`SWFTE_TOOLS=core,review`) so the default surface keeps its ceiling. Every tool is read-only on the artifact.
+
+| Tool | What it does |
+| --- | --- |
+| `swfte_review_start` | Pin a review to an exact content hash. While it is open the reviewer cannot edit the artifact. |
+| `swfte_review_items` | List the checks, their confirmed status and any suggestion. |
+| `swfte_review_check` | Ask the review Copilot to check one item. Read-only tools, evidence required, recorded as a suggestion. |
+| `swfte_review_finding` | Record a finding. It waits for a person to request changes or accept the risk. |
+| `swfte_review_signoff` | Sign off, bound to the content and plan hash. Only a token its owner granted `review:signoff`; otherwise it returns `NEEDS_INTERACTIVE_SESSION` and a Studio link. |
+| `swfte_review_status` | Where the review stands, what blocks sign-off, and the quorum. |
+
+A token never confirms a check, requests changes or accepts a risk. `review:signoff` is off unless named on the token,
+is audited, and counts as the token's owner, once, in the quorum.
 
 ## Compliance control plane (core)
 
