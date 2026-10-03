@@ -21,3 +21,4 @@ coverage/
 !test/fixtures/codemap/**/.env.local
 # Local scan cache and offline queue (never committed).
 .swfte/codemap/
+.native-artifacts/
