@@ -38,7 +38,7 @@ async function fixture(options: { missingClient?: boolean; unpinned?: boolean; e
     outputSchema: { type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'] } };
   if (options.emptySchemas) { live.inputSchema = {}; live.outputSchema = {}; }
   const hash = contractHash(live);
-  const pinned = { ...live, invoke: { ...live.invoke, path: version ? '/v2/workflows/wf_a/versions/' + version + '/invoke' : live.invoke.path } };
+  const pinned = { ...live, invoke: { ...live.invoke, path: version ? '/v2/workflows/wf_a/versions/' + encodeURIComponent(version) + '/invoke' : live.invoke.path } };
   const generated = renderTypeScriptClient({ catalogRef: live.catalogRef, kind: 'workflow', id: 'wf_a', name: 'Answer', alias: 'answer',
     contract: pinned, contractHash: hash, defaultBaseUrl: config.baseUrl, pinnedVersion: version });
   const files: Record<string, string> = {
@@ -153,7 +153,9 @@ test('unsupported and changed exact-version schema/hash cannot post an otherwise
     const f = await fixture();
     f.state.pin = pin;
     const ordinary = await verifyProject(f.ctx);
-    assert.equal(ordinary.exitCode, 0);
+    // Ordinary verify answers 'could not check' (exit 2) when the pin lookup is unsupported or malformed (bake.ts unreachable);
+    // a hash-only mismatch is not an ordinary-verify failure. The report refuses every one of them.
+    assert.equal(ordinary.exitCode, ({ unsupported: 2, mismatch: 0, 'null-schema': 2, 'wrong-route': 2 } as const)[pin], pin);
     await assert.rejects(f.verify(), /context/);
     assert.equal(f.reports().length, 0);
   }

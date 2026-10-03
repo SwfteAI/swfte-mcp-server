@@ -13,6 +13,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 import { loadConfig, DEFAULT_GROUPS } from '../src/config.js';
+import { LOCAL_STEPS_PATH } from '../src/learning-contract.js';
 import { SwfteApiError, SwfteClient, type RequestOptions } from '../src/client.js';
 import { allTools } from '../src/tools/index.js';
 import { buildServer, selectTools } from '../src/server.js';
@@ -103,6 +104,15 @@ function serverClient(options: {
   const client = new SwfteClient(config);
   const requests: RequestOptions[] = [];
   client.request = async <T>(request: RequestOptions): Promise<T> => {
+    // Learning-loop step delivery (parallel/learning-loop-mcp) posts here for a call that made no counted
+    // request; the fixture accepts it so the queue-empty assertions below measure the connections tools only.
+    if (request.path === LOCAL_STEPS_PATH) return {} as T;
+    // The artifact setup route (promotion-confidence-setup branch) is probed first by swfte_connections_check.
+    // These fixtures model a server without it (404), so the check falls through to the connections routes;
+    // the probe is deliberately not logged so the existing exact-request assertions keep their meaning.
+    if (/\/v2\/artifacts\/[^/]+\/[^/]+\/setup$/.test(request.path)) {
+      throw new SwfteApiError({ status: 404, code: 'NOT_FOUND', message: 'not found', method: request.method, path: request.path });
+    }
     requests.push(request);
     if (request.path === CONNECTIONS) {
       if (options.inventoryError !== undefined) throw options.inventoryError;
@@ -400,6 +410,8 @@ describe('actual client workspace transport and debug secrecy', () => {
     const requests: Array<{ path: string; init?: RequestInit }> = [];
     t.mock.method(globalThis, 'fetch', async (url: string | URL | Request, init?: RequestInit) => {
       const path = new URL(String(url)).pathname;
+      // Server without the artifact setup route (see the fixture above): probe answers 404, unlogged.
+      if (/\/v2\/artifacts\/[^/]+\/[^/]+\/setup$/.test(path)) return new Response(JSON.stringify({ error: 'not_found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
       requests.push({ path, init });
       if (path.endsWith(CONNECTIONS)) return Response.json([connection('server-choice')]);
       assert.ok(path.endsWith(AUTO_BIND));
@@ -421,6 +433,7 @@ describe('actual client workspace transport and debug secrecy', () => {
     const client = new SwfteClient(config);
     const headers: Headers[] = [];
     t.mock.method(globalThis, 'fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      if (/\/v2\/artifacts\/[^/]+\/[^/]+\/setup$/.test(new URL(String(url)).pathname)) return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } });
       headers.push(new Headers(init?.headers));
       return new URL(String(url)).pathname.endsWith(CONNECTIONS) ? Response.json([]) : Response.json({ bindings: [] });
     });

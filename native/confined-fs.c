@@ -6,6 +6,10 @@
  * atomic per directory entry, not compare-and-swap or a multi-file transaction.
  */
 #define _POSIX_C_SOURCE 200809L
+#ifdef __APPLE__
+/* Darwin hides O_NOFOLLOW/O_DIRECTORY and st_mtimespec under a bare _POSIX_C_SOURCE. */
+#define _DARWIN_C_SOURCE
+#endif
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>

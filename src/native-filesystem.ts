@@ -297,7 +297,7 @@ export class NativeFilesystem {
     if (!policy || input.expected === undefined) throw new NativeFilesystemError('PROTOCOL_INVALID');
     if (policy === 1 && input.expected) throw new NativeFilesystemError('CONFLICT');
     const content = Buffer.from(input.bytes); const size = Buffer.alloc(4); size.writeUInt32BE(content.length);
-    const tail = [Buffer.from([policy, input.expected ? 1 : 0])];
+    const tail: Buffer[] = [Buffer.from([policy, input.expected ? 1 : 0])];
     if (input.expected) {
       if (!(input.expected.bytes instanceof Uint8Array) || input.expected.bytes.length > NATIVE_FILE_LIMIT) throw new NativeFilesystemError('PROTOCOL_INVALID');
       const expected = Buffer.from(input.expected.bytes);

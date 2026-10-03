@@ -324,7 +324,7 @@ describe('advertised surface', () => {
 // Source-authored registry acceptance; QUEUED/UNRUN.
 test('bound consumer registry preserves total/default counts and unique names', () => {
   const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x' } as never));
-  assert.equal(allTools.length, 249); assert.equal(selected.length, 108);
+  assert.equal(allTools.length, 309); assert.equal(selected.length, 108);
   assert.equal(new Set(allTools.map(t => t.name)).size, allTools.length);
   for (const name of ['swfte_open_review_room', 'swfte_assemble_proof_bundle', 'swfte_export_proof_bundle']) assert.ok(selected.some(t => t.name === name));
   for (const name of ['swfte_review_room', 'swfte_proof_bundle']) assert.equal(selected.some(t => t.name === name), false);

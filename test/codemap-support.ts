@@ -7,7 +7,7 @@ import type { AssignedSite } from '../src/codemap/fingerprint.js';
 export function project(files: Record<string, string>): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'swfte-codemap-')));
   for (const [path, text] of Object.entries(files)) { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), text); }
-  for (const args of [['init', '--quiet'], ['add', '.'], ['-c', 'user.name=Codex', '-c', 'user.email=codex@openai.com', 'commit', '--quiet', '-m', 'fixture']]) {
+  for (const args of [['init', '--quiet'], ['add', '.'], ['-c', 'user.name=Codex', '-c', 'user.email=codex@openai.com', 'commit', '--quiet', '--allow-empty', '-m', 'fixture']]) {
     execFileSync('git', ['-C', root, ...args], { stdio: 'pipe' });
   }
   return root;

@@ -339,7 +339,7 @@ describe('cli and parsing', () => {
     assert.throws(() => validateKey(mut((k) => (k.sites[0].artifact.id = null)), 'k'), /id is null exactly when unresolved/);
     assert.throws(() => validateKey(mut((k) => (k.sites[0].line = 0)), 'k'), /1-based line/);
     assert.throws(() => validateKey(mut((k) => (k.sites = 'x')), 'k'), /no sites array/);
-    assert.equal(loadFixtures(CORPUS).length, 6); // every real key passes the strict loader
+    assert.equal(loadFixtures(CORPUS).length, 7); // every real key passes the strict loader (7th: opaque-versions)
   });
 
   test('floor parser and env-file globs', async () => {

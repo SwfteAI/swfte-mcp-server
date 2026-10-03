@@ -38,7 +38,7 @@ export const runtimeExecTools:ToolDefinition[]=[
         const lines=frame.split('\n');const ids=lines.filter(line=>line.startsWith('id:'));
         const names=lines.filter(line=>line.startsWith('event:'));
         if(ids.length!==1||names.length!==1)throw new Error('RUNTIME_EVENT_INVALID');
-        const id=Number(ids[0].slice(3).trim());const event=names[0].slice(6).trim();
+        const id=Number(ids[0]!.slice(3).trim());const event=names[0]!.slice(6).trim();
         if(!Number.isInteger(id)||id<=cursor||id>1||!['runtime-state','runtime-result'].includes(event))throw new Error('RUNTIME_EVENT_INVALID');
         const data=JSON.parse(lines.filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trimStart()).join('\n'));
         if(!data||data.commandId!==input.commandId||event==='runtime-result'&&data.instanceId!==input.instanceId)throw new Error('RUNTIME_EVENT_IDENTITY_MISMATCH');

@@ -157,7 +157,11 @@ test('actual scan owns one root per hash pass, closes before outbound, and durab
       if (body) bodies.push(body);
       if (path.endsWith('/key')) return Response.json({ keyId: 'wk_native', key: Buffer.alloc(32, 7).toString('base64') });
       if (path.endsWith('/manifests')) return Response.json({ status: 'stored', commitSha: body.commitSha, callSites: body.callSites.length });
-      if (path.endsWith('/repos')) return Response.json({ repoId, pathHashing: false, attribution: false });
+      if (path.endsWith('/repos')) {
+        const optIn = { repoId, pathHashing: false, attribution: false };
+        // GET lists consent ({repos:[...]}); POST answers with the single opt-in record.
+        return Response.json(init?.method === 'GET' ? { repos: [optIn] } : optIn);
+      }
       throw new Error('unexpected test route');
     }) as typeof fetch };
   try {

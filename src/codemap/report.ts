@@ -7,6 +7,7 @@ import { loadLock, LOCK_FILE, normalizeRel, type LockArtifact } from '../lock.js
 import { effectiveContractHash, getContract, parseCatalogRef, sameHash, type CatalogContract } from '../catalog.js';
 import { snake } from '../codegen.js';
 import { SwfteApiError, SwfteClient } from '../client.js';
+import type { ServerConfig } from '../config.js';
 import { committedBlobs, currentBoundScan, repositoryIdentity } from './scan.js';
 import { fetchWorkspaceKey, postVerifyResult, repositoryOptIns, type UploadConfig } from './upload.js';
 import { bindingError, bindingTarget, digest, stableJson } from './binding.js';
@@ -127,9 +128,14 @@ function applies(problem: VerifyReport['problems'][number], alias: string, ref: 
 
 function exactPinPath(artifact: VerificationSnapshot['artifacts'][number]): string | null {
   if (artifact.pinnedVersion === null) return null;
-  if (!isPinnable(artifact.catalogRef, artifact.pinnedVersion)
-    || !isSafeVersionPin(artifact.pinnedVersion)) throw bindingError('UNCONFIRMED_REPORT_PIN');
-  const path = versionedInvokePath(parseCatalogRef(artifact.catalogRef).id, artifact.pinnedVersion);
+  // isPinnable/versionedInvokePath throw a LockError on a malformed recorded pin; a report must refuse it as
+  // an unconfirmed context (no request, no report), not surface the lock diagnostic.
+  let path: string;
+  try {
+    if (!isPinnable(artifact.catalogRef, artifact.pinnedVersion)
+      || !isSafeVersionPin(artifact.pinnedVersion)) throw bindingError('UNCONFIRMED_REPORT_PIN');
+    path = versionedInvokePath(parseCatalogRef(artifact.catalogRef).id, artifact.pinnedVersion);
+  } catch { throw bindingError('UNCONFIRMED_REPORT_PIN'); }
   if (new URL(path, 'https://codemap.invalid').pathname !== path) throw bindingError('UNCONFIRMED_REPORT_PIN');
   return path;
 }
@@ -179,7 +185,7 @@ async function confirmPins(client: SwfteClient, snapshot: VerificationSnapshot, 
 }
 
 /** Root CLI supplies its existing client and that client's exact trusted config. */
-export async function verifyProjectWithSnapshot(ctx: Parameters<typeof verifyProject>[0], cfg: UploadConfig,
+export async function verifyProjectWithSnapshot(ctx: Omit<Parameters<typeof verifyProject>[0], 'config'> & { config?: ServerConfig }, cfg: UploadConfig,
   opts: Parameters<typeof verifyProject>[1] = {}): Promise<VerifyReport> {
   if (opts?.offline || !ctx.client || ctx.writer.inline) throw bindingError('UNMEASURED_REPORT_CONTEXT');
   if (!ctx.config) throw bindingError('REPORT_CLIENT_CONTEXT_MISMATCH');

@@ -2,11 +2,29 @@
 import ts from 'typescript';
 import { ConfinedWriter } from '../fsguard.js';
 import { readConfined } from './walk.js';
-import { withTree as pythonTree, walk as walkPython } from './detectors/py/parse.js';
-import { withTree as javaTree, walk as walkJava, argsOf, nameOf } from './detectors/java/parse.js';
+import { withTree as rawPythonTree, walk as walkPython } from './detectors/py/parse.js';
+import { withTree as rawJavaTree, walk as walkJava, argsOf, nameOf } from './detectors/java/parse.js';
 import type { AssignedSite } from './fingerprint.js';
 
 interface Edit { start: number; end: number; text: string }
+
+/**
+ * `withTree` returns null when a grammar is unavailable, but it also swallows anything the callback throws.
+ * Tagging planners refuse unsafe shapes by throwing, so capture that refusal and rethrow it past `withTree`;
+ * otherwise a real "Unknown Java native overload" refusal would read as "grammar unavailable".
+ */
+function refusing<N>(run: <T>(text: string, fn: (root: N) => T) => T | null): <T>(text: string, fn: (root: N) => T) => T | null {
+  return <T>(text: string, fn: (root: N) => T): T | null => {
+    let refusal: { error: unknown } | undefined;
+    const out = run(text, (root) => {
+      try { return fn(root); } catch (error) { refusal = { error }; return undefined as unknown as T; }
+    });
+    if (refusal) throw refusal.error;
+    return out;
+  };
+}
+const pythonTree = refusing(rawPythonTree);
+const javaTree = refusing(rawJavaTree);
 const methods = new Set(['invoke', 'invokeAndWait', 'invokeVersion', 'invokeVersionAndWait', 'execute', 'chat', 'startSession', 'test']);
 const tsLine = (sf: ts.SourceFile, node: ts.Node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
 

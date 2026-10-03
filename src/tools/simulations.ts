@@ -417,18 +417,20 @@ export const simulationTools: ToolDefinition[] = [
           throw new Error('VALIDATION_PACK_REUSE_INVALID: saved reuse creation identity is unavailable.')
         }
         if (refusal) {
-          return { created: false, valid: false, errors: Array.isArray(res.errors) ? res.errors : [],
-            code: typeof res.code === 'string' ? res.code : typeof res.error === 'string' ? res.error : undefined,
-            message: typeof res.message === 'string' ? res.message : undefined }
+          const envelope = res as Record<string, unknown>
+          return { created: false, valid: false, errors: Array.isArray(envelope.errors) ? envelope.errors : [],
+            code: typeof envelope.code === 'string' ? envelope.code : typeof envelope.error === 'string' ? envelope.error : undefined,
+            message: typeof envelope.message === 'string' ? envelope.message : undefined }
         }
       }
       if (res && typeof res === 'object' && typeof res.id === 'string') {
         const run = res as unknown as SimulationRun;
         return { created: true, run: { id: run.id, status: run.status, specHash: run.specHash, mode: run.mode, profile: run.profile, target: run.target, budget: run.budget } };
       }
-      const errors = (res?.errors as SpecError[] | undefined) ?? [];
-      const code = typeof res?.code === 'string' ? res.code : typeof res?.error === 'string' ? res.error : undefined;
-      return { created: false, valid: false, errors, code, message: typeof res?.message === 'string' ? res.message : undefined };
+      const raw = res as Record<string, unknown> | undefined;
+      const errors = (raw?.errors as SpecError[] | undefined) ?? [];
+      const code = typeof raw?.code === 'string' ? raw.code : typeof raw?.error === 'string' ? raw.error : undefined;
+      return { created: false, valid: false, errors, code, message: typeof raw?.message === 'string' ? raw.message : undefined };
     },
   },
   {
