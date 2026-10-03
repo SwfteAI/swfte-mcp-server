@@ -72,6 +72,16 @@ test('generated TypeScript returns the declared outputPath value, not the output
   assert.notDeepEqual(plain(result.output), plain(snapshot(FINAL).execution.outputData));
 });
 
+for (const endId of ['end_review_42', 'end.review-2']) {
+  test(`the path follows the backend-declared END node id ${endId}, not a hard-coded end_1`, async () => {
+    const s = withPath(['execution', 'outputData', 'parameters', endId]);
+    const polled = snapshot({ not: 'this one' });
+    (polled.execution.outputData.parameters as Record<string, unknown>)[endId] = FINAL;
+    const ts = await invokeTs(renderTypeScriptClient(s), polled, s);
+    assert.deepEqual(plain(ts.output), FINAL);
+  });
+}
+
 test('negative control: the previous wrapper reader returns the wrong value for the same response', async () => {
   const source = renderTypeScriptClient(spec);
   const start = source.indexOf('const outputOf =');
