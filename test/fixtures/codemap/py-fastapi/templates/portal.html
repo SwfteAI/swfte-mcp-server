@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Customer portal{% endblock %}
+{% block content %}
+<h1>Welcome back, {{ user.first_name }}</h1>
+{% if user.is_sales_lead %}
+<iframe
+  src="https://app.swfte.com/chat/ag_Sales6"
+  title="Talk to sales"
+  width="420"
+  height="640"
+  allow="clipboard-write"
+></iframe>
+{% else %}
+<iframe src="https://app.swfte.com/chat/ag_Portal7" title="Portal assistant" width="420" height="640"></iframe>
+{% endif %}
+{% endblock %}
+{% block chat %}{% endblock %}

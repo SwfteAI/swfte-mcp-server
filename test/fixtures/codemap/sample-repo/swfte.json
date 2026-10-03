@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "baseUrl": "https://api.swfte.com/agents",
+  "workspaceId": "ws_acme01",
+  "artifacts": [
+    {
+      "catalogRef": "workflow:wf_Smp1Qa",
+      "alias": "ticket-summary",
+      "language": "typescript",
+      "framework": "plain-ts",
+      "outDir": "src/swfte",
+      "contractHash": "b91aa7bc39356aa3b9e04f7446df3ebb4ccc78b076dbbd6367bd33259e7e3489",
+      "pinnedVersion": null,
+      "files": [
+        "src/swfte/ticket-summary.ts"
+      ]
+    }
+  ]
+}

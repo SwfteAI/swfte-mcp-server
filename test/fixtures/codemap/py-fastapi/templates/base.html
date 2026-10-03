@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{% block title %}Acme Ops{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}" />
+  </head>
+  <body>
+    <main>{% block content %}{% endblock %}</main>
+    {% block chat %}
+    <script src="https://unpkg.com/@swfte/chat-widget@1.4.0/dist/swfte-chat.umd.js"></script>
+    <script>
+      new SwfteChatWidget({
+        agentId: "ag_Portal7",
+        type: "bubble",
+        greeting: "Hi {{ user.first_name|default('there') }}, need a hand?",
+      }).mount();
+    </script>
+    {% endblock %}
+  </body>
+</html>

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Support</title>
+  <script src="https://unpkg.com/@swfte/chat-widget@1.4.0/dist/swfte-chat.umd.js"></script>
+</head>
+<body>
+<h1 th:text="#{support.title}">Support</h1>
+<div id="support-chat"></div>
+<script>
+  const supportChat = new SwfteChatWidget({
+    agentId: 'ag_JvSup1',
+    type: 'embedded',
+    container: '#support-chat'
+  });
+  supportChat.mount();
+</script>
+</body>
+</html>

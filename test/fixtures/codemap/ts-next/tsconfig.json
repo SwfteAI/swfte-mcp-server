@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "es2022"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": false,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "jsx": "preserve",
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@swfte/sdk": ["./types/swfte-sdk.d.ts"],
+      "@swfte/chat-widget": ["./types/swfte-chat-widget.d.ts"],
+      "@swfte/chat-widget/react": ["./types/swfte-chat-widget-react.d.ts"],
+      "@acme/swfte-fork": ["./types/acme-swfte-fork.d.ts"],
+      "next/server": ["./types/next-server.d.ts"],
+      "node:fs/promises": ["./types/node-fs-promises.d.ts"],
+      "react": ["./types/react.d.ts"],
+      "axios": ["./types/axios.d.ts"]
+    }
+  },
+  "include": ["types/**/*.d.ts", "src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src/**/__tests__/**", "src/**/*.test.ts"]
+}

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Acme status</title>
+    <script src="https://unpkg.com/@swfte/chat-widget@1.4.0/dist/swfte-chat.umd.js"></script>
+  </head>
+  <body>
+    <iframe src="https://app.swfte.com/chat/ag_Supp9x" title="Support" width="380" height="560"></iframe>
+    <script>
+      new SwfteChatWidget({ agentId: '{{ agent_id }}', type: 'bubble' }).mount();
+    </script>
+    {{ support_iframe | safe }}
+  </body>
+</html>

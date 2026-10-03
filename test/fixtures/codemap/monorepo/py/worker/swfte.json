@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "baseUrl": "https://api.swfte.com/agents",
+  "workspaceId": "ws_acme01",
+  "artifacts": [
+    {
+      "catalogRef": "workflow:wf_Lead5Q",
+      "alias": "lead-enrich",
+      "language": "python",
+      "framework": "plain-python",
+      "outDir": "acme_worker/swfte_clients",
+      "contractHash": "fab5631f26e1f2a1d71e733044e4a2d73bf927bf391978e1462fa110f1263c6d",
+      "pinnedVersion": null,
+      "files": [
+        "acme_worker/swfte_clients/lead_enrich.py"
+      ]
+    }
+  ]
+}

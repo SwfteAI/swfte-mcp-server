@@ -1,7 +1,7 @@
 {
   "name": "@swfte/mcp-server",
   "version": "0.2.0",
-  "description": "Official Model Context Protocol (MCP) server for the Swfte AI platform \u2014 build, validate, and deploy complete workflows, agents, chatflows, widgets, applications and MCP servers from Claude Code, Claude Desktop, Cursor, or any MCP client.",
+  "description": "Official Model Context Protocol (MCP) server for the Swfte AI platform — build, validate, and deploy complete workflows, agents, chatflows, widgets, applications and MCP servers from Claude Code, Claude Desktop, Cursor, or any MCP client.",
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -72,14 +72,15 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.0",
     "fflate": "^0.8.3",
+    "typescript": "^5.6.0",
+    "web-tree-sitter": "^0.25.10",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.23.5"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
     "tsup": "^8.3.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.6.0"
+    "tsx": "^4.19.2"
   },
   "publishConfig": {
     "access": "public"

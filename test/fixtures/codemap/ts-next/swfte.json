@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "baseUrl": "https://api.swfte.com/agents",
+  "workspaceId": "ws_acme01",
+  "artifacts": [
+    {
+      "catalogRef": "workflow:wf_8K2mQ4",
+      "alias": "content-pipeline",
+      "language": "typescript",
+      "framework": "nextjs",
+      "outDir": "src/swfte",
+      "contractHash": "874bedbbe106b7aeb432fd72bc399c558f7afd95ba01c1e5ecda9f8fe7bb2202",
+      "pinnedVersion": null,
+      "files": [
+        "src/swfte/content-pipeline.ts"
+      ]
+    },
+    {
+      "catalogRef": "workflow:wf_Inv7Tr2",
+      "alias": "invoice-triage",
+      "language": "typescript",
+      "framework": "nextjs",
+      "outDir": "src/swfte",
+      "contractHash": "51a851709ad70b70f2c8c8d55eec5251a7a61623e694e7eb5c1e10b954818bdc",
+      "pinnedVersion": "2",
+      "files": [
+        "src/swfte/invoice-triage.ts"
+      ]
+    },
+    {
+      "catalogRef": "agent:ag_Supp9x",
+      "alias": "support-agent",
+      "language": "typescript",
+      "framework": "nextjs",
+      "outDir": "src/swfte",
+      "contractHash": "9271aa7c127e7ffc2e2ec309cd276a8856cf54c11c2f661838bf905ef80b4741",
+      "pinnedVersion": null,
+      "files": [
+        "src/swfte/support-agent.ts"
+      ]
+    }
+  ]
+}

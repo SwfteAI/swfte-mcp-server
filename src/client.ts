@@ -1,5 +1,27 @@
+import type { HostedLearningBinding, LocalDeliveryState } from './hosted-learning-state.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ServerConfig } from './config.js';
+import {
+  LOCAL_STEPS_PATH,
+  LOCAL_STEPS_PER_POST,
+  MCP_CLIENT_HEADER,
+  MCP_SESSION_HEADER,
+  TRACE_ECHO_HEADER,
+  TRACEPARENT_HEADER,
+} from './learning-contract.js';
+import {
+  currentCall,
+  LocalStepQueue,
+  outsideCall,
+  parseTraceparent,
+  recordEcho,
+  traceHeaders,
+  type CallContext,
+  type PendingStep,
+} from './tracing.js';
+
+/** One attempt at posting local steps; they are best effort and never retried inline. */
+const LOCAL_STEPS_TIMEOUT_MS = 5_000;
 
 export interface RequestOptions {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -135,7 +157,12 @@ export class SwfteClient {
     return Math.max(1, Math.min(timeoutMs, this.remainingMs()));
   }
 
-  constructor(private readonly config: ServerConfig) {}
+  private readonly config: ServerConfig;
+
+  constructor(config: ServerConfig, private readonly hostedLearning?: HostedLearningBinding) {
+    // A hosted caller cannot change the identity underneath queued trace metadata.
+    this.config = Object.freeze({ ...config, enabledGroups: new Set(config.enabledGroups) });
+  }
 
   get baseUrl(): string {
     return this.config.baseUrl;
@@ -194,12 +221,13 @@ export class SwfteClient {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestBudget(opts.timeoutMs ?? 60_000));
+    const startedAt = Date.now();
 
     let res: Response;
     let text: string;
     try {
-      res = await fetch(url, { method: opts.method, headers, body, signal: controller.signal });
-      text = await res.text();
+      res = await this.send(url, { method: opts.method, headers, body }, controller);
+      text = await this.consumeBody(() => res.text(), controller, headers, startedAt);
     } finally {
       clearTimeout(timer);
     }
@@ -245,7 +273,169 @@ export class SwfteClient {
     // AuthFilter injects the token's own trusted tenant headers and overrides
     // whatever we send, so ours can only mislead.
 
+    // Inside a tool call: the call's trace with a fresh span for this attempt, plus the MCP session,
+    // client and tool. Set last so a caller-supplied header cannot replace them. Outside a call
+    // nothing is added.
+    const call = currentCall();
+    if (call) Object.assign(headers, traceHeaders(call));
+
     return headers;
+  }
+
+  /* ── learning loop: attempt bookkeeping and local steps ─────────────────── */
+
+  private readonly localState: LocalDeliveryState = { queue: new LocalStepQueue(), draining: false, inFlight: 0, discarded: 0,
+    discardInFlight: () => { this.localState.discarded += this.localState.inFlight; this.localState.inFlight = 0 },
+    current: () => true };
+  private observedState = this.localState;
+
+  private deliveryState(scope: Pick<PendingStep, 'workspaceId' | 'sessionId' | 'client'>): LocalDeliveryState | undefined {
+    const state = this.hostedLearning ? this.hostedLearning.scope(scope) : this.localState;
+    if (state) this.observedState = state;
+    return state;
+  }
+
+  /** Steps waiting for the backend (UNREACHED attempts, undelivered local steps) and how many were dropped. */
+  get pendingLocalSteps(): { queued: number; dropped: number; steps: PendingStep['step'][] } {
+    const queue = this.observedState.queue;
+    return { queued: this.observedState.current() ? queue.size : 0, dropped: queue.dropped + this.observedState.discarded, steps: this.observedState.current() ? queue.snapshot() : [] };
+  }
+
+  private get learningEnabled(): boolean {
+    return this.config.telemetry !== false;
+  }
+
+  /**
+   * Every HTTP attempt goes through here. Inside a tool call it counts the attempt, records the echoed
+   * trace id, queues an UNREACHED step when the backend could not be reached, and drains pending steps
+   * once the backend answers. Outside a call it is a plain fetch.
+   */
+  private async send(
+    url: string,
+    init: RequestInit & { headers: Record<string, string> },
+    controller: AbortController
+  ): Promise<Response> {
+    const call = currentCall();
+    if (!call) return fetch(url, { ...init, signal: controller.signal });
+
+    call.requests += 1;
+    const startedAt = Date.now();
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, signal: controller.signal });
+    } catch (err) {
+      // Our own abort is a timeout: the request may well have reached the backend, so it is not
+      // UNREACHED. Anything else (refused, reset, DNS) never produced an answer.
+      this.queueUnreached(call, init.headers, startedAt, controller.signal.aborted);
+      throw err;
+    }
+    recordEcho(call, res.headers.get(TRACE_ECHO_HEADER));
+    this.drainLocalSteps(this.deliveryState({ sessionId: call.sessionId, client: call.client,
+      workspaceId: init.headers['X-Workspace-ID'] ?? this.config.workspaceId }));
+    return res;
+  }
+
+  private async consumeBody<T>(read: () => Promise<T>, controller: AbortController,
+    headers: Record<string, string>, startedAt: number): Promise<T> {
+    try { return await read(); } catch (err) {
+      const call = currentCall();
+      if (call) this.queueUnreached(call, headers, startedAt, controller.signal.aborted, true);
+      throw err;
+    }
+  }
+
+  private queueUnreached(call: CallContext, headers: Record<string, string>, startedAt: number, timedOut: boolean,
+    responseReceived = false): void {
+    if (!this.learningEnabled) return;
+    const ids = parseTraceparent(headers[TRACEPARENT_HEADER]);
+    if (!ids) return;
+    const state = this.deliveryState({ sessionId: call.sessionId, client: call.client,
+      workspaceId: headers['X-Workspace-ID'] ?? this.config.workspaceId });
+    if (!state?.current()) return;
+    state.queue.push({
+      sessionId: call.sessionId,
+      client: call.client,
+      workspaceId: headers['X-Workspace-ID'] ?? this.config.workspaceId,
+      step: {
+        traceId: ids.traceId,
+        spanId: ids.spanId,
+        tool: call.tool,
+        resultClass: timedOut ? 'CLIENT_TIMEOUT' : responseReceived ? 'ERROR' : 'UNREACHED',
+        errorSignature: timedOut ? 'net:client_timeout' : responseReceived ? 'net:response_incomplete' : 'net:unreachable',
+        argShape: call.argShape,
+        ms: Math.max(0, Date.now() - startedAt),
+        occurredAtMs: startedAt,
+      },
+    });
+  }
+
+  /**
+   * Post a step for a tool call that made no backend request. Fire-and-forget: it never throws, never
+   * delays the caller, and a step it cannot deliver waits in the bounded queue.
+   */
+  recordLocalStep(entry: PendingStep): void {
+    try {
+      const state = this.deliveryState({ ...entry, workspaceId: entry.workspaceId ?? this.config.workspaceId });
+      if (!this.learningEnabled || !state?.current()) return;
+      state.queue.push({ ...entry, workspaceId: entry.workspaceId ?? this.config.workspaceId,
+        step: { ...entry.step, ...(entry.step.argShape ? { argShape: { ...entry.step.argShape } } : {}) } });
+      this.drainLocalSteps(state);
+    } catch {
+      // A step never fails a tool.
+    }
+  }
+
+  /**
+   * Deliver pending steps in batches of LOCAL_STEPS_PER_POST, one session/client per POST. Runs outside
+   * any tool call (so the POST carries no call trace, counts for no call and cannot queue a step of its
+   * own) and outside the caller's operation deadline. One drain at a time.
+   */
+  private drainLocalSteps(state: LocalDeliveryState | undefined): void {
+    if (!state?.current() || state.draining || state.queue.size === 0 || !this.learningEnabled) return;
+    state.draining = true;
+    outsideCall(() =>
+      this.operationDeadline.exit(() => {
+        void this.deliverLocalSteps(state)
+          .catch(() => false)
+          .then((reachable) => {
+            state.draining = false;
+            if (reachable && state.current() && state.queue.size > 0) this.drainLocalSteps(state);
+          });
+      })
+    );
+  }
+
+  /** Returns false when the backend could not be reached (the batch is back in the queue). */
+  private async deliverLocalSteps(state: LocalDeliveryState): Promise<boolean> {
+    while (state.current() && state.queue.size > 0) {
+      const batch = state.queue.takeBatch(LOCAL_STEPS_PER_POST);
+      const head = batch[0]!;
+      state.inFlight = batch.length;
+      try {
+        await this.request({
+          method: 'POST',
+          path: LOCAL_STEPS_PATH,
+          body: { steps: batch.map((e) => e.step) },
+          workspaceId: head.workspaceId,
+          headers: { [MCP_SESSION_HEADER]: head.sessionId, [MCP_CLIENT_HEADER]: head.client },
+          retries: 0,
+          timeoutMs: LOCAL_STEPS_TIMEOUT_MS,
+        });
+      } catch (err) {
+        // Permanent refusal (flag off, wrong credential, invalid) cannot benefit from retry. Transient
+        // failures retain the exact trace/span for a later contact, with no inline/recursive retry.
+        if (err instanceof SwfteApiError && !RETRYABLE_STATUSES.has(err.status)) {
+          state.discardInFlight();
+          continue;
+        }
+        if (state.current()) state.queue.unshift(batch);
+        else state.discardInFlight();
+        return false;
+      } finally {
+        state.inFlight = 0;
+      }
+    }
+    return true;
   }
 
   private toApiError(res: Response, text: string, opts: RequestOptions): SwfteApiError {
@@ -310,16 +500,17 @@ export class SwfteClient {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestBudget(opts.timeoutMs ?? 180_000));
+    const startedAt = Date.now();
     try {
-      const res = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+      const res = await this.send(url, { method: 'GET', headers }, controller);
       if (!res.ok) {
-        const text = await res.text();
+        const text = await this.consumeBody(() => res.text(), controller, headers, startedAt);
         throw this.toApiError(res, text, { method: 'GET', path });
       }
       const out: Record<string, string> = {};
       res.headers.forEach((v, k) => { out[k.toLowerCase()] = v; });
       return {
-        bytes: new Uint8Array(await res.arrayBuffer()),
+        bytes: new Uint8Array(await this.consumeBody(() => res.arrayBuffer(), controller, headers, startedAt)),
         headers: out,
         contentType: res.headers.get('content-type') ?? '',
       };
@@ -348,11 +539,12 @@ export class SwfteClient {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestBudget(opts.timeoutMs ?? 180_000));
+    const startedAt = Date.now();
     let res: Response;
     let text: string;
     try {
-      res = await fetch(url, { method: 'POST', headers, body: form, signal: controller.signal });
-      text = await res.text();
+      res = await this.send(url, { method: 'POST', headers, body: form }, controller);
+      text = await this.consumeBody(() => res.text(), controller, headers, startedAt);
     } finally {
       clearTimeout(timer);
     }

@@ -12,4 +12,9 @@ export default defineConfig({
   splitting: false,
   shims: false,
   banner: { js: '#!/usr/bin/env node' },
+  // The code-map scanner's vendored tree-sitter grammars (MIT; docs/codemap/CONTRACT.md D1) ship beside the bundle.
+  async onSuccess() {
+    const { cpSync } = await import('node:fs');
+    cpSync('src/codemap/grammars', 'dist/codemap/grammars', { recursive: true });
+  },
 });

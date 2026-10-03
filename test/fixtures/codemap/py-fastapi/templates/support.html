@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Helpdesk{% endblock %}
+{% block content %}
+<h1>IT helpdesk</h1>
+<div id="helpdesk-chat"></div>
+{% endblock %}
+{% block chat %}
+<script src="https://unpkg.com/@swfte/chat-widget@1.4.0/dist/swfte-chat.umd.js"></script>
+<script>
+  const helpdesk = new SwfteChatWidget({ agentId: "ag_Help4Py", type: "embedded", container: "#helpdesk-chat" });
+  helpdesk.mount();
+</script>
+{% endblock %}

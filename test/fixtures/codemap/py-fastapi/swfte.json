@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "baseUrl": "https://api.swfte.com/agents",
+  "workspaceId": "ws_acme02",
+  "artifacts": [
+    {
+      "catalogRef": "workflow:wf_Ctr8Rv",
+      "alias": "contract-review",
+      "language": "python",
+      "framework": "fastapi",
+      "outDir": "app/swfte_clients",
+      "contractHash": "357fbe7617ea782bc50709bc5b17486c3b05f6d9151ec1a144e5f90356766fd2",
+      "pinnedVersion": "3",
+      "files": [
+        "app/swfte_clients/contract_review.py"
+      ]
+    },
+    {
+      "catalogRef": "agent:ag_Help4Py",
+      "alias": "helpdesk-agent",
+      "language": "python",
+      "framework": "fastapi",
+      "outDir": "app/swfte_clients",
+      "contractHash": "9271aa7c127e7ffc2e2ec309cd276a8856cf54c11c2f661838bf905ef80b4741",
+      "pinnedVersion": null,
+      "files": [
+        "app/swfte_clients/helpdesk_agent.py"
+      ]
+    },
+    {
+      "catalogRef": "workflow:wf_Inv3Xt",
+      "alias": "invoice-extract",
+      "language": "python",
+      "framework": "fastapi",
+      "outDir": "app/swfte_clients",
+      "contractHash": "a21ddf9a08a3493cfbe18878a04fa37c47775c63f1b0bb2df0e4d3c93e5d1164",
+      "pinnedVersion": null,
+      "files": [
+        "app/swfte_clients/invoice_extract.py"
+      ]
+    },
+    {
+      "catalogRef": "workflow:wf_Lead5Sc",
+      "alias": "lead-scoring",
+      "language": "python",
+      "framework": "fastapi",
+      "outDir": "app/swfte_clients",
+      "contractHash": "38556364fa8173f207475ca55732aa790a059c652e44e1dab0594437e1c3e696",
+      "pinnedVersion": null,
+      "files": [
+        "app/swfte_clients/lead_scoring.py"
+      ]
+    }
+  ]
+}

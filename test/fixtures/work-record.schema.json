@@ -1,0 +1,91 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://swfte.com/schemas/learning/work-record.schema.json",
+  "title": "WorkRecord",
+  "description": "The unit of learning (brief 08 section 3.2, revisions L1-L3). One schema for every channel. Never holds a value: secrets only as handles, content only as schema, size and a salted hash.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "workspaceId", "environment", "channel", "client", "actorSource", "steps", "verification", "outcome", "consentTier", "createdAt"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string", "pattern": "^wr_[0-9a-f]{24}$" },
+    "workspaceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "accountId": { "type": "string", "maxLength": 128 },
+    "environment": { "type": "string", "pattern": "^(SANDBOX|LIVE:[A-Za-z0-9_.:-]{1,128})$" },
+    "channel": { "enum": ["wizard", "canvas", "mcp", "cli", "lab"] },
+    "client": { "enum": ["studio", "claude-code", "codex", "cursor", "cli", "lab", "other"] },
+    "actorUserId": { "type": "string", "maxLength": 128 },
+    "actorSource": { "enum": ["USER", "AGENT"] },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "facets": { "type": "array", "maxItems": 32, "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$" } },
+        "textHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "length": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "steps": { "type": "array", "items": { "$ref": "#/definitions/step" } },
+    "artifactsTouched": { "type": "array", "items": { "$ref": "#/definitions/ref" } },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proofVerdict"],
+      "properties": {
+        "proofVerdict": { "enum": ["PASS", "FAIL", "NONE"] },
+        "checks": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$" } },
+        "executionIds": { "type": "array", "items": { "type": "string", "maxLength": 128 } }
+      }
+    },
+    "outcome": { "enum": ["succeeded", "failed", "abandoned", "in_progress"] },
+    "humanVerdict": { "enum": ["accepted", "rejected"] },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "usd": { "type": "number", "minimum": 0 },
+        "tokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "wallMs": { "type": "integer", "minimum": 0 },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mcpSession": { "type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$" },
+        "nexusEpisode": { "type": "string", "maxLength": 128 },
+        "executions": { "type": "array", "items": { "type": "string", "maxLength": 128 } }
+      }
+    },
+    "consentTier": { "enum": ["private", "structure", "publish"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  },
+  "definitions": {
+    "ref": { "type": "string", "pattern": "^[a-z][a-z-]{1,31}:[A-Za-z0-9_.-]{1,128}$" },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["traceId", "spanId", "resultClass", "ms", "attempts", "startedAtMs"],
+      "properties": {
+        "traceId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+        "spanId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "session": { "type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$" },
+        "tool": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,63}$" },
+        "endpoint": { "type": "string", "pattern": "^(GET|POST|PUT|PATCH|DELETE) /[A-Za-z0-9_./{}-]{0,200}$" },
+        "argShape": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$" },
+          "additionalProperties": { "enum": ["string", "number", "integer", "boolean", "object", "array", "null", "handle"] }
+        },
+        "resultClass": { "enum": ["OK", "ERROR", "UNREACHED", "CLIENT_TIMEOUT"] },
+        "errorSignature": { "type": "string", "pattern": "^[A-Za-z0-9_.:/-]{1,128}$" },
+        "artifactsTouched": { "type": "array", "items": { "$ref": "#/definitions/ref" } },
+        "ms": { "type": "integer", "minimum": 0 },
+        "attempts": { "type": "integer", "minimum": 1 },
+        "startedAtMs": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

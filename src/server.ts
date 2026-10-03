@@ -20,10 +20,24 @@ import { loadConfig, type ServerConfig } from './config.js';
 import { UnsupportedKindError, UnsupportedVerbError } from './kinds/index.js';
 import { allTools } from './tools/index.js';
 import type { ToolDefinition } from './tools/_types.js';
-import { RESOURCE_TEMPLATES, STATIC_RESOURCES, ResourceNotFoundError, readResource } from './resources.js';
-import { PROMPTS, getPrompt } from './prompts.js';
+import { RESOURCE_TEMPLATES, STATIC_RESOURCES, LEARNING_RESOURCE_TEMPLATES,
+  listLearningResources, ResourceNotFoundError, readResource } from './resources.js';
+import { PROMPTS, LEARNING_PROMPTS, getPrompt, getLearningPrompt } from './prompts.js';
 
 import { PACKAGE_NAME, PACKAGE_VERSION } from './version.js';
+import { normaliseClientName } from './learning-contract.js';
+import { learningEnabled } from './learning-capabilities.js';
+import {
+  errorSignature,
+  mintSessionId,
+  mintSpanId,
+  newCallContext,
+  outsideCall,
+  resultTraceId,
+  runInCall,
+  sessionIdOr,
+  withTrace,
+} from './tracing.js';
 
 export interface BuildServerOptions {
   config?: ServerConfig;
@@ -48,10 +62,10 @@ export interface BuildServerOptions {
   localFilesystem?: boolean;
 }
 
-/** Apply the `SWFTE_TOOLS` group filter. An empty set means "advertise everything". */
+/** Empty groups preserves ordinary tools; learning still requires an explicit local opt-in. */
 export function selectTools(tools: ToolDefinition[], config: ServerConfig): ToolDefinition[] {
-  if (config.enabledGroups.size === 0) return tools;
-  return tools.filter((t) => !t.group || config.enabledGroups.has(t.group));
+  return tools.filter((t) => t.group === 'learning' ? config.enabledGroups.has('learning')
+    : config.enabledGroups.size === 0 || !t.group || config.enabledGroups.has(t.group));
 }
 
 export function buildServer(opts: BuildServerOptions = {}): Server {
@@ -70,8 +84,10 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
     { capabilities: { tools: {}, resources: {}, prompts: {} } }
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: tools.map((t) => ({
+  server.setRequestHandler(ListToolsRequestSchema, async (_req, extra) => {
+    const enabled = config.enabledGroups.has('learning')
+      && await learningEnabled(await resolveClient(extra?.authInfo), config);
+    return { tools: tools.filter((t) => t.group !== 'learning' || enabled).map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: zodSchemaToJson(t.inputSchema),
@@ -80,64 +96,152 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
         ...(t.readOnly ? { readOnlyHint: true } : {}),
         ...(t.destructive ? { destructiveHint: true } : {}),
       },
-    })),
-  }));
+    })) };
+  });
+
+  // ── Learning loop: every tool call is one traced step (see tracing.ts) ──────
+  // One session id per server (stdio: the process's session); a transport that names its own session
+  // (stateful HTTP) wins. The client is the `initialize` clientInfo, normalised so an unknown host is
+  // `other` and its raw name never travels.
+  const serverSessionId = mintSessionId();
 
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
+    const call = newCallContext({
+      sessionId: sessionIdOr(extra?.sessionId, serverSessionId),
+      client: normaliseClientName(server.getClientVersion()?.name),
+      tool: toolMap.has(req.params.name) ? req.params.name : 'unknown',
+      args: req.params.arguments,
+    });
+    const startedAt = Date.now();
+    const outcome = await runInCall(call, () => callTool(req, extra)).catch((err: unknown) => ({
+      client: undefined,
+      errorToken: 'error',
+      result: { isError: true, content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }] },
+    }));
+    const result = outcome.result as { isError?: boolean; content: Array<{ type: 'text'; text: string }> };
+
+    if (call.requests === 0) {
+      // The call attempted no backend request, so the backend has no step for it: post a local one.
+      // (Attempts that could not reach the backend are already queued as UNREACHED by the client.)
+      // Fire-and-forget, outside the call, after the result is settled; it never fails or delays it.
+      const step = {
+        traceId: call.traceId,
+        spanId: mintSpanId(),
+        tool: call.tool,
+        resultClass: result.isError ? ('ERROR' as const) : ('OK' as const),
+        ...(result.isError ? { errorSignature: errorSignature(outcome.errorToken ?? 'error') } : {}),
+        argShape: call.argShape,
+        ms: Math.max(0, Date.now() - startedAt),
+        occurredAtMs: startedAt,
+      };
+      outsideCall(() => {
+        void (async () => {
+          const client = outcome.client ?? (await resolveClient(extra?.authInfo));
+          if (client instanceof SwfteClient) {
+            client.recordLocalStep({ step, sessionId: call.sessionId, client: call.client });
+          }
+        })().catch(() => undefined);
+      });
+    }
+
+    return withTrace(result, resultTraceId(call));
+  });
+
+  /**
+   * The tool call itself, unchanged in what it answers. Returns the result plus what the learning step
+   * needs: the client it resolved and a value-free error token.
+   */
+  async function callTool(
+    req: { params: { name: string; arguments?: Record<string, unknown> } },
+    extra: { authInfo?: AuthInfo } | undefined
+  ): Promise<{ result: Record<string, unknown>; client?: SwfteClient; errorToken?: string }> {
     const tool = toolMap.get(req.params.name);
     if (!tool) {
       return {
-        isError: true,
-        content: [{ type: 'text', text: `Unknown tool: ${req.params.name}` }],
+        errorToken: 'unknown_tool',
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: `Unknown tool: ${req.params.name}` }],
+        },
       };
     }
 
     const parsed = tool.inputSchema.safeParse(req.params.arguments ?? {});
     if (!parsed.success) {
       return {
-        isError: true,
-        content: [
-          {
-            type: 'text',
-            text: `Invalid input for ${tool.name}: ${parsed.error.issues
-              .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
-              .join('; ')}`,
-          },
-        ],
+        errorToken: 'invalid_input',
+        result: {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: `Invalid input for ${tool.name}: ${parsed.error.issues
+                .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
+                .join('; ')}`,
+            },
+          ],
+        },
       };
     }
 
+    let client: SwfteClient | undefined;
     try {
-      const client = await resolveClient(extra?.authInfo);
+      client = await resolveClient(extra?.authInfo);
+      if (tool.group === 'learning' && !await learningEnabled(client, config)) {
+        throw new SwfteApiError({ status: 404, code: 'NOT_FOUND', message: 'Not found',
+          method: 'GET', path: '/v2/learning/capabilities' });
+      }
       const result = await tool.execute(parsed.data, { client, config, localFilesystem: opts.localFilesystem ?? true });
       return {
-        content: [
-          {
-            type: 'text',
-            text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
-          },
-        ],
+        client,
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
+            },
+          ],
+        },
       };
     } catch (err) {
       // Structured failures carry a code and a suggested action; hand those
       // through as JSON so the model can branch on them instead of parsing prose.
       if (err instanceof SwfteApiError) {
         return {
-          isError: true,
-          content: [{ type: 'text', text: JSON.stringify(err.toJSON(), null, 2) }],
+          client,
+          errorToken: /^[A-Za-z][A-Za-z0-9_]{0,59}$/.test(err.code) ? err.code : 'api_error',
+          result: {
+            isError: true,
+            content: [{ type: 'text', text: JSON.stringify(err.toJSON(), null, 2) }],
+          },
         };
       }
       if (err instanceof UnsupportedKindError || err instanceof UnsupportedVerbError) {
-        return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'UNSUPPORTED_CAPABILITY', message: err.message, nextAction: 'Call swfte_capabilities to inspect implemented verbs and per-kind lifecycle paths. Artifact form, activation and infrastructure deployment are separate decisions.' }) }] };
+        return { client, errorToken: 'unsupported_capability', result: { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'UNSUPPORTED_CAPABILITY', message: err.message, nextAction: 'Call swfte_capabilities to inspect implemented verbs and per-kind lifecycle paths. Artifact form, activation and infrastructure deployment are separate decisions.' }) }] } };
       }
       const message = err instanceof Error ? err.message : String(err);
-      return { isError: true, content: [{ type: 'text', text: message }] };
+      return { client, errorToken: 'error', result: { isError: true, content: [{ type: 'text', text: message }] } };
     }
-  });
+  }
 
   // Resources: local capabilities plus a per-artifact catalog context template.
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: STATIC_RESOURCES }));
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: RESOURCE_TEMPLATES }));
+  server.setRequestHandler(ListResourcesRequestSchema, async (req, extra) => {
+    if (!config.enabledGroups.has('learning')) return { resources: STATIC_RESOURCES };
+    try {
+      const client = await resolveClient(extra?.authInfo);
+      if (!await learningEnabled(client, config)) return { resources: STATIC_RESOURCES };
+      const page = await listLearningResources(client, config, req.params?.cursor);
+      return { resources: [...STATIC_RESOURCES, ...page.resources], ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
+    } catch (error) {
+      if (error instanceof ResourceNotFoundError) return { resources: STATIC_RESOURCES };
+      throw error;
+    }
+  });
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async (_req, extra) => {
+    const enabled = config.enabledGroups.has('learning')
+      && await learningEnabled(await resolveClient(extra?.authInfo), config);
+    return { resourceTemplates: [...RESOURCE_TEMPLATES, ...(enabled ? LEARNING_RESOURCE_TEMPLATES : [])] };
+  });
   server.setRequestHandler(ReadResourceRequestSchema, async (req, extra) => {
     try {
       const content = await readResource(req.params.uri, {
@@ -154,11 +258,18 @@ export function buildServer(opts: BuildServerOptions = {}): Server {
   });
 
   // Prompts: the reuse-first, ship and bake-in recipes.
-  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
-    prompts: PROMPTS.map((p) => ({ name: p.name, title: p.title, description: p.description, arguments: p.arguments })),
-  }));
-  server.setRequestHandler(GetPromptRequestSchema, async (req) => {
+  server.setRequestHandler(ListPromptsRequestSchema, async (_req, extra) => {
+    const enabled = config.enabledGroups.has('learning')
+      && await learningEnabled(await resolveClient(extra?.authInfo), config);
+    return { prompts: [...PROMPTS, ...(enabled ? LEARNING_PROMPTS : [])]
+      .map((p) => ({ name: p.name, title: p.title, description: p.description, arguments: p.arguments })) };
+  });
+  server.setRequestHandler(GetPromptRequestSchema, async (req, extra) => {
     try {
+      if (LEARNING_PROMPTS.some((p) => p.name === req.params.name)) {
+        return await getLearningPrompt(req.params.name, req.params.arguments ?? {},
+          { client: await resolveClient(extra?.authInfo), config });
+      }
       return getPrompt(req.params.name, (req.params.arguments ?? {}) as Record<string, string>);
     } catch (err) {
       // Unknown prompt or a missing required argument: the caller's request is at fault.

@@ -1,0 +1,14 @@
+{
+  "name": "swfte-codemap-sample",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "codemap": "sh ci/codemap.sh"
+  },
+  "devDependencies": {
+    "@swfte/mcp-server": "^0.2.0",
+    "typescript": "^5.6.3"
+  }
+}
