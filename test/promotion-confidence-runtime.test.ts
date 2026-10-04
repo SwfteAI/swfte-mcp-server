@@ -205,6 +205,10 @@ test('managed READ resolves through the actual approved action handle after curr
   assert.equal(calls.length,2);assert.equal(calls[0]!.method,'GET');assert.equal(calls[1]!.method,'POST');
   assert.equal(calls[1]!.path,'/v2/artifacts/workflow/owned/setup/node-key/resolve');
   assert.deepEqual(calls[1]!.body,{optionId:'provision-read',environment:'SANDBOX',value:managedResolve.value,expectedContentHash:hash,expectedRevision:2});
+},call=>({body:call.method==='GET'?[managedEntry]:{...managedEntry,revision:managedEntry.revision+1,task:{...managedEntry.task,state:'RESOLVED'}}})));
+test('a resolve response that does not advance the task revision is refused (negative control for the advance rule)',()=>fixture(async(client,calls)=>{
+  await assert.rejects(tool('swfte_resolve_setup_task',managedResolve,client),/^Error: SETUP_RESOLVE_RESPONSE_BINDING_MISMATCH$/);
+  assert.equal(calls.length,2);assert.equal(calls[1]!.method,'POST');
 },call=>({body:call.method==='GET'?[managedEntry]:managedEntry})));
 test('managed READ cannot resolve using owner credentials, literal SQL, Live or client action labels',()=>fixture(async(client,calls)=>{
   for(const change of [{value:{handle:'secret://managed_db_owner'}},{value:{literal:'password'}},{environment:'LIVE:target'},{value:{handle:'managed:action:client-label'}}])
@@ -212,11 +216,11 @@ test('managed READ cannot resolve using owner credentials, literal SQL, Live or 
   assert.equal(calls.length,4);assert.ok(calls.every(call=>call.method==='GET'));
 },()=>({body:[managedEntry]})));
 test('foreign and duplicate current task rows refuse before resolution effects',()=>fixture(async(client,calls)=>{
-  await assert.rejects(tool('swfte_resolve_setup_task',managedResolve,client),/SETUP_RESPONSE_INVALID/);
+  await assert.rejects(tool('swfte_resolve_setup_task',managedResolve,client),/^Error: SETUP_RESPONSE_IDENTITY_MISMATCH$/);
   assert.equal(calls.length,1);assert.equal(calls[0]!.method,'GET');
 },()=>({body:[{...managedEntry,task:{...managedEntry.task,artifactId:'foreign'}}]})));
 test('duplicate task keys never pick the first advertised managed READ option',()=>fixture(async(client,calls)=>{
-  await assert.rejects(tool('swfte_resolve_setup_task',managedResolve,client),/SETUP_RESPONSE_INVALID/);assert.equal(calls.length,1);
+  await assert.rejects(tool('swfte_resolve_setup_task',managedResolve,client),/^Error: SETUP_RESPONSE_IDENTITY_MISMATCH$/);assert.equal(calls.length,1);
 },()=>({body:[managedEntry,managedEntry]})));
 test('zero and unsafe setup revisions refuse before any server request',()=>fixture(async(client,calls)=>{
   for(const expectedRevision of [0,-1,Number.MAX_SAFE_INTEGER+1])await assert.rejects(tool('swfte_resolve_setup_task',{...managedResolve,expectedRevision},client));

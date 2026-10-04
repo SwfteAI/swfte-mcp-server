@@ -34,26 +34,55 @@ test('installer refuses outbound Nexus directory symlink with a confined positiv
     await assert.rejects(readFile(join(outside, 'gates', 'proving-ground.md')));
   } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
 });
-test('installed unmodified Nexus discovers and adjudicates PG, FAIL negative leaves it unmet', async () => {
+// Hermetic: a throwaway HOME, a throwaway git repo and a PATH-local `swfte` oracle per repo. The oracle records every
+// invocation in a log, so a Nexus that never discovers or runs the ledger cannot make these tests pass vacuously.
+// Nexus 0.3.4 does not turn a gate that was already recorded met back to unmet when `--reverify` fails, so the
+// negative here is a gate whose oracle fails from the start (a separate repo), plus the reverify run itself reporting FAIL.
+async function nexusRepo(oracleBody: string) {
   const root = await mkdtemp(join(tmpdir(), 'prove-real-nexus-')); const userConfig = await mkdtemp(join(tmpdir(), 'prove-nexus-home-'));
   const bins = join(root, 'bin'); await mkdir(bins);
-  const oracle = join(bins, 'swfte');
+  const oracle = join(bins, 'swfte'); const log = join(userConfig, 'oracle.log');
   const env = { ...process.env, HOME: userConfig, PATH: `${bins}:${process.env.PATH ?? ''}` };
+  await exec('git', ['init', '-q', root]); await installProvingGate(root);
+  const script = (body: string) => `#!/bin/sh\necho invoked >> '${log}'\n${body}\n`;
+  await writeFile(oracle, script(oracleBody), { mode: 0o700 });
+  const calls = async () => { try { return (await readFile(log, 'utf8')).split('\n').filter(Boolean).length; } catch { return 0; } };
+  const cleanup = async () => { await rm(root, { recursive: true, force: true }); await rm(userConfig, { recursive: true, force: true }); };
+  return { root, env, oracle, script, calls, cleanup };
+}
+async function nexusCheck(root: string, env: NodeJS.ProcessEnv, extra: string[]): Promise<{ output: string; code: number }> {
+  try { const r = await exec('nexus', ['gates', 'check', '--approve', ...extra], { cwd: root, env, timeout: 30_000 }); return { output: r.stdout + r.stderr, code: 0 }; }
+  catch (error) { const r = error as { code?: number; stdout?: string; stderr?: string }; if (r.code !== 1) throw error; return { output: (r.stdout ?? '') + (r.stderr ?? ''), code: 1 }; }
+}
+test('installed unmodified Nexus discovers PG and a passing oracle makes it met', async () => {
+  const repo = await nexusRepo('printf "PROOF_PASS\\n"');
   try {
-    await exec('git', ['init', '-q', root]); await installProvingGate(root);
-    await writeFile(oracle, '#!/bin/sh\nprintf "PROOF_PASS\\n"\n', { mode: 0o700 });
-    const before = await nexusStatus(root, env);
-    assert.equal(before.code, 1); assert.match(before.output, /PG.*\[unmet\]/u);
-    const passed = await exec('nexus', ['gates', 'check', '--approve'], { cwd: root, env, timeout: 30_000 });
-    assert.match(passed.stdout + passed.stderr, /PG/u);
-    const success = await nexusStatus(root, env);
-    assert.equal(success.code, 0); assert.match(success.output, /PG.*\[met\]/u);
-    await writeFile(oracle, '#!/bin/sh\nprintf "PROOF_FAIL\\n"\nexit 1\n');
-    let failed = '';
-    try { const checked = await exec('nexus', ['gates', 'check', '--approve', '--reverify'], { cwd: root, env, timeout: 30_000 }); failed = checked.stdout + checked.stderr; }
-    catch (error) { failed = (error as { stdout?: string }).stdout ?? ''; }
-    assert.match(failed, /PG/u);
-    const failure = await nexusStatus(root, env);
-    assert.equal(failure.code, 1); assert.match(failure.output, /PG.*\[unmet\]/u);
-  } finally { await rm(root, { recursive: true, force: true }); await rm(userConfig, { recursive: true, force: true }); }
+    const before = await nexusStatus(repo.root, repo.env);
+    assert.equal(before.code, 1); assert.match(before.output, /PG.*\[unmet\]/u); assert.equal(await repo.calls(), 0);
+    const passed = await nexusCheck(repo.root, repo.env, []);
+    assert.equal(passed.code, 0); assert.match(passed.output, /PASS PG/u); assert.match(passed.output, /EXPECT=matched/u);
+    assert.equal(await repo.calls(), 1, 'the oracle must actually have run');
+    const after = await nexusStatus(repo.root, repo.env);
+    assert.equal(after.code, 0); assert.match(after.output, /PG.*\[met\]/u);
+  } finally { await repo.cleanup(); }
+});
+test('installed unmodified Nexus leaves PG unmet when the oracle fails, and a failing reverify reports FAIL', async () => {
+  const failing = await nexusRepo('printf "PROOF_FAIL\\n"\nexit 1');
+  const passing = await nexusRepo('printf "PROOF_PASS\\n"');
+  try {
+    const checked = await nexusCheck(failing.root, failing.env, []);
+    assert.equal(checked.code, 1); assert.match(checked.output, /FAIL PG/u); assert.match(checked.output, /EXPECT=not matched/u);
+    assert.equal(await failing.calls(), 1, 'the failing oracle must actually have run');
+    const status = await nexusStatus(failing.root, failing.env);
+    assert.equal(status.code, 1); assert.match(status.output, /PG.*\[unmet\]/u);
+    // positive control in the same test: the identical flow with a passing oracle IS met, so "unmet" above is the oracle's doing
+    assert.equal((await nexusCheck(passing.root, passing.env, [])).code, 0);
+    assert.equal((await nexusStatus(passing.root, passing.env)).code, 0);
+    // the oracle turning bad after a pass: the reverify run itself must fail and report the failing oracle
+    await writeFile(passing.oracle, passing.script('printf "PROOF_FAIL\\n"\nexit 1'), { mode: 0o700 });
+    const before = await passing.calls();
+    const reverify = await nexusCheck(passing.root, passing.env, ['--reverify']);
+    assert.equal(reverify.code, 1); assert.match(reverify.output, /FAIL PG/u);
+    assert.equal(await passing.calls(), before + 1, 'reverify must re-run the oracle');
+  } finally { await failing.cleanup(); await passing.cleanup(); }
 });

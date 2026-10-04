@@ -205,7 +205,7 @@ test('selected report retains exact additive numeric values and lexemes through 
     assert.ok((actual as string).includes('"reportHash":"' + reportHash + '"'));
   }, call => call.path === '/v2/confidence/identity' ? { body: identity } : { raw });
   await fixture(async (client, calls) => {
-    const config = loadConfig({ SWFTE_PAT: 'pat_test', SWFTE_TELEMETRY: '0' } as never);
+    const config = loadConfig({ SWFTE_PAT: 'pat_test', SWFTE_TELEMETRY: '0', SWFTE_TOOLS: 'core,runtime' } as never); // runtime tools are opt-in (src/config.ts)
     const server = buildServer({ config, resolveClient: () => client });
     try {
       const handler = (server as any)._requestHandlers.get('tools/call'); assert.ok(handler);
