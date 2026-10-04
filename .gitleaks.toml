@@ -1,0 +1,27 @@
+# gitleaks config for swfte-mcp-server. Extends the default ruleset; the only allowlist entries are the exact
+# test-fixture lines below (release gate R-G16). Each entry pins ONE file, ONE rule and the exact fake value, so a real
+# secret added to the same file, or the same value anywhere else, still fails. No directory globs.
+# Real leaks must still fail CI: rotate and remove them, never allowlist them here.
+title = "swfte-mcp-server gitleaks"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "nexus-contract-pins.test.ts: the two 64-hex values are SHA-256 pins of the nexus-devtools read-api contract and the COLLECTOR-AUTH.md doc that the test recomputes and compares; they are content digests of public files, not credentials, and the rule fires only because the file names contain 'api' and 'AUTH'"
+condition = "AND" # path, rule and fake value must all match
+targetRules = ["generic-api-key"] # only the generic rule
+paths = ['''^test/nexus-contract-pins\.test\.ts$'''] # this exact file
+regexTarget = "line" # match the whole source line
+regexes = [ # the two exact digest lines, nothing broader
+  '''read-api\.v1\.json', '4e679261ae41be16cc5ca6606685f0fa99da8fa7d509a8e20ec558ac8725dc9c\'''', # the contract digest only
+  '''COLLECTOR-AUTH\.md', 'd8d7245991cb33a546dc75ed2de88dd205824e22d509a58587520faf2cd7b939\'''', # the doc digest only
+]
+
+[[allowlists]]
+description = "codemap-detect-py.test.ts: cm-canary-default-0000 is the default value inside a Python source snippet the code-map detector parses to prove it records env NAMES and never values; the string is the planted canary, not a key"
+condition = "AND" # path, rule and fake value must all match
+targetRules = ["generic-api-key"] # only the generic rule
+paths = ['''^test/codemap-detect-py\.test\.ts$'''] # this exact file
+regexTarget = "line" # match the whole source line
+regexes = ['''SWFTE_API_KEY", "cm-canary-default-0000"'''] # the planted canary only
