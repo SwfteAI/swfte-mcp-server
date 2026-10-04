@@ -17,7 +17,7 @@ If you don't know what Swfte is, [start here](https://www.swfte.com). It's the u
 
 ## What this gives you
 
-- **309 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
+- **315 MCP tools** that wrap every important V2 endpoint — agents, chatflows, workflows, Relay journeys/runs/mailboxes, conversations, datasets, files, RAG, MCP-on-MCP, modules, marketplace, voice, audit, cost-control.
 - **Stdio transport** — works out of the box with Claude Desktop and Claude Code.
 - **Workspace-scoped** — set `SWFTE_WORKSPACE_ID` once, or pass `workspaceId` per call.
 - **Zero-config security** — your API key stays on the machine running the MCP server, never in the LLM context.
@@ -51,7 +51,7 @@ widget, application, or MCP server**.
   server-side page cap, read-merge-write updates where the raw PATCH would wipe
   omitted fields, retry with load-shedding detection, and typed error envelopes
   carrying the backend's own code plus a suggested action.
-- **309 tools available, 108 advertised by default**, adjustable via `SWFTE_TOOLS`. Enable the setup, proof, confidence, promotion, AWS and bounded runtime command/file tools with `SWFTE_TOOLS=core,runtime`.
+- **315 tools available, 108 advertised by default**, adjustable via `SWFTE_TOOLS`. Enable the setup, proof, confidence, promotion, AWS and bounded runtime command/file tools with `SWFTE_TOOLS=core,runtime`.
 - **Stdio transport**, multi-arch Docker image, and Zod-typed inputs published
   as JSON Schema over `tools/list`.
 
@@ -231,6 +231,7 @@ or `mcp-server`.
 | Catalog proof suites and inherited evidence | `swfte_catalog_proof`, `swfte_catalog_shelves`, `swfte_extend_proof_suite`, `swfte_declare_deviation`, `swfte_rerun_parent_suite` | `marketplace` | |
 | Private code maps | `swfte_code_map`, `swfte_code_impact`, `swfte_code_fix` | `codemap` | |
 | Codebase twins | `swfte_twin_*` | `twins` | |
+| Review mode | `swfte_review_start`, `swfte_review_items`, `swfte_review_check`, `swfte_review_finding`, `swfte_review_signoff`, `swfte_review_status` | `review` | |
 | Proving verdicts | `swfte_prove_verdict` | `extras` | |
 | Files | `swfte_files_*` | `files` | |
 | MCP-on-MCP | `swfte_mcp_*` | `mcp` | |
@@ -239,7 +240,7 @@ or `mcp-server`.
 | Agent mail | `swfte_agent_mail_*` | `agent-mail` | |
 | Simulations (validate locally, create, start, status, findings, report) | `swfte_simulation_*` | `simulations` | |
 
-Advertising all 309 tools measurably degrades a model's ability to pick the
+Advertising all 315 tools measurably degrades a model's ability to pick the
 right one, so 108 are advertised by default. `SWFTE_TOOLS=all` widens it, and
 `swfte_whoami` reports which groups are live and what is hidden — nothing
 disappears silently. The learning-loop tools (outcome reports, rule proposals
@@ -661,4 +662,4 @@ If you'd rather call the Swfte API directly, use one of the official SDKs:
 
 — Built with ❤ in the United Kingdom and across Europe.
 
-The current 309 total / 108 default tool inventory is static source inventory; execution is UNRUN. The default ceiling is 108, preserving all original groups and the three core room/proof operations. Compatibility aliases and release experiments remain opt-in. Release evidence validates the existing wire, and an unconfirmed mutation requires authoritative reconciliation before retrying.
+The current 315 total / 108 default tool inventory is static source inventory; execution is UNRUN. The default ceiling is 108, preserving all original groups and the three core room/proof operations. Compatibility aliases and release experiments remain opt-in. Release evidence validates the existing wire, and an unconfirmed mutation requires authoritative reconciliation before retrying.

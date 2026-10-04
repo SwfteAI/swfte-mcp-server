@@ -77,6 +77,9 @@ export const TOOL_GROUPS = [
   // Private feature surfaces are explicit opt-ins; keep the existing selection budget intact.
   'codemap',
   'twins',
+  // Review mode (swfte_review_*): a stakeholder reviews an exact version without editing it. Opt-in on purpose: the
+  // default surface sits at its ceiling of 108. SWFTE_TOOLS=core,review.
+  'review',
 ] as const;
 
 export type ToolGroup = (typeof TOOL_GROUPS)[number];
@@ -84,7 +87,7 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is 309 tools, in the current source inventory. A large surface can reduce a model's ability
+ * The full surface is 315 tools, in the current source inventory. A large surface can reduce a model's ability
  * to pick the right one (test/tools.test.ts "the budget comment carries the measured counts" will check
  * these two numbers when execution is authorized). This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
@@ -155,7 +158,7 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   // can hide is a step that gets skipped.
   // The three exact room/proof core operations preserve original outcomes; aliases
   // remain extras and five release experiments remain opt-in. Ceiling 105 → 108.
-  // Measured by the release build: 309 registered, 108 advertised against the ceiling of 108 —
+  // Measured by the release build: 315 registered, 108 advertised against the ceiling of 108 —
   //   core 44, workflows 16, agents 10, chatflows 12, deployments 7,
   //   datasets 6, modules 6, connect 4, untagged 3.
   // The 39 setup/proof/confidence/promotion/AWS and bounded runtime tools are opt-in through

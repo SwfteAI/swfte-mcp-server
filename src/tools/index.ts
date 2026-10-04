@@ -30,6 +30,7 @@ import { analyticsTools } from './analytics.js';
 import { experimentTools } from './experiments.js';
 import { releaseTools } from './releases.js';
 import { reviewTools } from './review.js';
+import { reviewModeTools } from './review-mode.js';
 import { connectTools } from './connect.js';
 import { deploymentTools } from './deployments.js';
 import { agentMailTools } from './agent-mail.js';
@@ -86,6 +87,7 @@ export const allTools: ToolDefinition[] = [
   // Compliance control plane (CONTRACT rev 7): assess, scan code, evidence records.
   ...tag('core', complianceTools),
   ...tag('core', reviewTools),
+  ...tag('review', reviewModeTools),
   ...tag('codemap', codeMapTools),
   ...tag('core', provingVerdictTools),
   ...tag('marketplace', catalogProofTools),
