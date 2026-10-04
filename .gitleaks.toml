@@ -13,7 +13,7 @@ condition = "AND" # path, rule and fake value must all match
 targetRules = ["generic-api-key"] # only the generic rule
 paths = ['''^test/nexus-contract-pins\.test\.ts$'''] # this exact file
 regexTarget = "line" # match the whole source line
-regexes = [
+regexes = [ # the two exact digest lines, nothing broader
   '''read-api\.v1\.json', '4e679261ae41be16cc5ca6606685f0fa99da8fa7d509a8e20ec558ac8725dc9c\'''', # the contract digest only
   '''COLLECTOR-AUTH\.md', 'd8d7245991cb33a546dc75ed2de88dd205824e22d509a58587520faf2cd7b939\'''', # the doc digest only
 ]
