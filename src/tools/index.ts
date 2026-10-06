@@ -60,6 +60,7 @@ import { selectedConfidenceReportTools } from './selected-confidence-report.js';
 import { cloudLinkTools } from './cloud-link.js';
 import { promotionTools } from './promotion.js';
 import { runtimeExecTools } from './runtime-exec.js';
+import { tourTools } from './tour.js';
 
 /**
  * Tag a whole module's tools with a group, so `SWFTE_TOOLS` can trim them
@@ -84,6 +85,8 @@ export const allTools: ToolDefinition[] = [
   ...tag('core', actionTools),
   ...tag('core', wireTools),
   ...tag('core', hubTools),
+  // Read-only deep link + step table for Studio's in-product Sandbox-first tour (no backend call).
+  ...tag('core', tourTools),
   // Compliance control plane (CONTRACT rev 7): assess, scan code, evidence records.
   ...tag('core', complianceTools),
   ...tag('core', reviewTools),

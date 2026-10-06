@@ -244,7 +244,7 @@ describe('advertised surface', () => {
     // Nothing advertised covers either, so there was no duplicate to move to
     // `extras`; DEFAULT_GROUPS is unchanged (test/delivery.test.ts pins it).
     // Measured at 105 — core 41, the rest as above.
-    assert.ok(selected.length <= 108, `default surface is ${selected.length} tools`);
+    assert.ok(selected.length <= 109, `default surface is ${selected.length} tools`);
     assert.ok(selected.length > 40, `default surface is only ${selected.length} tools`);
   });
 
@@ -324,7 +324,7 @@ describe('advertised surface', () => {
 // Source-authored registry acceptance; QUEUED/UNRUN.
 test('bound consumer registry preserves total/default counts and unique names', () => {
   const selected = selectTools(allTools, loadConfig({ SWFTE_PAT: 'pat_x' } as never));
-  assert.equal(allTools.length, 315); assert.equal(selected.length, 108);
+  assert.equal(allTools.length, 316); assert.equal(selected.length, 109);
   assert.equal(new Set(allTools.map(t => t.name)).size, allTools.length);
   for (const name of ['swfte_open_review_room', 'swfte_assemble_proof_bundle', 'swfte_export_proof_bundle']) assert.ok(selected.some(t => t.name === name));
   for (const name of ['swfte_review_room', 'swfte_proof_bundle']) assert.equal(selected.some(t => t.name === name), false);

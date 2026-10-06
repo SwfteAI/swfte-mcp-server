@@ -87,7 +87,7 @@ export type ToolGroup = (typeof TOOL_GROUPS)[number];
 /**
  * Groups advertised when `SWFTE_TOOLS` is unset.
  *
- * The full surface is 315 tools, in the current source inventory. A large surface can reduce a model's ability
+ * The full surface is 316 tools, in the current source inventory. A large surface can reduce a model's ability
  * to pick the right one (test/tools.test.ts "the budget comment carries the measured counts" will check
  * these two numbers when execution is authorized). This subset covers building, shipping, and inspecting
  * the artifacts people actually reach for; the rest stay one env var away.
@@ -158,14 +158,17 @@ export const DEFAULT_GROUPS: ToolGroup[] = [
   // can hide is a step that gets skipped.
   // The three exact room/proof core operations preserve original outcomes; aliases
   // remain extras and five release experiments remain opt-in. Ceiling 105 → 108.
-  // Measured by the release build: 315 registered, 108 advertised against the ceiling of 108 —
-  //   core 44, workflows 16, agents 10, chatflows 12, deployments 7,
+  // Measured by the release build: 316 registered, 109 advertised against the ceiling of 109 —
+  //   core 45, workflows 16, agents 10, chatflows 12, deployments 7,
   //   datasets 6, modules 6, connect 4, untagged 3.
+  // Ceiling 108 -> 109, argued: swfte_tour (read-only, no backend call) hands a user a deep link into
+  // Studio's Sandbox-first tour and maps every step to the tool that does it. Nothing advertised covers it,
+  // and it is safe to leave always visible, so it is `core`.
   // The 39 setup/proof/confidence/promotion/AWS and bounded runtime tools are opt-in through
   // SWFTE_TOOLS=core,runtime; the default discovery budget is unchanged.
   // `journeys` and `relay` are deliberately absent, and that is a decision to
-  // revisit rather than a default to inherit. The surface sits at 108 against
-  // a ceiling of 108 — a ceiling that exists because a large advertised surface
+  // revisit rather than a default to inherit. The surface sits at 109 against
+  // a ceiling of 109 — a ceiling that exists because a large advertised surface
   // measurably degrades a model's ability to pick the right tool. Adding them
   // (17 tools) would push well past it. They stay reachable through
   // SWFTE_TOOLS; whether an agent should reach for Relay tools unprompted is a

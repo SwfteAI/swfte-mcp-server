@@ -1,0 +1,325 @@
+{
+  "track": "sandbox-first",
+  "title": "See everything Sandbox-first does",
+  "summary": "Build in a Sandbox, prove it, promote it, and do all of it from your coding agent.",
+  "steps": [
+    {
+      "id": "sandbox-pill",
+      "chapter": 1,
+      "chapterTitle": "Everything starts in a Sandbox",
+      "title": "1 · Everything starts in a Sandbox",
+      "route": "/v2/studio",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_build",
+        "args": {
+          "kind": "workflow",
+          "prompt": "When a refund request arrives, check the order and reply to the customer"
+        },
+        "prompt": "Build a workflow that checks the order and replies when a refund request arrives. Leave it in my sandbox."
+      }
+    },
+    {
+      "id": "sandbox-band",
+      "chapter": 1,
+      "chapterTitle": "Everything starts in a Sandbox",
+      "title": "The info icon says what that means",
+      "route": "/v2/studio",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_build_status",
+        "args": {
+          "kind": "workflow",
+          "sessionId": "<sessionId>"
+        },
+        "prompt": "Check how my last build is going and tell me which environment it is in."
+      }
+    },
+    {
+      "id": "wizard-draft",
+      "chapter": 2,
+      "chapterTitle": "Describe it, watch it appear",
+      "title": "2 · Describe it, watch it appear",
+      "route": "/v2/studio?mode=workflow",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_build_steer",
+        "args": {
+          "kind": "workflow",
+          "sessionId": "<sessionId>",
+          "instruction": "use Postgres, not MySQL"
+        },
+        "prompt": "Tell the build that is still running to use Postgres instead of MySQL."
+      }
+    },
+    {
+      "id": "builder-refine",
+      "chapter": 2,
+      "chapterTitle": "Describe it, watch it appear",
+      "title": "Then refine it in the Builder",
+      "route": "/v2/studio?mode=workflow",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_refine",
+        "args": {},
+        "prompt": "Refine this workflow so it escalates refunds over 500 dollars to a human."
+      }
+    },
+    {
+      "id": "attention",
+      "chapter": 3,
+      "chapterTitle": "A build never dead-ends",
+      "title": "3 · A build never dead-ends",
+      "route": "/v2/studio?mode=workflow",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_build_status",
+        "args": {
+          "kind": "workflow",
+          "sessionId": "<sessionId>"
+        },
+        "prompt": "My build looks stuck. Show me what it needs from me, or retry it."
+      }
+    },
+    {
+      "id": "connections-intro",
+      "chapter": 4,
+      "chapterTitle": "Connect your tools once",
+      "title": "4 · Connect your tools once",
+      "route": "/v2/studio/library/connections",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_connections_list",
+        "args": {},
+        "prompt": "List which providers my workspace has already connected."
+      }
+    },
+    {
+      "id": "connections-card",
+      "chapter": 4,
+      "chapterTitle": "Connect your tools once",
+      "title": "Each connection shows its state",
+      "route": "/v2/studio/library/connections",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_connect_start",
+        "args": {
+          "provider": "slack"
+        },
+        "prompt": "Connect Slack for me and give me the link to authorise it."
+      }
+    },
+    {
+      "id": "proof-checks",
+      "chapter": 5,
+      "chapterTitle": "Prove it before it goes anywhere",
+      "title": "5 · Prove it before it goes anywhere",
+      "route": "/v2/studio/sandbox/proof",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_proof",
+        "args": {
+          "artifact": {
+            "kind": "workflow",
+            "id": "<workflowId>"
+          },
+          "runs": 3
+        },
+        "prompt": "Run a proof for this workflow and show me the confidence report."
+      }
+    },
+    {
+      "id": "proof-levels",
+      "chapter": 5,
+      "chapterTitle": "Prove it before it goes anywhere",
+      "title": "Proof has levels, and they expire",
+      "route": "/v2/studio/sandbox/proof",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_proof_status",
+        "args": {
+          "artifact": {
+            "kind": "workflow",
+            "id": "<workflowId>"
+          }
+        },
+        "prompt": "Is the proof for this workflow still current, or has it gone stale?"
+      }
+    },
+    {
+      "id": "confidence-configure",
+      "chapter": 6,
+      "chapterTitle": "Choose how hard to test",
+      "title": "6 · Choose how hard to test",
+      "route": "/v2/studio/confidence/configure",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_proof_bundle",
+        "args": {
+          "artifact": {
+            "kind": "workflow",
+            "id": "<workflowId>"
+          }
+        },
+        "prompt": "Run the standard confidence profile and give me the signed proof bundle."
+      }
+    },
+    {
+      "id": "confidence-enterprise",
+      "chapter": 6,
+      "chapterTitle": "Deep, Adversarial, Swarm, Approve, Rollout",
+      "title": "6 · Deep, Adversarial, Swarm, Approve, Rollout",
+      "route": "/v2/studio/confidence/configure",
+      "enterprise": true,
+      "mcp": {
+        "tool": "swfte_release_propose_ramp",
+        "args": {},
+        "prompt": "Propose a staged rollout for this workflow, starting small, and show me the guardrails."
+      }
+    },
+    {
+      "id": "promote-targets",
+      "chapter": 7,
+      "chapterTitle": "Promote with a dry run first",
+      "title": "7 · Promote with a dry run first",
+      "route": "/v2/studio/sandbox/promote",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_promotion_preview",
+        "args": {
+          "scope": "ARTIFACT",
+          "artifacts": [
+            {
+              "kind": "workflow",
+              "id": "<workflowId>"
+            }
+          ]
+        },
+        "prompt": "Do a promotion dry run for this workflow and tell me what blocks it."
+      }
+    },
+    {
+      "id": "promote-own-aws",
+      "chapter": 7,
+      "chapterTitle": "Promote into your own AWS",
+      "title": "7 · Promote into your own AWS",
+      "route": "/v2/studio/sandbox/promote",
+      "enterprise": true,
+      "mcp": {
+        "tool": "swfte_promotion_targets",
+        "args": {},
+        "prompt": "Which promotion targets are available to me, including my own AWS?"
+      }
+    },
+    {
+      "id": "live-sandbox",
+      "chapter": 7,
+      "chapterTitle": "Promote into your own AWS",
+      "title": "See Sandbox and Live side by side",
+      "route": "/v2/studio/sandbox/live",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_promotion_status",
+        "args": {},
+        "prompt": "Show me the status of my last promotion and what differs from live."
+      }
+    },
+    {
+      "id": "code-map",
+      "chapter": 8,
+      "chapterTitle": "See where your code calls Swfte",
+      "title": "8 · See where your code calls Swfte",
+      "route": "/v2/studio/code-map",
+      "enterprise": true,
+      "mcp": {
+        "tool": "swfte_code_map",
+        "args": {
+          "directory": "."
+        },
+        "prompt": "Scan this repository for Swfte call sites and show me the map."
+      }
+    },
+    {
+      "id": "activity",
+      "chapter": 9,
+      "chapterTitle": "Everything that happened, in order",
+      "title": "9 · Everything that happened, in order",
+      "route": "/v2/studio/governance",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_audit_events",
+        "args": {},
+        "prompt": "Show me the latest activity for this workspace, newest first."
+      }
+    },
+    {
+      "id": "learning",
+      "chapter": 9,
+      "chapterTitle": "Learning, from your own runs",
+      "title": "9 · Learning, from your own runs",
+      "route": "/v2/studio/governance",
+      "enterprise": true,
+      "mcp": {
+        "tool": "swfte_report_outcome",
+        "args": {},
+        "prompt": "Report that the last run succeeded, with a one-line summary, so it can be reviewed."
+      }
+    },
+    {
+      "id": "review",
+      "chapter": 10,
+      "chapterTitle": "Review it as someone who is not building it",
+      "title": "10 · Review it as someone who is not building it",
+      "route": "/v2/studio/approvals",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_review_start",
+        "args": {
+          "kind": "workflow",
+          "artifactId": "<workflowId>",
+          "contentHash": "<contentHash>"
+        },
+        "prompt": "Start a review of this exact workflow version and list its checks."
+      }
+    },
+    {
+      "id": "review-signoff",
+      "chapter": 10,
+      "chapterTitle": "Sign-off, with the roles that matter",
+      "title": "10 · Sign-off, with the roles that matter",
+      "route": "/v2/studio/approvals",
+      "enterprise": true,
+      "mcp": {
+        "tool": "swfte_review_signoff",
+        "args": {},
+        "prompt": "Sign off the review once every check is confirmed, or tell me what is still open."
+      }
+    },
+    {
+      "id": "simulations",
+      "chapter": 11,
+      "chapterTitle": "Rehearse against simulated people",
+      "title": "11 · Rehearse against simulated people",
+      "route": "/v2/studio/simulations",
+      "enterprise": true,
+      "mcp": {
+        "tool": "swfte_simulation_create",
+        "args": {},
+        "prompt": "Create a simulation for this agent covering refunds and angry customers, then start it."
+      }
+    },
+    {
+      "id": "from-your-agent",
+      "chapter": 12,
+      "chapterTitle": "Do all of this from your coding agent",
+      "title": "12 · Do all of this from your coding agent",
+      "route": "/v2/studio/welcome",
+      "enterprise": false,
+      "mcp": {
+        "tool": "swfte_whoami",
+        "args": {},
+        "prompt": "Run swfte_whoami and tell me which workspace you are connected to."
+      }
+    }
+  ]
+}
