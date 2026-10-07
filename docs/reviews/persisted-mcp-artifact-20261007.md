@@ -20,3 +20,9 @@ Source provenance:
 - `src/kinds/mcp-server.ts` SHA256 `f52d8b22ced93b3bedc9889fcdadc85601d7ebf3ce8b6c798bffca5700012db5`.
 - `test/mcp-artifact-contract.test.ts` SHA256 `dde145efa799aae46bac1f2043c007cb72cc706775f0902ae31bad8666c370c1`.
 - `test/fixtures/mcp-persisted-quote.json` SHA256 `53b3e4c6bd6ced526a7e8865d5b566bc88f424f4f0c23493526c0902288d5350`.
+
+## Coordinated actual saved-ID readback
+
+The runtime reviewer subsequently exercised the same saved ID against the real service with client source `deae70c7de84f96abd77cae5d3123bd9d05cefff`. Independent receipt readback confirms real MCP verification reports persisted, artifact-contract, one tool and configuration checks true, while overall verification remains false because compilation was not performed. Receipt in the Studio workspace: `mcp/verify-fixed-adapter-quote.json`, SHA256 `37b2aa0ce597558c0e19720753d86d602d80635e8a67309e34302c8528832c31`. Client harness SHA256: `1057dc52f0dd677ecda5c3ac0baa81a2e7f7235553b77b6c7983d44111f7cc1b`.
+
+There is no generic MCP get tool. A supplemental actual adapter.get using real SwfteClient HTTP readback returned the normalized one-tool definition/configuration: `mcp/get-fixed-adapter-quote.json`, SHA256 `2517b35a1f7bd99b0a7e447691b8abc79a9cbcb076990a04b43daafeecbb5251`. It is classified as a source-adapter HTTP readback, not an MCP get call. Neither receipt grants generated-code execution, build, deployment or endpoint-health credit. The transport discrepancy remains unresolved.
