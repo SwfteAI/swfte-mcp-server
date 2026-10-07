@@ -16,6 +16,45 @@ import {
 const WIZARD = '/v2/mcp/wizard';
 const DEPLOYMENTS = '/v2/mcp/deployments';
 
+/** Translate the persisted wizard DTO before handing it to generated-server APIs. */
+function normalizeArtifact(value: unknown): Record<string, any> {
+  const invalid = (field: string): never => { throw new Error(`Invalid MCP artifact: ${field}`); };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) invalid('expected an object');
+  const artifact = value as Record<string, any>;
+  const pairs = [['tools', 'toolDefinitions'], ['resources', 'resourceDefinitions'], ['prompts', 'promptDefinitions']] as const;
+  const persisted = pairs.some(([, field]) => Object.hasOwn(artifact, field));
+  if (persisted && pairs.some(([field]) => Object.hasOwn(artifact, field))) invalid('mixed definition contracts');
+  const definitions: Record<string, unknown[]> = {};
+  for (const [field, stored] of pairs) {
+    let items: unknown;
+    if (persisted) {
+      if (typeof artifact[stored] !== 'string') invalid(`${stored} must be a JSON string`);
+      try { items = JSON.parse(artifact[stored]); } catch { invalid(`${stored} contains malformed JSON`); }
+    } else {
+      items = artifact[field];
+      // Generated servers may omit optional resource and prompt definitions.
+      if (items === undefined && field !== 'tools') continue;
+    }
+    if (!Array.isArray(items) || items.some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
+      invalid(`${persisted ? stored : field} must contain an array of objects`);
+    }
+    definitions[field] = items as unknown[];
+  }
+  if (!persisted) return artifact;
+  const { toolDefinitions, resourceDefinitions, promptDefinitions, ...metadata } = artifact;
+  return {
+    ...metadata,
+    ...definitions,
+    configuration: artifact.configuration ?? {
+      transport: artifact.transport,
+      port: artifact.port,
+      environment: artifact.environment,
+      requiredSecrets: artifact.requiredSecrets,
+    },
+    deployment: artifact.deployment ?? { type: artifact.deploymentType },
+  };
+}
+
 /**
  * Generating an MCP server is the one wizard that is genuinely synchronous —
  * it returns the finished artifact from `/generate` rather than a session to
@@ -132,7 +171,7 @@ export const mcpServerAdapter: KindAdapter = {
     const result = await client.request<any>({
       method: 'POST',
       path: `${WIZARD}/validate`,
-      body: artifact,
+      body: normalizeArtifact(artifact),
       retries: 1,
       timeoutMs: 120_000,
     });
@@ -145,9 +184,9 @@ export const mcpServerAdapter: KindAdapter = {
   },
 
   async deploy(client, id, _opts: DeployOpts): Promise<DeployResult> {
-    const artifact = await client.request<any>({
+    const artifact = normalizeArtifact(await client.request<any>({
       method: 'GET', path: `${WIZARD}/artifacts/${encodeURIComponent(id)}`,
-    });
+    }));
     if (!artifact || !artifact.name) throw new Error('Cannot deploy: the saved MCP artifact has no server definition.');
     const server = {
       ...artifact,
@@ -188,7 +227,7 @@ export const mcpServerAdapter: KindAdapter = {
   },
 
   async get(client, id) {
-    return client.request({ method: 'GET', path: `${WIZARD}/artifacts/${encodeURIComponent(id)}`, retries: 1 });
+    return normalizeArtifact(await client.request({ method: 'GET', path: `${WIZARD}/artifacts/${encodeURIComponent(id)}`, retries: 1 }));
   },
 
   async list(client) {
@@ -221,6 +260,14 @@ export const mcpServerAdapter: KindAdapter = {
       const msg = err instanceof SwfteApiError ? `${err.status} ${err.message}` : String(err);
       checks.push({ id: 'persisted', ok: false, detail: `GET artifact ${id} → ${msg}` });
       return { ok: false, kind: 'mcp-server', id, checks, nextActions: ['Artifact not found — list them with swfte_mcp_artifacts_list.'] };
+    }
+
+    try {
+      artifact = normalizeArtifact(artifact);
+      checks.push({ id: 'artifact-contract', ok: true, detail: 'Server definitions decoded' });
+    } catch (error) {
+      checks.push({ id: 'artifact-contract', ok: false, detail: error instanceof Error ? error.message : String(error) });
+      return { ok: false, kind: 'mcp-server', id, checks, nextActions: ['Repair the persisted server definitions before validation or deployment.'] };
     }
 
     const tools = artifact?.tools ?? [];
